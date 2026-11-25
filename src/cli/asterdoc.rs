@@ -2364,9 +2364,6 @@ pub(crate) fn validate_asterdoc_module_value(value: &serde_yaml::Value, line_no:
                 }
                 let items = get("items").and_then(|v| v.as_sequence())
                     .ok_or_else(|| CliError::input("subflow needs items"))?;
-                if items.is_empty() {
-                    return Err(CliError::input("subflow needs at least one item"));
-                }
                 for item in items {
                     let sid = asterdoc_map_get(item, "id").and_then(|v| v.as_str()).unwrap_or("").trim();
                     let stitle = asterdoc_map_get(item, "title").and_then(|v| v.as_str()).unwrap_or("").trim();

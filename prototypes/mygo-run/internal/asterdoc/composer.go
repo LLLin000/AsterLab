@@ -335,9 +335,7 @@ func DefaultStarterBlockWithPrefs(doc *Document, stepID, kind string, plateForma
 	case "attachment":
 		return map[string]any{"kind": "attachment", "id": id, "schema": 1, "title": "实验照片/附件", "scope": "step_evidence", "media_hint": "上传当前步骤现场照片或原始文件"}
 	case "subflow":
-		return map[string]any{"kind": "subflow", "id": id, "schema": 1, "title": "详细子步骤", "items": []any{
-			map[string]any{"id": id + "-s1", "title": "准备管架并逐级混匀"},
-		}}
+		return map[string]any{"kind": "subflow", "id": id, "schema": 1, "title": "详细子步骤", "items": []any{}}
 	case "plate":
 		firstGroup := "g-control"
 		if doc != nil {

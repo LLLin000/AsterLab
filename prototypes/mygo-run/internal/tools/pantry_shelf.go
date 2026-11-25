@@ -195,10 +195,25 @@ func (w *Workspace) OpenNewPantryDialog(presetLocation string) {
 		VesselID: labsticker.SuggestVesselID("", w.PantryLocation),
 	}
 	w.pantryStatusIdx = 0
-	w.pantryPickerOpen = true
+	w.pantryPickerOpen = false
 	w.pantryConfirmDel = false
 	w.pantryDialogErr = ""
 	w.PantryDialogOpen = true
+}
+
+func zonePresetLocation(zone string) string {
+	switch strings.TrimSpace(zone) {
+	case "-80":
+		return "-80°C"
+	case "-20":
+		return "-20°C 酶盒"
+	case "4C":
+		return "4°C 冷藏架"
+	case "ambient":
+		return "常温避光"
+	default:
+		return ""
+	}
 }
 
 // SelectDraftVessel sets the BioRender vessel sticker in the currently open reagent dialog.
@@ -773,7 +788,7 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 				w.OpenNewBoxDialog(zone)
 			}
 			if components.Button(c, "+ 新试剂", components.ButtonPrimary).Clicked() {
-				w.OpenNewPantryDialog("")
+				w.OpenNewPantryDialog(zonePresetLocation(w.pantryZoneFilter))
 			}
 		}
 	})
@@ -802,16 +817,16 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		zoneCounts[zk]++
 	}
 
-	// Top Search & Zone Filter Capsule Toolbar
-	ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(3)).
+	// Top Search & Zone Filter Capsule Toolbar (tight width/gap keeps all controls cleanly in one bar)
+	ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(2.5)).
 		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
-		AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Box(c).Width(float32(tok.Spacing48)*5.2).Children(func() {
+		AlignItems(ui.Center).Gap(float32(tok.Spacing4)+2).Children(func() {
+		ui.Box(c).Width(float32(tok.Spacing48)*3.8).Shrink(0).Children(func() {
 			components.TextBox(c, &w.pantrySearch, components.TextBoxOptions{
 				LeadingIcon: lucide.Search(),
 			}).Placeholder("搜试剂、货号、盒子或孔位…")
 		})
-		ui.Box(c).Width(t.Space(0)+1).Height(t.Space(4)).Background(tok.BorderStrong)
+		ui.Box(c).Width(t.Space(0)+1).Height(t.Space(4)).Shrink(0).Background(tok.BorderStrong)
 		filters := []struct {
 			key   string
 			label string
@@ -821,7 +836,7 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			{"-20", fmt.Sprintf("-20°C (%d)", zoneCounts["-20"])},
 			{"4C", fmt.Sprintf("4°C (%d)", zoneCounts["4C"])},
 			{"ambient", fmt.Sprintf("常温避光 (%d)", zoneCounts["ambient"])},
-			{"near_expiry", fmt.Sprintf("临期提醒 (%d)", nearCount)},
+			{"near_expiry", fmt.Sprintf("临期 (%d)", nearCount)},
 		}
 		for _, f := range filters {
 			f := f
@@ -830,15 +845,15 @@ func pantryView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			if active {
 				variant = components.ButtonToolbar
 			}
-			if components.Button(c, f.label, variant).FontFeatures("tnum").Clicked() {
+			if components.Button(c, f.label, variant).Shrink(0).FontFeatures("tnum").Clicked() {
 				w.pantryZoneFilter = f.key
 			}
 		}
 		ui.Spacer(c)
-		if components.Button(c, "导出贴标", components.ButtonGhost).Clicked() {
+		if components.Button(c, "导出贴标", components.ButtonGhost).Shrink(0).Clicked() {
 			w.ExportPantryLabels()
 		}
-		if components.Button(c, "刷新", components.ButtonGhost).Clicked() {
+		if components.Button(c, "刷新", components.ButtonGhost).Shrink(0).Clicked() {
 			w.ReloadPantry()
 		}
 	})
@@ -1317,14 +1332,26 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 							if placedInBox {
 								components.Badge(c, fmt.Sprintf("%s · %s · 孔位 %s", ZoneDisplayPrefix(activeBox.ZoneKey), activeBox.Name, firstNonEmptyStr(w.pantryDraftMeta.BoxSlot, "未选")), components.BadgeOptions{Tone: components.BadgeAccent})
 							} else {
-								for _, preset := range []string{"-80°C", "-20°C 酶盒", "4°C 冷藏架", "常温避光"} {
-									preset := preset
+								curZoneKey := ""
+								if strings.TrimSpace(w.PantryLocation) != "" {
+									curZoneKey, _, _ = pantryZoneCategory(w.PantryLocation)
+								}
+								for _, zp := range []struct {
+									zoneKey string
+									preset  string
+								}{
+									{"-80", "-80°C"},
+									{"-20", "-20°C 酶盒"},
+									{"4C", "4°C 冷藏架"},
+									{"ambient", "常温避光"},
+								} {
+									zp := zp
 									variant := components.ButtonGhost
-									if w.PantryLocation == preset {
+									if curZoneKey == zp.zoneKey {
 										variant = components.ButtonSecondary
 									}
-									if components.Button(c, preset, variant).Clicked() {
-										w.PantryLocation = preset
+									if components.Button(c, zp.preset, variant).Shrink(0).Clicked() {
+										w.PantryLocation = zp.preset
 									}
 								}
 							}
@@ -1334,7 +1361,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 								ui.Column(c).Grow(2).MinWidth(0).Gap(t.Space(1)).Children(func() {
 									ui.Text(c, "存放柜层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 									components.TextBox(c, &w.PantryLocation, components.TextBoxOptions{}).
-										Placeholder("如 -20°C 酶盒 A2")
+										Placeholder("点击上方温区或填写位置（留空归常温避光）")
 								})
 							}
 							ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
@@ -1365,30 +1392,34 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 										ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…")
 									})
 									boxSel.Popup(func(panel ui.Element) {
-										noneItem := boxSel.Item("")
-										noneItem.Children(func() {
-											ui.Text(c, "独立摆放（不放入盒子）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-										})
-										if noneItem.Clicked() {
-											w.pantryDraftMeta.BoxID = ""
-											w.pantryDraftMeta.BoxSlot = ""
-											w.pantryDraftMeta.BoxSlots = nil
-										}
-										for _, bx := range w.PantryBoxes {
-											bx := bx
-											it := boxSel.Item(bx.ID)
-											it.Children(func() {
-												ui.Text(c, fmt.Sprintf("%s · %s (%d×%d)", ZoneDisplayPrefix(bx.ZoneKey), bx.Name, bx.Rows, bx.Cols)).
-													FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-											})
-											if it.Clicked() {
-												w.pantryDraftMeta.BoxID = bx.ID
-												if w.pantryDraftMeta.BoxSlot == "" {
-													w.pantryDraftMeta.BoxSlot = w.FirstEmptyBoxSlot(bx)
+										ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.2).Children(func() {
+											ui.Column(c).FillWidth().Gap(2).Children(func() {
+												noneItem := boxSel.Item("")
+												noneItem.Children(func() {
+													ui.Text(c, "独立摆放（不放入盒子）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+												})
+												if noneItem.Clicked() {
+													w.pantryDraftMeta.BoxID = ""
+													w.pantryDraftMeta.BoxSlot = ""
+													w.pantryDraftMeta.BoxSlots = nil
 												}
-												w.PantryLocation = FormatBoxLocation(bx.ZoneKey, bx.Name, w.pantryDraftMeta.BoxSlot)
-											}
-										}
+												for _, bx := range w.PantryBoxes {
+													bx := bx
+													it := boxSel.Item(bx.ID)
+													it.Children(func() {
+														ui.Text(c, fmt.Sprintf("%s · %s (%d×%d)", ZoneDisplayPrefix(bx.ZoneKey), bx.Name, bx.Rows, bx.Cols)).
+															FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+													})
+													if it.Clicked() {
+														w.pantryDraftMeta.BoxID = bx.ID
+														if w.pantryDraftMeta.BoxSlot == "" {
+															w.pantryDraftMeta.BoxSlot = w.FirstEmptyBoxSlot(bx)
+														}
+														w.PantryLocation = FormatBoxLocation(bx.ZoneKey, bx.Name, w.pantryDraftMeta.BoxSlot)
+													}
+												}
+											})
+										})
 									})
 								})
 								if bx, ok := w.FindPantryBox(w.pantryDraftMeta.BoxID); ok {

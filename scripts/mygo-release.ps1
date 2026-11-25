@@ -1,10 +1,17 @@
 # Reproducible unsigned Pure-Go MyGo release build: dist + portable zip + NSIS installer + SHA256SUMS.
 param(
-    [string]$Version = '0.1.0-unsigned'
+    [string]$Version = '0.1.0-unsigned',
+    [switch]$IncludeNLModel,
+    [string]$NLModelDir = '',
+    [string]$OnnxRuntimeDll = ''
 )
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-& (Join-Path $PSScriptRoot 'mygo-build.ps1') -Version $Version -Release
+$buildParams = @{ Version = $Version; Release = $true }
+if ($IncludeNLModel) { $buildParams.IncludeNLModel = $true }
+if ($NLModelDir) { $buildParams.NLModelDir = $NLModelDir }
+if ($OnnxRuntimeDll) { $buildParams.OnnxRuntimeDll = $OnnxRuntimeDll }
+& (Join-Path $PSScriptRoot 'mygo-build.ps1') @buildParams
 if ($LASTEXITCODE -ne 0) { throw "mygo-build.ps1 failed" }
 
 $zip = & (Join-Path $PSScriptRoot 'mygo-package.ps1') -Version $Version

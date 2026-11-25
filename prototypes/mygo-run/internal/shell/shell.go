@@ -330,8 +330,21 @@ type Shell struct {
 	RenderPantryContent    func(*ui.Context)
 	RenderSecondaryContent func(*ui.Context, WorkspaceTab)
 	RenderOverlays         func(*ui.Context)
+	ExternalModalOpen      bool
+	IsExternalModalOpen    func() bool
 
 	window *sidebar.Shell
+}
+
+// AnyModalOpen reports whether any shell or host modal/dialog/popover currently covers the canvas,
+// so underlying hover-tracking widgets (e.g. week-grid timeline) stay frozen behind overlays.
+func (s *Shell) AnyModalOpen() bool {
+	if s.ExternalModalOpen || (s.IsExternalModalOpen != nil && s.IsExternalModalOpen()) {
+		return true
+	}
+	return s.VaultSettingsOpen || s.PaletteOpen || s.ComponentGalleryOpen ||
+		s.DayPopoverOpen || s.VaultLauncherOpen ||
+		s.newFolderDialogOpen || s.FeedbackOpen || s.WelcomeOpen || s.GlobalSearchOpen
 }
 
 // NewWindow creates the AsterLab window with Ribbon + File Tree on the left

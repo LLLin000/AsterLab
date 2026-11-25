@@ -547,3 +547,45 @@ func TestWeekGridYToMinutesPrecisionAndSnap(t *testing.T) {
 		t.Fatalf("5-min precision got (%d, %v, %.1f), want (615, false, 126.0)", mins, snapped, dispY)
 	}
 }
+
+func TestWeekCalendarSuppressesHoverBehindModalAndSettingsSegmentedFits(t *testing.T) {
+	extModal := false
+	s := &Shell{
+		TodayDate:           "2026-11-25",
+		CalendarMode:        1,
+		weekHoverOn:         true,
+		weekHoverY:          120,
+		IsExternalModalOpen: func() bool { return extModal },
+	}
+	s.EnsureTabs()
+	s.OpenCalendarTab()
+	if s.AnyModalOpen() {
+		t.Fatal("expected AnyModalOpen false initially")
+	}
+
+	extModal = true
+	if !s.AnyModalOpen() {
+		t.Fatal("expected AnyModalOpen true when host dialog is open")
+	}
+	tt := render(s.RenderSplitView, 1365, 872)
+	tt.Frame()
+	if s.weekHoverOn {
+		t.Fatalf("expected weekHoverOn cleared when modal dialog is open")
+	}
+
+	// Open Settings -> 编辑器 tab and verify 阅读态 segmented pill fits without clipping
+	extModal = false
+	s.VaultSettingsOpen = true
+	s.SettingsView.Category = "editor"
+	tt.Frame()
+	if !tt.HasText("默认打开视图") || !tt.HasText("阅读态") {
+		t.Fatalf("expected editor settings with 默认打开视图 / 阅读态, got %q", tt.Texts())
+	}
+	el, ok := tt.Find("阅读态")
+	if !ok {
+		t.Fatal("missing 阅读态 button element")
+	}
+	if el.W < 40 || el.X+el.W > 1365 {
+		t.Fatalf("unexpected 阅读态 bounds in 1365dp window: %+v", el)
+	}
+}
