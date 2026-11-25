@@ -11,12 +11,14 @@ import (
 	"asterlab-mygo-prototype/internal/notebook"
 	"asterlab-mygo-prototype/internal/notebook/record"
 	"asterlab-mygo-prototype/internal/protocol"
+	"asterlab-mygo-prototype/internal/recovery"
 	"asterlab-mygo-prototype/internal/resultgrid"
 	"asterlab-mygo-prototype/internal/runui"
 	"asterlab-mygo-prototype/internal/runworkspace"
 	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/state"
+	"asterlab-mygo-prototype/internal/syncengine"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/uikit/kit"
@@ -33,6 +35,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -40,6 +43,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -264,6 +268,18 @@ type app struct {
 
 	mobileState      mobileLifecycleState
 	mobileMemWarnOff func()
+
+	syncHTTPClient      *http.Client
+	syncPolicyOverride  *syncengine.DownloadPolicy
+	syncSecretsMu       sync.Mutex
+	syncSecretsFallback map[string]string
+	recoveryHistory     *recovery.HistoryManager
+	crashGuardLogDir    string
+	crashGuardInstalled bool
+	capturePhotoFn      func(context.Context) (string, error)
+	shareFileFn         func(string, string) error
+	saveExportFileFn    func(defaultName, title string, data []byte) (string, error)
+	openImportFileFn    func(title string) (string, error)
 }
 
 func (a *app) nextOp() string {
@@ -4734,6 +4750,12 @@ func main() {
 		assetRoots: map[string]string{}, runViewKinds: map[string]runworkspace.ViewKind{},
 		runLinkArg: runLink,
 	}
+	a.installCrashGuard()
+	defer func() {
+		if r := recover(); r != nil {
+			a.recordCrashGuardPanic("main", r)
+		}
+	}()
 	// Per ADR-0002, `.asterml` local Vault is the single source of truth and runs
 	// natively in pure Go without requiring the optional legacy Runs.dll native bridge.
 	// Log missing native services quietly instead of showing a blocking error banner.
@@ -5473,6 +5495,8 @@ func main() {
 		if err := a.initVaultWorkspace(""); err != nil {
 			a.syncErr = err.Error()
 		}
+		_, _ = a.checkAndRecoverEmergencyDrafts()
+		a.wireRecoveryHost()
 		win := a.shell.NewWindow()
 		if win != nil && win.Window() != nil {
 			if pngIcon := theme.AppIconPNG(); len(pngIcon) > 0 {

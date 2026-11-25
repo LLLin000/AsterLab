@@ -6,6 +6,7 @@ package shell
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -15,6 +16,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/schedule"
+	"asterlab-mygo-prototype/internal/syncengine"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
@@ -89,6 +91,85 @@ type ExperimentItem struct {
 
 type DesignItem struct{ ID, Title, Meta string }
 type RecentRun struct{ ID, Title, Meta string }
+
+const (
+	SyncImagePolicyPreviewOnly    = string(syncengine.PolicyPreviewOnly)
+	SyncImagePolicyThreshold      = "threshold"
+	SyncImagePolicyAlwaysOriginal = string(syncengine.PolicyAlwaysOriginal)
+)
+
+// SyncSettings holds WebDAV connection parameters and the dual-track scientific image download policy.
+type SyncSettings struct {
+	Enabled           bool
+	Endpoint          string
+	Username          string
+	Password          string
+	RemotePath        string
+	AutoIntervalMin   int
+	ImagePolicy       string // "preview_only" | "threshold" | "always_original"
+	ImageThresholdMB  int    // 1 | 2 | 5 | 10
+	WiFiOnlyOriginals bool
+}
+
+// NormalizeImagePolicy maps syncengine.DownloadPolicyMode or UI policy values into canonical UI keys.
+func NormalizeImagePolicy(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case SyncImagePolicyPreviewOnly:
+		return SyncImagePolicyPreviewOnly
+	case SyncImagePolicyAlwaysOriginal:
+		return SyncImagePolicyAlwaysOriginal
+	case SyncImagePolicyThreshold, string(syncengine.PolicyThresholdBytes), "":
+		return SyncImagePolicyThreshold
+	default:
+		return SyncImagePolicyThreshold
+	}
+}
+
+// IsNutstore reports whether Endpoint points to Nutstore (jianguoyun.com), which triggers auto-throttling.
+func (cfg SyncSettings) IsNutstore() bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(cfg.Endpoint)), "jianguoyun.com")
+}
+
+// ToDownloadPolicy converts UI SyncSettings into the syncengine.DownloadPolicy contract.
+func (cfg SyncSettings) ToDownloadPolicy(isMobile bool) syncengine.DownloadPolicy {
+	var mode syncengine.DownloadPolicyMode
+	switch NormalizeImagePolicy(cfg.ImagePolicy) {
+	case SyncImagePolicyPreviewOnly:
+		mode = syncengine.PolicyPreviewOnly
+	case SyncImagePolicyAlwaysOriginal:
+		mode = syncengine.PolicyAlwaysOriginal
+	default:
+		mode = syncengine.PolicyThresholdBytes
+	}
+	mb := cfg.ImageThresholdMB
+	switch mb {
+	case 1, 2, 5, 10:
+	default:
+		mb = 2
+	}
+	return syncengine.DownloadPolicy{
+		Mode:                 mode,
+		ThresholdBytes:       int64(mb) << 20,
+		WiFiOnlyForOriginals: cfg.WiFiOnlyOriginals,
+		IsMobile:             isMobile,
+	}
+}
+
+// SyncStateSummary exposes live WebDAV sync telemetry and local originals cache footprint.
+type SyncStateSummary struct {
+	Status                string // "" | "idle" | "syncing" | "synced" | "error" | "conflict"
+	LastSyncText          string
+	PendingCount          int
+	LocalOriginalsCacheMB float64
+	ErrorText             string
+}
+
+// SyncConflictItem describes one preserved `.sync-conflict-*` copy awaiting user resolution.
+type SyncConflictItem struct {
+	RelPath      string
+	ConflictPath string
+	DetectedAt   string
+}
 
 // DiagnosticItem renders one graded scientific or structural diagnostic in the companion drawer.
 type DiagnosticItem struct {
@@ -328,6 +409,18 @@ type Shell struct {
 	OnOpenSandboxVault     func()
 	OnRemoveRecentVault    func(vaultPath string)
 	OnToggleHideAssets     func(hide bool)
+	SyncSettings           SyncSettings
+	SyncState              SyncStateSummary
+	SyncConflicts          []SyncConflictItem
+	syncPrefsInited        bool
+	syncPasswordVisible    bool
+	OnSaveSyncSettings     func()
+	OnTestSyncConnection   func()
+	OnTriggerSyncNow       func()
+	OnClearOriginalsCache  func()
+	OnResolveSyncConflict  func(relPath, conflictPath, choice string)
+	OnVaultBackupZip       func()
+	OnVaultRestoreZip      func()
 	OnSettingsChanged         func()
 	OnUndo                    func()
 	OnRedo                    func()

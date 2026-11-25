@@ -1400,8 +1400,8 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			}
 		}
 
-		// Tier 3: Vault title/stats on left + Standalone 40x40 Circular Glass Settings Gear on right!
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+		// Tier 3: Vault title/stats on left + compact Sync status pill + Standalone 40x40 Circular Glass Settings Gear on right!
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					components.Text(c, "AsterLab").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
@@ -1410,6 +1410,8 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 				components.Text(c, fmt.Sprintf("%d 份实验 · %d 模板", expCnt, tplCnt)).
 					FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).FontFeatures("tnum")
 			})
+
+			s.renderMobileDrawerSyncIndicator(c, tok)
 
 			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(40, 40).Radius(20).Center().Label("打开设置")
 			theme.ApplyCapsuleGlass(gearBtn, tok, true)
@@ -1423,6 +1425,76 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			}
 		})
 	})
+}
+
+func (s *Shell) renderMobileDrawerSyncIndicator(c *ui.Context, tok theme.Tokens) {
+	dotColor := tok.TextMuted
+	bgColor := tok.Elevated
+	borderColor := tok.BorderSubtle
+	textColor := tok.TextMuted
+	label := "未同步"
+	hasConflict := len(s.SyncConflicts) > 0
+
+	switch {
+	case hasConflict:
+		dotColor = tok.Warning
+		bgColor = tok.WarningBg
+		borderColor = tok.Warning
+		textColor = tok.WarningText
+		label = fmt.Sprintf("冲突 %d", len(s.SyncConflicts))
+	case s.SyncState.Status == "error":
+		dotColor = tok.Danger
+		bgColor = tok.DangerBg
+		borderColor = tok.Danger
+		textColor = tok.DangerText
+		label = "同步异常"
+	case s.SyncState.Status == "syncing":
+		dotColor = tok.Accent
+		bgColor = tok.InfoBg
+		borderColor = tok.Border
+		textColor = tok.InfoText
+		label = "同步中"
+	case s.SyncSettings.Enabled:
+		dotColor = tok.Success
+		bgColor = tok.Elevated
+		borderColor = tok.BorderSubtle
+		textColor = tok.TextMuted
+		if s.SyncState.PendingCount > 0 {
+			dotColor = tok.Warning
+			label = fmt.Sprintf("待同步 %d", s.SyncState.PendingCount)
+		} else {
+			label = "已同步"
+		}
+	}
+
+	syncPill := ui.ButtonBase(c.Key("mb-drawer-sync-status")).
+		Height(float32(tok.Spacing24)).
+		Padding(0, float32(tok.Spacing8)).
+		Radius(float32(tok.ControlRadius)).
+		Background(bgColor).
+		Border(1, borderColor).
+		Shrink(0).
+		Center().
+		Label("同步状态 " + label)
+	theme.ApplyTactilePress(syncPill)
+	syncPill.Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
+				Radius(float32(tok.Spacing4)).Background(dotColor).Shrink(0)
+			components.Text(c, label).FontSize(float32(tok.TextMeta)).
+				TextColor(textColor).SingleLine().FontFeatures("tnum")
+		})
+	})
+	if syncPill.Clicked() {
+		mygo.Haptics.Selection()
+		if hasConflict || !s.SyncSettings.Enabled || s.SyncState.Status == "error" || s.OnTriggerSyncNow == nil {
+			s.MobileDrawer = ""
+			s.SettingsView.Category = "sync"
+			s.VaultSettingsOpen = true
+		} else {
+			s.OnTriggerSyncNow()
+		}
+	}
 }
 
 func (s *Shell) renderMobileFileTreeScrollBody(c *ui.Context, tok theme.Tokens) {

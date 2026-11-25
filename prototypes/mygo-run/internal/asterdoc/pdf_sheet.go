@@ -35,6 +35,8 @@ type DocumentPDFOptions struct {
 	Plan             string
 	RunRecords       string
 	BaseDir          string
+	HeaderText       string
+	IncludeFootnotes bool
 	ActualParams     map[string]string
 	CalcActuals      *CalcActualContext
 	CheckedItems     map[string]bool
@@ -50,11 +52,25 @@ type fontPairCandidate struct {
 }
 
 var cjkFontPairCandidates = []fontPairCandidate{
+	// Windows
 	{regular: "C:/Windows/Fonts/Deng.ttf", bold: "C:/Windows/Fonts/Dengb.ttf"},
 	{regular: "C:/Windows/Fonts/simhei.ttf", bold: ""},
 	{regular: "C:/Windows/Fonts/simsunb.ttf", bold: ""},
 	{regular: "C:/Windows/Fonts/NotoSansSC-VF.ttf", bold: ""},
+	{regular: "C:/Windows/Fonts/NotoSansSC-Regular.ttf", bold: "C:/Windows/Fonts/NotoSansSC-Bold.ttf"},
+	// macOS
+	{regular: "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", bold: ""},
+	{regular: "/Library/Fonts/Arial Unicode.ttf", bold: ""},
+	{regular: "/Library/Fonts/NotoSansSC-Regular.ttf", bold: "/Library/Fonts/NotoSansSC-Bold.ttf"},
+	{regular: "/Library/Fonts/NotoSansCJKsc-Regular.otf", bold: "/Library/Fonts/NotoSansCJKsc-Bold.otf"},
+	// Linux
+	{regular: "/usr/share/fonts/google-noto-cjk/NotoSansCJKsc-Regular.otf", bold: "/usr/share/fonts/google-noto-cjk/NotoSansCJKsc-Bold.otf"},
+	{regular: "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf", bold: "/usr/share/fonts/truetype/noto/NotoSansSC-Bold.ttf"},
 	{regular: "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf", bold: ""},
+	{regular: "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttf", bold: ""},
+	// Android
+	{regular: "/system/fonts/NotoSansSC-Regular.ttf", bold: "/system/fonts/NotoSansSC-Bold.ttf"},
+	{regular: "/system/fonts/DroidSansFallback.ttf", bold: ""},
 }
 
 func isValidSingleSFNT(data []byte) bool {
@@ -75,25 +91,61 @@ func probeFontLoadsCleanly(data []byte) bool {
 }
 
 func loadSafeCJKFont(pdf *gofpdf.Fpdf) (string, error) {
-	for _, cand := range cjkFontPairCandidates {
-		regBytes, err := os.ReadFile(cand.regular)
+	registerPair := func(regPath, boldPath string) (string, error) {
+		regBytes, err := os.ReadFile(regPath)
 		if err != nil || !probeFontLoadsCleanly(regBytes) {
-			continue
+			return "", nil
 		}
 		pdf.AddUTF8FontFromBytes("AsterCJK", "", regBytes)
 		boldBytes := regBytes
-		if cand.bold != "" {
-			if b, bErr := os.ReadFile(cand.bold); bErr == nil && probeFontLoadsCleanly(b) {
+		if boldPath != "" {
+			if b, bErr := os.ReadFile(boldPath); bErr == nil && probeFontLoadsCleanly(b) {
 				boldBytes = b
 			}
 		}
 		pdf.AddUTF8FontFromBytes("AsterCJK", "B", boldBytes)
 		if pdf.Error() != nil {
-			return "", fmt.Errorf("load CJK font %q: %w", cand.regular, pdf.Error())
+			return "", fmt.Errorf("load CJK font %q: %w", regPath, pdf.Error())
 		}
 		return "AsterCJK", nil
 	}
+	for _, cand := range cjkFontPairCandidates {
+		loaded, err := registerPair(cand.regular, cand.bold)
+		if err != nil {
+			return "", err
+		}
+		if loaded != "" {
+			return loaded, nil
+		}
+	}
+	for _, cand := range chineseFontCandidates {
+		loaded, err := registerPair(cand, "")
+		if err != nil {
+			return "", err
+		}
+		if loaded != "" {
+			return loaded, nil
+		}
+	}
 	return "", fmt.Errorf("cannot export Chinese text: no valid CJK TrueType font found")
+}
+
+// ensurePDFRoom inserts a page break when neededMM vertical space is not
+// available above pageBreakY, preventing headers, tables, and plates from
+// splitting awkwardly across page boundaries.
+func ensurePDFRoom(pdf *gofpdf.Fpdf, neededMM, pageBreakY float64) bool {
+	if neededMM <= 0 {
+		return false
+	}
+	const maxUsableHeight = 250.0
+	if neededMM > maxUsableHeight {
+		neededMM = maxUsableHeight
+	}
+	if pdf.GetY()+neededMM > pageBreakY {
+		pdf.AddPage()
+		return true
+	}
+	return false
 }
 
 // ExportDocumentPDF renders an AsterML v2 document into a publication-grade A4
@@ -123,7 +175,8 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	pdf.AliasNbPages("{nb}")
 
 	font := "Helvetica"
-	needsCJK := containsCJK(title, opts.Revision, opts.SourceHash, opts.RunID, []string{doc.Source, opts.Plan, opts.RunRecords, opts.StatusLabel, opts.RecordedAt, opts.NotebookMarkdown})
+	headerText := strings.TrimSpace(opts.HeaderText)
+	needsCJK := containsCJK(title, opts.Revision, opts.SourceHash, opts.RunID, []string{doc.Source, opts.Plan, opts.RunRecords, opts.StatusLabel, opts.RecordedAt, opts.NotebookMarkdown, headerText})
 	if loaded, err := loadSafeCJKFont(pdf); err == nil {
 		font = loaded
 	} else if needsCJK {
@@ -138,18 +191,34 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	pdf.SetSubject(traceability, false)
 
 	pdf.SetHeaderFunc(func() {
-		if pdf.PageNo() <= 1 {
+		if pdf.PageNo() <= 1 && headerText == "" {
 			return
 		}
 		pdf.SetY(7.5)
 		pdf.SetFont(font, "", 8)
 		pdf.SetTextColor(115, 110, 102)
-		pdf.CellFormat(130, 5, title, "", 0, "L", false, 0, "")
-		hdrTag := "实验设计方案"
-		if opts.IsRunRecord || opts.RunID != "" {
-			hdrTag = "实验实测记录单"
+		hdrTag := "Protocol Design"
+		if font != "Helvetica" {
+			hdrTag = "实验设计方案"
 		}
-		pdf.CellFormat(50, 5, hdrTag, "", 0, "R", false, 0, "")
+		if opts.IsRunRecord || opts.RunID != "" {
+			if font != "Helvetica" {
+				hdrTag = "实验实测记录单"
+			} else {
+				hdrTag = "Run Record"
+			}
+		}
+		leftHdr := title
+		rightHdr := hdrTag
+		if headerText != "" {
+			if pdf.PageNo() <= 1 {
+				leftHdr = headerText
+			} else {
+				rightHdr = headerText
+			}
+		}
+		pdf.CellFormat(120, 5, leftHdr, "", 0, "L", false, 0, "")
+		pdf.CellFormat(60, 5, rightHdr, "", 0, "R", false, 0, "")
 		pdf.SetDrawColor(231, 227, 219)
 		pdf.SetLineWidth(0.25)
 		pdf.Line(marginL, 13.5, marginL+contentW, 13.5)
@@ -163,8 +232,12 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 		pdf.Line(marginL, 283.5, marginL+contentW, 283.5)
 		pdf.SetFont(font, "", 8)
 		pdf.SetTextColor(115, 110, 102)
-		pdf.CellFormat(90, 6, "AsterLab · AsterML v2 实验方案与记录单", "", 0, "L", false, 0, "")
-		pdf.CellFormat(90, 6, fmt.Sprintf("第 %d / {nb} 页", pdf.PageNo()), "", 0, "R", false, 0, "")
+		leftFooter := "AsterLab · AsterML v2 Protocol & Run Sheet"
+		if font != "Helvetica" {
+			leftFooter = "AsterLab · AsterML v2 实验方案与记录单"
+		}
+		pdf.CellFormat(110, 6, leftFooter, "", 0, "L", false, 0, "")
+		pdf.CellFormat(70, 6, fmt.Sprintf("Page %d / {nb}", pdf.PageNo()), "", 0, "R", false, 0, "")
 	})
 
 	pdf.AddPage()
@@ -177,9 +250,7 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	}
 
 	ensureSpace := func(neededMM float64) {
-		if pdf.GetY()+neededMM > pageBreakY {
-			pdf.AddPage()
-		}
+		ensurePDFRoom(pdf, neededMM, pageBreakY)
 	}
 
 	// 1. Top Title & Provenance Card (Bench-sheet ready with printable operator blank if draft)
@@ -213,7 +284,7 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 	renderedGlobalHeader := false
 	ensureGlobalHeader := func() {
 		if !renderedGlobalHeader {
-			ensureSpace(14)
+			ensurePDFRoom(pdf, 26, pageBreakY)
 			drawPDFSectionHeading(pdf, font, marginL, contentW, "一、实验设计与材料总览", "")
 			renderedGlobalHeader = true
 		}
@@ -259,7 +330,7 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 		}
 	}
 	if len(steps) > 0 {
-		ensureSpace(16)
+		ensurePDFRoom(pdf, 28, pageBreakY)
 		stepHeading := "二、实验操作步骤与台账记录表"
 		if opts.IsRunRecord {
 			stepHeading = "二、实验执行步骤与实测记录"
@@ -269,7 +340,7 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 			execMode := firstNonEmpty(textValue(step.Data, "execution"), "executable")
 			stepTitle := firstNonEmpty(textValue(step.Data, "title"), step.ID)
 			tps := strings.Join(stringList(step.Data, "timepoints"), " / ")
-			ensureSpace(18)
+			ensurePDFRoom(pdf, 26, pageBreakY)
 			drawPDFStepBanner(pdf, font, marginL, contentW, idx+1, stepTitle, execMode, tps)
 
 			blocks := mapSlice(step.Data["blocks"])
@@ -287,7 +358,7 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 
 			// If printable checklist items live directly on step.checks, render them too.
 			if checks := mapSlice(step.Data["checks"]); len(checks) > 0 && len(blocks) == 0 {
-				drawPDFChecklist(pdf, font, opts, step.ID, marginL, contentW, ensureSpace, "步骤核对项", checks)
+				drawPDFChecklist(pdf, font, opts, step.ID, marginL, contentW, pageBreakY, ensureSpace, "步骤核对项", checks)
 			}
 			pdf.Ln(2)
 		}
@@ -315,10 +386,17 @@ func ExportDocumentPDF(w io.Writer, doc *Document, opts DocumentPDFOptions) erro
 		pdf.Ln(2)
 	}
 	if strings.TrimSpace(opts.RunRecords) != "" {
-		ensureSpace(16)
+		ensurePDFRoom(pdf, 24, pageBreakY)
 		drawPDFSectionHeading(pdf, font, marginL, contentW, "执行明细记录", "")
 		for _, line := range strings.Split(opts.RunRecords, "\n") {
 			renderPDFLine(pdf, font, line)
+		}
+	}
+
+	// 6. Optional Parsed Markdown Footnotes Appendix
+	if opts.IncludeFootnotes {
+		if footnotes := collectPDFFootnotes(doc.Source, opts.NotebookMarkdown); len(footnotes) > 0 {
+			renderFootnotesAppendixPDF(pdf, font, marginL, contentW, pageBreakY, footnotes)
 		}
 	}
 
@@ -510,13 +588,13 @@ func renderModuleToPDF(
 	case "calculator":
 		drawPDFCalculator(pdf, font, doc, opts, x, w, pageBreakY, ensureSpace, data)
 	case "plate":
-		drawPDFPlate(pdf, font, doc, x, w, ensureSpace, imgSeq, data)
+		drawPDFPlate(pdf, font, doc, x, w, pageBreakY, imgSeq, data)
 	case "figure":
-		drawPDFFigure(pdf, font, opts, x, w, ensureSpace, imgSeq, data)
+		drawPDFFigure(pdf, font, opts, x, w, pageBreakY, ensureSpace, imgSeq, data)
 	case "checklist":
-		drawPDFChecklist(pdf, font, opts, stepID, x, w, ensureSpace, firstNonEmpty(textValue(data, "title"), "操作核对清单"), mapSlice(data["items"]))
+		drawPDFChecklist(pdf, font, opts, stepID, x, w, pageBreakY, ensureSpace, firstNonEmpty(textValue(data, "title"), "操作核对清单"), mapSlice(data["items"]))
 	case "subflow":
-		renderSubflowPDF(pdf, font, opts, stepID, x, w, ensureSpace, data)
+		renderSubflowPDF(pdf, font, opts, stepID, x, w, pageBreakY, ensureSpace, data)
 	case "timer":
 		renderTimerPDF(pdf, font, x, w, ensureSpace, data)
 	case "attachment":
@@ -580,47 +658,13 @@ func drawPDFTable(pdf *gofpdf.Fpdf, font string, x, w, pageBreakY float64, title
 	if len(headers) == 0 || len(colWidths) != len(headers) {
 		return
 	}
-	drawTitle := func() {
-		if strings.TrimSpace(title) == "" {
-			return
-		}
-		if pdf.GetY()+16 > pageBreakY {
-			pdf.AddPage()
-		}
-		pdf.SetFont(font, "B", 9.5)
-		pdf.SetTextColor(28, 27, 24)
-		pdf.CellFormat(w, 5.2, title, "", 1, "L", false, 0, "")
-	}
-	drawHeader := func() {
-		y := pdf.GetY()
-		pdf.SetFillColor(239, 236, 230)
-		pdf.SetDrawColor(214, 208, 197)
-		pdf.SetLineWidth(0.25)
-		cx := x
-		pdf.SetFont(font, "B", 8.6)
-		pdf.SetTextColor(58, 54, 49)
-		for i, h := range headers {
-			cw := colWidths[i]
-			pdf.Rect(cx, y, cw, 6.4, "FD")
-			align := "L"
-			if i < len(alignRight) && alignRight[i] {
-				align = "R"
-			}
-			pdf.SetXY(cx+1.6, y+1.0)
-			pdf.CellFormat(cw-3.2, 4.4, h, "", 0, align, false, 0, "")
-			cx += cw
-		}
-		pdf.SetY(y + 6.4)
-	}
-
-	drawTitle()
-	if pdf.GetY()+13 > pageBreakY {
-		pdf.AddPage()
-	}
-	drawHeader()
-
+	// Pre-measure every row so compact tables keep together and large tables
+	// never orphan their title/header from the first row.
+	pdf.SetFont(font, "", 8.6)
+	splitAll := make([][][]string, len(rows))
+	rowHeights := make([]float64, len(rows))
+	totalRowsH := 0.0
 	for rIdx, row := range rows {
-		pdf.SetFont(font, "", 8.6)
 		maxLines := 1
 		splitCells := make([][]string, len(headers))
 		for cIdx := range headers {
@@ -638,8 +682,61 @@ func drawPDFTable(pdf *gofpdf.Fpdf, font string, x, w, pageBreakY float64, title
 			splitCells[cIdx] = lines
 		}
 		rh := float64(maxLines)*4.1 + 2.4
-		if pdf.GetY()+rh > pageBreakY {
-			pdf.AddPage()
+		splitAll[rIdx] = splitCells
+		rowHeights[rIdx] = rh
+		totalRowsH += rh
+	}
+
+	hasTitle := strings.TrimSpace(title) != ""
+	titleH := 0.0
+	if hasTitle {
+		titleH = 5.2
+	}
+	const headerH = 6.4
+	firstRowH := 0.0
+	if len(rowHeights) > 0 {
+		firstRowH = rowHeights[0]
+	}
+	totalH := titleH + headerH + totalRowsH + 2.5
+	minKeepH := titleH + headerH + firstRowH + 2.5
+	if totalH <= 175.0 {
+		ensurePDFRoom(pdf, totalH, pageBreakY)
+	} else {
+		ensurePDFRoom(pdf, minKeepH, pageBreakY)
+	}
+
+	if hasTitle {
+		pdf.SetFont(font, "B", 9.5)
+		pdf.SetTextColor(28, 27, 24)
+		pdf.CellFormat(w, titleH, title, "", 1, "L", false, 0, "")
+	}
+	drawHeader := func() {
+		y := pdf.GetY()
+		pdf.SetFillColor(239, 236, 230)
+		pdf.SetDrawColor(214, 208, 197)
+		pdf.SetLineWidth(0.25)
+		cx := x
+		pdf.SetFont(font, "B", 8.6)
+		pdf.SetTextColor(58, 54, 49)
+		for i, h := range headers {
+			cw := colWidths[i]
+			pdf.Rect(cx, y, cw, headerH, "FD")
+			align := "L"
+			if i < len(alignRight) && alignRight[i] {
+				align = "R"
+			}
+			pdf.SetXY(cx+1.6, y+1.0)
+			pdf.CellFormat(cw-3.2, 4.4, h, "", 0, align, false, 0, "")
+			cx += cw
+		}
+		pdf.SetY(y + headerH)
+	}
+	drawHeader()
+
+	for rIdx := range rows {
+		rh := rowHeights[rIdx]
+		splitCells := splitAll[rIdx]
+		if ensurePDFRoom(pdf, rh, pageBreakY) {
 			drawHeader()
 		}
 		y := pdf.GetY()
@@ -651,6 +748,7 @@ func drawPDFTable(pdf *gofpdf.Fpdf, font string, x, w, pageBreakY float64, title
 		}
 		pdf.SetDrawColor(214, 208, 197)
 		pdf.SetLineWidth(0.22)
+		pdf.SetFont(font, "", 8.6)
 		pdf.SetTextColor(28, 27, 24)
 		for cIdx := range headers {
 			cw := colWidths[cIdx]
@@ -929,7 +1027,7 @@ func drawPDFCalculator(pdf *gofpdf.Fpdf, font string, doc *Document, opts Docume
 	)
 }
 
-func drawPDFPlate(pdf *gofpdf.Fpdf, font string, doc *Document, x, w float64, ensureSpace func(float64), imgSeq *int, data map[string]any) {
+func drawPDFPlate(pdf *gofpdf.Fpdf, font string, doc *Document, x, w, pageBreakY float64, imgSeq *int, data map[string]any) {
 	format := int(numOrZero(data["format"]))
 	if format <= 0 {
 		format = 96
@@ -1012,10 +1110,10 @@ func drawPDFPlate(pdf *gofpdf.Fpdf, font string, doc *Document, x, w float64, en
 		return
 	}
 
-	drawEmbeddedPNG(pdf, font, x, w, ensureSpace, imgSeq, "plate", pngBytes, 174, 94, "")
+	drawEmbeddedPNG(pdf, font, x, w, pageBreakY, imgSeq, "plate", pngBytes, 174, 94, "", "")
 }
 
-func drawPDFFigure(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, x, w float64, ensureSpace func(float64), imgSeq *int, data map[string]any) {
+func drawPDFFigure(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, x, w, pageBreakY float64, ensureSpace func(float64), imgSeq *int, data map[string]any) {
 	title := firstNonEmpty(textValue(data, "title"), "示意图 / 附图")
 	caption := strings.TrimSpace(textValue(data, "caption"))
 	svgRaw := strings.TrimSpace(textValue(data, "svg"))
@@ -1046,11 +1144,7 @@ func drawPDFFigure(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, x, w 
 		return
 	}
 
-	ensureSpace(10)
-	pdf.SetFont(font, "B", 9.5)
-	pdf.SetTextColor(28, 27, 24)
-	pdf.CellFormat(w, 5.2, title, "", 1, "L", false, 0, "")
-	drawEmbeddedPNG(pdf, font, x, w, ensureSpace, imgSeq, "fig", pngBytes, 152, 82, caption)
+	drawEmbeddedPNG(pdf, font, x, w, pageBreakY, imgSeq, "fig", pngBytes, 152, 82, title, caption)
 }
 
 func rasterizeFigureSVGToPNG(svgRaw string, annotations []svgTextLabel) []byte {
@@ -1124,7 +1218,7 @@ func ensureImagePNGBytes(raw []byte) []byte {
 	return buf.Bytes()
 }
 
-func drawEmbeddedPNG(pdf *gofpdf.Fpdf, font string, x, w float64, ensureSpace func(float64), imgSeq *int, prefix string, pngBytes []byte, maxW, maxH float64, caption string) {
+func drawEmbeddedPNG(pdf *gofpdf.Fpdf, font string, x, w, pageBreakY float64, imgSeq *int, prefix string, pngBytes []byte, maxW, maxH float64, title, caption string) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(pngBytes))
 	if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
 		return
@@ -1139,11 +1233,20 @@ func drawEmbeddedPNG(pdf *gofpdf.Fpdf, font string, x, w float64, ensureSpace fu
 		drawH = maxH
 		drawW = drawH * aspect
 	}
+	titleH := 0.0
+	if strings.TrimSpace(title) != "" {
+		titleH = 5.2
+	}
 	extra := 4.0
 	if caption != "" {
 		extra = 10.0
 	}
-	ensureSpace(drawH + extra)
+	ensurePDFRoom(pdf, titleH+drawH+extra, pageBreakY)
+	if titleH > 0 {
+		pdf.SetFont(font, "B", 9.5)
+		pdf.SetTextColor(28, 27, 24)
+		pdf.CellFormat(w, titleH, title, "", 1, "L", false, 0, "")
+	}
 	*imgSeq++
 	imgName := fmt.Sprintf("%s-%d", prefix, *imgSeq)
 	info := pdf.RegisterImageOptionsReader(imgName, gofpdf.ImageOptions{ImageType: "PNG", ReadDpi: false}, bytes.NewReader(pngBytes))
@@ -1165,11 +1268,11 @@ func drawEmbeddedPNG(pdf *gofpdf.Fpdf, font string, x, w float64, ensureSpace fu
 	pdf.Ln(2.0)
 }
 
-func drawPDFChecklist(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, stepID string, x, w float64, ensureSpace func(float64), title string, items []map[string]any) {
+func drawPDFChecklist(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, stepID string, x, w, pageBreakY float64, ensureSpace func(float64), title string, items []map[string]any) {
 	if len(items) == 0 {
 		return
 	}
-	ensureSpace(12)
+	ensurePDFRoom(pdf, 18, pageBreakY)
 	pdf.SetFont(font, "B", 9.4)
 	pdf.SetTextColor(28, 27, 24)
 	pdf.CellFormat(w, 5.2, title, "", 1, "L", false, 0, "")
@@ -1191,7 +1294,7 @@ func drawPDFChecklist(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, st
 		pdf.SetFont(font, "", 9.0)
 		lines := pdf.SplitText(label, w-9)
 		rh := float64(max(1, len(lines)))*4.4 + 1.2
-		ensureSpace(rh)
+		ensurePDFRoom(pdf, rh, pageBreakY)
 		y := pdf.GetY()
 		if checked {
 			pdf.SetFillColor(238, 251, 243)
@@ -1215,7 +1318,7 @@ func drawPDFChecklist(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, st
 	pdf.Ln(1.5)
 }
 
-func renderSubflowPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, stepID string, x, w float64, ensureSpace func(float64), data map[string]any) {
+func renderSubflowPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, stepID string, x, w, pageBreakY float64, ensureSpace func(float64), data map[string]any) {
 	title := firstNonEmpty(textValue(data, "title"), "细分子操作")
 	items := mapSlice(data["items"])
 	if len(items) == 0 {
@@ -1232,7 +1335,7 @@ func renderSubflowPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions, st
 		}
 		rows = append(rows, map[string]any{"id": textValue(it, "id"), "label": lbl})
 	}
-	drawPDFChecklist(pdf, font, opts, stepID, x, w, ensureSpace, title, rows)
+	drawPDFChecklist(pdf, font, opts, stepID, x, w, pageBreakY, ensureSpace, title, rows)
 }
 
 func renderTimerPDF(pdf *gofpdf.Fpdf, font string, x, w float64, ensureSpace func(float64), data map[string]any) {
@@ -1263,7 +1366,7 @@ func renderAttachmentPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions,
 		return
 	}
 
-	ensureSpace(12)
+	ensurePDFRoom(pdf, 24, pageBreakY)
 	pdf.SetFont(font, "B", 9.5)
 	pdf.SetTextColor(28, 27, 24)
 	pdf.CellFormat(w, 5.2, fmt.Sprintf("采图/附件 · %s（共 %d 份）", title, len(thumbs)), "", 1, "L", false, 0, "")
@@ -1278,7 +1381,7 @@ func renderAttachmentPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDFOptions,
 		resolved := resolveFigurePath(opts.BaseDir, th.FilePath)
 		if raw, err := os.ReadFile(resolved); err == nil {
 			if pngBytes := ensureImagePNGBytes(raw); len(pngBytes) > 0 {
-				drawEmbeddedPNG(pdf, font, x, w, ensureSpace, imgSeq, "att", pngBytes, 132, 62, capLabel)
+				drawEmbeddedPNG(pdf, font, x, w, pageBreakY, imgSeq, "att", pngBytes, 132, 62, "", capLabel)
 				continue
 			}
 		}
@@ -1317,7 +1420,7 @@ func renderNotebookMarkdownToPDF(pdf *gofpdf.Fpdf, font string, opts DocumentPDF
 				if sz < 10.0 {
 					sz = 10.0
 				}
-				ensureSpace(10)
+				ensurePDFRoom(pdf, 16, pageBreakY)
 				pdf.SetFont(font, "B", sz)
 				pdf.SetTextColor(28, 27, 24)
 				pdf.SetX(x)
@@ -1455,4 +1558,80 @@ func stripLeadingStepNumber(title string) string {
 		}
 	}
 	return string(runes)
+}
+
+func collectPDFFootnotes(docSource, notebookMD string) []FootnoteEntry {
+	var out []FootnoteEntry
+	seen := map[string]bool{}
+	appendDoc := func(src string) {
+		if strings.TrimSpace(src) == "" {
+			return
+		}
+		fnDoc := ParseFootnotes(src)
+		if fnDoc == nil {
+			return
+		}
+		for _, e := range fnDoc.Entries {
+			if seen[e.ID] {
+				continue
+			}
+			seen[e.ID] = true
+			e.Number = len(out) + 1
+			out = append(out, e)
+		}
+	}
+	appendDoc(docSource)
+	appendDoc(notebookMD)
+	return out
+}
+
+func renderFootnotesAppendixPDF(pdf *gofpdf.Fpdf, font string, x, w, pageBreakY float64, entries []FootnoteEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	heading := "附录：实验批注与参考文献"
+	badge := fmt.Sprintf("%d 条", len(entries))
+	emptyBody := "（未填写批注正文）"
+	if font == "Helvetica" {
+		heading = "Appendix: Footnotes & Notes"
+		badge = fmt.Sprintf("%d notes", len(entries))
+		emptyBody = "(no note body)"
+	}
+
+	ensurePDFRoom(pdf, 26, pageBreakY)
+	drawPDFSectionHeading(pdf, font, x, w, heading, badge)
+
+	numColW := 14.0
+	bodyColW := w - numColW - 2.0
+	for _, fn := range entries {
+		body := strings.TrimSpace(fn.Body)
+		if body == "" {
+			body = emptyBody
+		}
+		prefix := fmt.Sprintf("[%d]", fn.Number)
+		if fn.ID != "" && fn.ID != strconv.Itoa(fn.Number) {
+			prefix = fmt.Sprintf("[%d · %s]", fn.Number, fn.ID)
+		}
+		pdf.SetFont(font, "", 8.8)
+		lines := pdf.SplitText(body, bodyColW)
+		rh := float64(max(1, len(lines)))*4.2 + 2.4
+		ensurePDFRoom(pdf, rh, pageBreakY)
+
+		y0 := pdf.GetY()
+		pdf.SetDrawColor(214, 208, 197)
+		pdf.SetLineWidth(0.35)
+		pdf.Line(x+1.0, y0+0.6, x+1.0, y0+rh-1.2)
+
+		pdf.SetXY(x+3.0, y0+0.4)
+		pdf.SetFont(font, "B", 8.8)
+		pdf.SetTextColor(91, 69, 201)
+		pdf.CellFormat(numColW, 4.2, prefix, "", 0, "L", false, 0, "")
+
+		pdf.SetXY(x+3.0+numColW, y0+0.4)
+		pdf.SetFont(font, "", 8.8)
+		pdf.SetTextColor(36, 34, 30)
+		pdf.MultiCell(bodyColW, 4.2, body, "", "L", false)
+		pdf.SetY(y0 + rh)
+	}
+	pdf.Ln(2.0)
 }

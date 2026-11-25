@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,8 +19,10 @@ import (
 	"asterlab-mygo-prototype/internal/astercmd"
 	"asterlab-mygo-prototype/internal/astercore"
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/labio"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/vault"
 )
 
 type cachedAssayResult struct {
@@ -218,8 +223,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 		if next == ld.Source {
 			return
 		}
+		a.stageEmergencyDraft(tab.FilePath, next, 0)
 		_ = ld.ApplyEdit(next)
 		ld.NotifySaved(a.vault, false)
+		_, _, _ = a.snapshotDocFile(tab.FilePath, "edit", false)
 		if a.vaultIndex != nil {
 			a.vaultIndex.UpsertSource(tab.FilePath, ld.Source)
 		}
@@ -235,106 +242,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 	if a.shell != nil {
 		a.shell.OnMobileDocToolbarAction = func(curTab shell.WorkspaceTab, action string) {
-			curLD, err := a.docStore.Open(curTab.FilePath)
-			if err != nil {
-				return
-			}
-			applyDoc := func(next string) {
-				if next == curLD.Source {
-					return
-				}
-				_ = curLD.ApplyEdit(next)
-				if a.liveEditorSynced != nil {
-					a.liveEditorSynced[curTab.FilePath] = strings.ReplaceAll(curLD.Source, "\r\n", "\n")
-				}
-				a.refreshVaultTreeAndCalendar()
-			}
-			lastStepID := ""
-			if curLD.Parsed != nil {
-				for _, m := range curLD.Parsed.Modules {
-					if m.Kind == "step" {
-						lastStepID = m.ID
-					}
-				}
-			}
-			runMobileCmd := func(cmdID string, args map[string]any, toastTitle string) {
-				res := astercmd.ExecuteBatch(curLD.Source, astercmd.BatchRequest{
-					Mode:        astercmd.ModeEdit,
-					PlateFormat: a.shell.DefaultPlateFormat,
-					ExcessPct:   a.shell.DefaultExcessPct,
-					Operations:  []astercmd.Operation{{CommandID: cmdID, Args: args}},
-				})
-				if res.OK {
-					applyDoc(res.NextSource)
-					if toastTitle != "" {
-						c.AddToast(ui.Toast{Title: toastTitle, Type: components.ToastSuccess})
-					}
-				} else if res.Error != nil {
-					c.AddToast(ui.Toast{Title: res.Error.Message, Type: components.ToastWarning})
-				}
-			}
-			switch action {
-			case "undo":
-				if a.shell.OnUndo != nil {
-					a.shell.OnUndo()
-				}
-			case "redo":
-				if a.shell.OnRedo != nil {
-					a.shell.OnRedo()
-				}
-			case "add_step":
-				runMobileCmd("step.create", map[string]any{"preset": "blank"}, "已添加空白步骤")
-			case "add_checklist":
-				args := map[string]any{"kind": "checklist"}
-				if lastStepID != "" {
-					args["step_id"] = lastStepID
-				}
-				runMobileCmd("block.insert", args, "已插入检查清单")
-			case "add_param":
-				args := map[string]any{"kind": "param_table"}
-				if lastStepID != "" {
-					args["step_id"] = lastStepID
-				}
-				runMobileCmd("block.insert", args, "已插入参数表")
-			case "add_plate":
-				args := map[string]any{"format": a.shell.DefaultPlateFormat}
-				if lastStepID != "" {
-					args["step_id"] = lastStepID
-				}
-				runMobileCmd("plate.create", args, "已插入孔板")
-			case "open_timer":
-				a.shell.RightTab = 1
-				a.shell.MobileDrawer = "outline"
-			case "source_mode":
-				if curTab.Mode == shell.ModeSource {
-					a.shell.SetActiveTabMode(shell.ModeEdit)
-				} else {
-					a.shell.SetActiveTabMode(shell.ModeSource)
-				}
-			case "copy_source":
-				c.Services().WriteClipboard(curLD.Source)
-				c.AddToast(ui.Toast{Title: "已复制 AsterML 原文", Type: components.ToastSuccess})
-			case "export_pdf":
-				if curLD.Parsed != nil {
-					t := docTitle
-					if fm2, _, _ := asterdoc.ScanFrontmatter(curLD.Source); strings.TrimSpace(fm2.Title) != "" {
-						t = strings.TrimSpace(fm2.Title)
-					}
-					a.startDocumentPDFExport(c, t, "", "", a.vault.Root, curLD.Parsed)
-				}
-			case "save_template":
-				if tpl, tErr := a.vault.SaveAsTemplate(curTab.FilePath, docTitle); tErr == nil {
-					a.refreshVaultTreeAndCalendar()
-					c.AddToast(ui.Toast{Title: "已保存为模板：" + tpl.Name, Type: components.ToastSuccess})
-				}
-			case "duplicate":
-				if dup, dErr := a.vault.DuplicateFile(curTab.FilePath, docDate); dErr == nil {
-					a.refreshVaultTreeAndCalendar()
-					a.shell.OpenFileInPane(pane.ID, dup.RelPath, dup.Title, shell.ModeEdit, true)
-				}
-			case "delete":
-				a.deleteVaultFile(curTab.FilePath)
-			}
+			a.handleMobileDocToolbarAction(c, curTab, action)
 		}
 	}
 
@@ -441,6 +349,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 							})
 						})
 						if labSeg.Clicked() && !labAct {
+							_, _, _ = a.snapshotDocFile(tab.FilePath, "freeze", true)
 							setTabMode(shell.ModeLab)
 							tab.Mode = shell.ModeLab
 						}
@@ -460,6 +369,19 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					if m.Item("导出 PDF 执行单…").Chosen() && ld.Parsed != nil {
 						a.startDocumentPDFExport(c, docTitle, "", "", a.vault.Root, ld.Parsed)
 					}
+					if m.Item("导出 Word 报告 (.docx)…").Chosen() && ld.Parsed != nil {
+						_ = a.exportDocumentDocx(c, tab.FilePath, ld.Parsed)
+					}
+					if m.Item("导出 Tidy CSV (Prism / R)…").Chosen() && ld.Parsed != nil {
+						_ = a.exportDocumentTidyCSV(c, tab.FilePath, ld.Parsed)
+					}
+					if m.Item("导入酶标仪矩阵 (CSV / XLSX)…").Chosen() {
+						_ = a.importPlateDataIntoDoc(c, tab.FilePath)
+					}
+					if m.Item("分享实验文档…").Chosen() && ld.Parsed != nil {
+						_ = a.shareDocument(c, tab.FilePath, ld.Parsed)
+					}
+					m.Separator()
 					if m.Item("另存为模板").Chosen() {
 						if tpl, err := a.vault.SaveAsTemplate(tab.FilePath, docTitle); err == nil {
 							a.refreshVaultTreeAndCalendar()
@@ -539,8 +461,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			curSource := strings.ReplaceAll(ld.Source, "\r\n", "\n")
 			if bufText != curSource {
 				a.liveEditorSynced[tab.FilePath] = bufText
+				a.stageEmergencyDraft(tab.FilePath, bufText, srcEd.Cursor())
 				ld.ApplySourceDraft(bufText)
 				if ld.ParseErr == nil {
+					_, _, _ = a.snapshotDocFile(tab.FilePath, "source-edit", false)
 					a.refreshVaultTreeAndCalendar()
 				}
 			}
@@ -1406,4 +1330,918 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			v.RenderPlateOverlay(c)
 		})
 	})
+}
+
+// CaptureLabPhoto captures a lab photo via mobile camera (or test hook).
+func (a *app) CaptureLabPhoto(ctx context.Context) (string, error) {
+	if a != nil && a.capturePhotoFn != nil {
+		return a.capturePhotoFn(ctx)
+	}
+	return CaptureLabPhoto(ctx)
+}
+
+// ShareFile opens the OS native share sheet for path (or test hook).
+func (a *app) ShareFile(path, text string) error {
+	if a != nil && a.shareFileFn != nil {
+		return a.shareFileFn(path, text)
+	}
+	return ShareFile(path, text)
+}
+
+func (a *app) activeLiveViewForTab(tab shell.WorkspaceTab) *asterdoc.View {
+	if a == nil || len(a.liveViews) == 0 {
+		return nil
+	}
+	if a.shell != nil {
+		if pane := a.shell.ActivePane(); pane != nil {
+			if v := a.liveViews[pane.ID+"|"+tab.ID+"|"+tab.FilePath]; v != nil {
+				return v
+			}
+		}
+	}
+	for k, v := range a.liveViews {
+		if v == nil {
+			continue
+		}
+		if (tab.ID != "" && strings.HasSuffix(k, "|"+tab.ID+"|"+tab.FilePath)) ||
+			(tab.FilePath != "" && strings.HasSuffix(k, "|"+tab.FilePath)) {
+			return v
+		}
+	}
+	return nil
+}
+
+func mapMobileToolbarActionToAsterDoc(action string) (string, bool) {
+	switch action {
+	case "at_entity", "trigger_mention":
+		return "trigger_mention", true
+	case "slash_module", "trigger_slash":
+		return "trigger_slash", true
+	case "footnote", "add_footnote":
+		return "add_footnote", true
+	case "nl_structure", "trigger_nl":
+		return "trigger_nl", true
+	case "heading", "format_heading":
+		return "format_heading", true
+	case "bold", "format_bold":
+		return "format_bold", true
+	case "checklist", "format_checklist":
+		return "format_checklist", true
+	case "bullet_list", "format_bullet":
+		return "format_bullet", true
+	case "indent":
+		return "indent", true
+	case "outdent":
+		return "outdent", true
+	case "move_block_up":
+		return "move_block_up", true
+	case "move_block_down":
+		return "move_block_down", true
+	case "fold_block":
+		return "fold_block", true
+	case "cursor_left":
+		return "cursor_left", true
+	case "cursor_right":
+		return "cursor_right", true
+	default:
+		return "", false
+	}
+}
+
+func addPageToast(c *ui.Context, title string, tone string) {
+	if c != nil && strings.TrimSpace(title) != "" {
+		c.AddToast(ui.Toast{Title: title, Type: tone})
+	}
+}
+
+func (a *app) handleMobileDocToolbarAction(c *ui.Context, curTab shell.WorkspaceTab, action string) {
+	if a == nil || a.docStore == nil || a.vault == nil || strings.TrimSpace(curTab.FilePath) == "" {
+		return
+	}
+	curLD, err := a.docStore.Open(curTab.FilePath)
+	if err != nil {
+		return
+	}
+	applyDoc := func(next string) {
+		if next == curLD.Source {
+			return
+		}
+		a.stageEmergencyDraft(curTab.FilePath, next, 0)
+		_ = curLD.ApplyEdit(next)
+		curLD.NotifySaved(a.vault, false)
+		_, _, _ = a.snapshotDocFile(curTab.FilePath, "toolbar-edit", false)
+		if a.vaultIndex != nil {
+			a.vaultIndex.UpsertSource(curTab.FilePath, curLD.Source)
+		}
+		if a.liveEditorSynced != nil {
+			a.liveEditorSynced[curTab.FilePath] = strings.ReplaceAll(curLD.Source, "\r\n", "\n")
+		}
+		a.lastCompanionKey = ""
+		a.refreshVaultTreeAndCalendar()
+		a.syncActiveDocCompanionState(curTab.FilePath, curLD.Source, curLD.Parsed)
+	}
+
+	if mapped, ok := mapMobileToolbarActionToAsterDoc(action); ok {
+		if v := a.activeLiveViewForTab(curTab); v != nil {
+			v.DispatchMobileAction(mapped)
+			if a.shell != nil {
+				a.shell.Invalidate()
+			}
+		}
+		return
+	}
+
+	fm, _, _ := asterdoc.ScanFrontmatter(curLD.Source)
+	docTitle := strings.TrimSpace(fm.Title)
+	if docTitle == "" {
+		docTitle = strings.TrimSuffix(filepath.Base(curTab.FilePath), ".asterml")
+	}
+	docDate := asterdoc.NormalizeDateYMD(fm.ScheduledDate)
+
+	lastStepID := ""
+	if curLD.Parsed != nil {
+		for _, m := range curLD.Parsed.Modules {
+			if m.Kind == "step" {
+				lastStepID = m.ID
+			}
+		}
+	}
+	runMobileCmd := func(cmdID string, args map[string]any, toastTitle string) {
+		var platFmt, excPct int
+		if a.shell != nil {
+			platFmt = a.shell.DefaultPlateFormat
+			excPct = a.shell.DefaultExcessPct
+		}
+		res := astercmd.ExecuteBatch(curLD.Source, astercmd.BatchRequest{
+			Mode:        astercmd.ModeEdit,
+			PlateFormat: platFmt,
+			ExcessPct:   excPct,
+			Operations:  []astercmd.Operation{{CommandID: cmdID, Args: args}},
+		})
+		if res.OK {
+			applyDoc(res.NextSource)
+			addPageToast(c, toastTitle, components.ToastSuccess)
+		} else if res.Error != nil {
+			addPageToast(c, res.Error.Message, components.ToastWarning)
+		}
+	}
+
+	switch action {
+	case "undo":
+		if a.shell != nil && a.shell.OnUndo != nil {
+			a.shell.OnUndo()
+		}
+	case "redo":
+		if a.shell != nil && a.shell.OnRedo != nil {
+			a.shell.OnRedo()
+		}
+	case "add_step":
+		runMobileCmd("step.create", map[string]any{"preset": "blank"}, "已添加空白步骤")
+	case "add_checklist":
+		args := map[string]any{"kind": "checklist"}
+		if lastStepID != "" {
+			args["step_id"] = lastStepID
+		}
+		runMobileCmd("block.insert", args, "已插入检查清单")
+	case "add_param":
+		args := map[string]any{"kind": "param_table"}
+		if lastStepID != "" {
+			args["step_id"] = lastStepID
+		}
+		runMobileCmd("block.insert", args, "已插入参数表")
+	case "add_plate":
+		platFmt := 12
+		if a.shell != nil && a.shell.DefaultPlateFormat > 0 {
+			platFmt = a.shell.DefaultPlateFormat
+		}
+		args := map[string]any{"format": platFmt}
+		if lastStepID != "" {
+			args["step_id"] = lastStepID
+		}
+		runMobileCmd("plate.create", args, "已插入孔板")
+	case "camera_photo":
+		a.importCameraPhotoIntoDoc(c, curTab, curLD, applyDoc)
+	case "export_tidy_csv":
+		if err := a.exportDocumentTidyCSV(c, curTab.FilePath, curLD.Parsed); err != nil {
+			addPageToast(c, "导出 Tidy CSV 失败："+err.Error(), components.ToastWarning)
+		}
+	case "export_docx":
+		if err := a.exportDocumentDocx(c, curTab.FilePath, curLD.Parsed); err != nil {
+			addPageToast(c, "导出 Word 失败："+err.Error(), components.ToastWarning)
+		}
+	case "import_plate_data":
+		if err := a.importPlateDataIntoDoc(c, curTab.FilePath); err != nil {
+			addPageToast(c, "导入孔板数据失败："+err.Error(), components.ToastWarning)
+		}
+	case "share_doc":
+		if err := a.shareDocument(c, curTab.FilePath, curLD.Parsed); err != nil {
+			addPageToast(c, "分享实验文档失败："+err.Error(), components.ToastWarning)
+		}
+	case "open_timer", "timer":
+		if a.shell != nil {
+			a.shell.RightTab = 1
+			a.shell.MobileDrawer = "outline"
+		}
+	case "source_mode":
+		if a.shell != nil {
+			if curTab.Mode == shell.ModeSource {
+				a.shell.SetActiveTabMode(shell.ModeEdit)
+			} else {
+				a.shell.SetActiveTabMode(shell.ModeSource)
+			}
+		}
+	case "copy_source":
+		if c != nil {
+			c.Services().WriteClipboard(curLD.Source)
+			addPageToast(c, "已复制 AsterML 原文", components.ToastSuccess)
+		}
+	case "export_pdf":
+		if curLD.Parsed != nil {
+			a.startDocumentPDFExport(c, docTitle, "", "", a.vault.Root, curLD.Parsed)
+		}
+	case "save_template":
+		if tpl, tErr := a.vault.SaveAsTemplate(curTab.FilePath, docTitle); tErr == nil {
+			a.refreshVaultTreeAndCalendar()
+			addPageToast(c, "已保存为模板："+tpl.Name, components.ToastSuccess)
+		}
+	case "duplicate":
+		if dup, dErr := a.vault.DuplicateFile(curTab.FilePath, docDate); dErr == nil {
+			a.refreshVaultTreeAndCalendar()
+			if a.shell != nil {
+				if pane := a.shell.ActivePane(); pane != nil {
+					a.shell.OpenFileInPane(pane.ID, dup.RelPath, dup.Title, shell.ModeEdit, true)
+				}
+			}
+		}
+	case "delete":
+		a.deleteVaultFile(curTab.FilePath)
+	}
+}
+
+func (a *app) importCameraPhotoIntoDoc(c *ui.Context, curTab shell.WorkspaceTab, curLD *vault.LiveDocument, applyDoc func(string)) {
+	photoPath, err := a.CaptureLabPhoto(context.Background())
+	if errors.Is(err, errors.ErrUnsupported) {
+		paths, dErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Parent:  mygo.FocusedWindow(),
+			Title:   "选择实验拍照或显微照片",
+			Filters: []mygo.FileFilter{{Name: "图像文件", Extensions: []string{"png", "jpg", "jpeg", "webp", "tif", "tiff"}}},
+		})
+		if dErr != nil || len(paths) == 0 {
+			return
+		}
+		photoPath = paths[0]
+		err = nil
+	}
+	if err != nil {
+		addPageToast(c, "拍照失败："+err.Error(), components.ToastWarning)
+		return
+	}
+	if strings.TrimSpace(photoPath) == "" {
+		return
+	}
+	relAsset, err := a.vault.ImportAssetFile(photoPath)
+	if err != nil {
+		addPageToast(c, "导入照片原图失败："+err.Error(), components.ToastWarning)
+		return
+	}
+	_, _ = a.generateAssetPreviewSidecar(relAsset)
+
+	var platFmt, excPct int
+	if a.shell != nil {
+		platFmt = a.shell.DefaultPlateFormat
+		excPct = a.shell.DefaultExcessPct
+	}
+	res := astercmd.ExecuteBatch(curLD.Source, astercmd.BatchRequest{
+		Mode:        astercmd.ModeEdit,
+		PlateFormat: platFmt,
+		ExcessPct:   excPct,
+		Operations: []astercmd.Operation{{
+			CommandID: "block.insert",
+			Args: map[string]any{
+				"kind":  "figure",
+				"title": "现场实验拍照",
+				"props": map[string]any{
+					"src":     relAsset,
+					"caption": "现场实验照片（原图已无损归档）",
+					"svg":     "",
+				},
+			},
+		}},
+	})
+	if res.OK {
+		applyDoc(res.NextSource)
+		addPageToast(c, "已无损归档照片并插入 figure@1", components.ToastSuccess)
+	} else if res.Error != nil {
+		addPageToast(c, res.Error.Message, components.ToastWarning)
+	}
+}
+
+func (a *app) saveExportBytes(c *ui.Context, defaultName, title string, filter mygo.FileFilter, data []byte) (string, error) {
+	if a != nil && a.saveExportFileFn != nil {
+		return a.saveExportFileFn(defaultName, title, data)
+	}
+	home, _ := os.UserHomeDir()
+	defPath := filepath.Join(home, defaultName)
+	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+		Parent:      mygo.FocusedWindow(),
+		Title:       title,
+		DefaultPath: defPath,
+		Filters:     []mygo.FileFilter{filter},
+	})
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	if wErr := asterdoc.WriteFileAtomic(path, data); wErr != nil {
+		return "", wErr
+	}
+	addPageToast(c, "已导出："+filepath.Base(path), components.ToastSuccess)
+	return path, nil
+}
+
+func docDisplayTitle(doc *asterdoc.Document, relPath string) string {
+	if doc != nil {
+		if fm, _, ok := asterdoc.ScanFrontmatter(doc.Source); ok && strings.TrimSpace(fm.Title) != "" {
+			return strings.TrimSpace(fm.Title)
+		}
+	}
+	base := strings.TrimSuffix(filepath.Base(relPath), filepath.Ext(relPath))
+	if base == "" {
+		return "AsterLab 实验记录"
+	}
+	return base
+}
+
+func sanitizeExportStem(name string) string {
+	s := vault.SanitizeFileName(name)
+	if s == "" {
+		return "experiment"
+	}
+	return s
+}
+
+func (a *app) exportDocumentTidyCSV(c *ui.Context, relPath string, doc *asterdoc.Document) error {
+	if doc == nil {
+		return errors.New("文档尚未解析")
+	}
+	title := docDisplayTitle(doc, relPath)
+	obs := buildTidyObservationsFromDoc(doc, title)
+	csvBytes, err := labio.ExportTidyCSV(obs, labio.TidyCSVOptions{IncludeUTF8BOM: true})
+	if err != nil {
+		return err
+	}
+	_, err = a.saveExportBytes(c, sanitizeExportStem(title)+"-tidy.csv", "导出 Tidy 长表 CSV", mygo.FileFilter{Name: "CSV", Extensions: []string{"csv"}}, csvBytes)
+	return err
+}
+
+func (a *app) exportDocumentDocx(c *ui.Context, relPath string, doc *asterdoc.Document) error {
+	if doc == nil {
+		return errors.New("文档尚未解析")
+	}
+	title := docDisplayTitle(doc, relPath)
+	vaultRoot := ""
+	if a != nil && a.vault != nil {
+		vaultRoot = a.vault.Root
+	}
+	docxDoc := buildDocxDocumentFromAsterDoc(doc, title, vaultRoot)
+	docxBytes, err := labio.ExportDocx(docxDoc)
+	if err != nil {
+		return err
+	}
+	_, err = a.saveExportBytes(c, sanitizeExportStem(title)+".docx", "导出 Word 实验报告 (.docx)", mygo.FileFilter{Name: "Word 文档", Extensions: []string{"docx"}}, docxBytes)
+	return err
+}
+
+func (a *app) importPlateDataIntoDoc(c *ui.Context, relPath string) error {
+	if a == nil || a.docStore == nil {
+		return errors.New("文档存储未就绪")
+	}
+	var picked string
+	if a.openImportFileFn != nil {
+		p, err := a.openImportFileFn("选择酶标仪读数文件 (CSV / TSV / XLSX)")
+		if err != nil {
+			return err
+		}
+		picked = p
+	} else {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Parent:  mygo.FocusedWindow(),
+			Title:   "选择酶标仪读数文件 (CSV / TSV / XLSX)",
+			Filters: []mygo.FileFilter{{Name: "表格与酶标仪导出", Extensions: []string{"csv", "tsv", "txt", "xlsx"}}},
+		})
+		if err != nil {
+			return err
+		}
+		if len(paths) > 0 {
+			picked = paths[0]
+		}
+	}
+	if strings.TrimSpace(picked) == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(picked)
+	if err != nil {
+		return err
+	}
+	nextSrc, err := a.importPlateMatrixBytesIntoDoc(relPath, raw, strings.TrimSuffix(filepath.Base(picked), filepath.Ext(picked)))
+	if err != nil {
+		return err
+	}
+	if nextSrc != "" {
+		addPageToast(c, "已导入酶标仪矩阵并生成数据表", components.ToastSuccess)
+	}
+	return nil
+}
+
+func (a *app) importPlateMatrixBytesIntoDoc(relPath string, rawBytes []byte, sourceTitle string) (string, error) {
+	if a == nil || a.docStore == nil || a.vault == nil {
+		return "", errors.New("vault doc store unavailable")
+	}
+	ld, err := a.docStore.Open(relPath)
+	if err != nil {
+		return "", err
+	}
+	parsedRes, err := labio.ImportPlateMatrix(rawBytes)
+	if err != nil {
+		return "", err
+	}
+	containerRef := ""
+	if ld.Parsed != nil {
+		for _, m := range ld.Parsed.Modules {
+			if m.Kind == "plate" {
+				containerRef = m.ID
+				break
+			}
+			if m.Kind == "step" {
+				if blks, ok := m.Data["blocks"].([]any); ok {
+					for _, raw := range blks {
+						if bm, ok := raw.(map[string]any); ok && fmt.Sprint(bm["kind"]) == "plate" {
+							containerRef = fmt.Sprint(bm["id"])
+							break
+						}
+					}
+				}
+			}
+			if containerRef != "" {
+				break
+			}
+		}
+	}
+	rows := make([]any, 0, len(parsedRes.Ordered))
+	for _, w := range parsedRes.Ordered {
+		if w.Value == nil && w.Raw == "" {
+			continue
+		}
+		row := map[string]any{
+			"well": w.Coord,
+		}
+		if w.Value != nil {
+			row["value"] = *w.Value
+		} else {
+			row["value"] = w.Raw
+		}
+		if w.Group != "" {
+			row["group"] = w.Group
+		}
+		if w.Timepoint != "" {
+			row["timepoint"] = w.Timepoint
+		}
+		if w.Replicate > 0 {
+			row["replicate"] = w.Replicate
+		}
+		rows = append(rows, row)
+	}
+	if len(rows) == 0 {
+		return "", errors.New("未识别到有效孔位读数")
+	}
+	tblTitle := "酶标仪导入读数"
+	if strings.TrimSpace(sourceTitle) != "" {
+		tblTitle = strings.TrimSpace(sourceTitle) + " 读数"
+	}
+	props := map[string]any{
+		"columns": []any{
+			map[string]any{"key": "well", "label": "孔位", "value_kind": "text"},
+			map[string]any{"key": "value", "label": "测定读数", "value_kind": "number"},
+		},
+		"rows": rows,
+	}
+	if containerRef != "" {
+		props["container_ref"] = containerRef
+	}
+	var platFmt, excPct int
+	if a.shell != nil {
+		platFmt = a.shell.DefaultPlateFormat
+		excPct = a.shell.DefaultExcessPct
+	}
+	res := astercmd.ExecuteBatch(ld.Source, astercmd.BatchRequest{
+		Mode:        astercmd.ModeEdit,
+		PlateFormat: platFmt,
+		ExcessPct:   excPct,
+		Operations: []astercmd.Operation{{
+			CommandID: "block.insert",
+			Args: map[string]any{
+				"kind":  "data_table",
+				"title": tblTitle,
+				"props": props,
+			},
+		}},
+	})
+	if !res.OK {
+		if res.Error != nil {
+			return "", res.Error
+		}
+		return "", errors.New("插入数据表失败")
+	}
+	a.stageEmergencyDraft(relPath, res.NextSource, 0)
+	if err := ld.ApplyEdit(res.NextSource); err != nil {
+		return "", err
+	}
+	ld.NotifySaved(a.vault, false)
+	_, _, _ = a.snapshotDocFile(relPath, "import-plate-data", false)
+	if a.vaultIndex != nil {
+		a.vaultIndex.UpsertSource(relPath, ld.Source)
+	}
+	if a.liveEditorSynced != nil {
+		a.liveEditorSynced[relPath] = strings.ReplaceAll(ld.Source, "\r\n", "\n")
+	}
+	a.lastCompanionKey = ""
+	a.refreshVaultTreeAndCalendar()
+	a.syncActiveDocCompanionState(relPath, ld.Source, ld.Parsed)
+	return res.NextSource, nil
+}
+
+func (a *app) shareDocument(c *ui.Context, relPath string, doc *asterdoc.Document) error {
+	if a == nil || a.vault == nil || doc == nil {
+		return errors.New("文档未就绪")
+	}
+	title := docDisplayTitle(doc, relPath)
+	shareDir := filepath.Join(a.vault.Root, ".asterlab", "cache", "share")
+	_ = os.MkdirAll(shareDir, 0o755)
+	pdfPath := filepath.Join(shareDir, sanitizeExportStem(title)+".pdf")
+	f, err := os.Create(pdfPath)
+	exportBytesPath := ""
+	exportFilter := mygo.FileFilter{Name: "PDF", Extensions: []string{"pdf"}}
+	if err == nil {
+		pdfErr := asterdoc.ExportDocumentPDF(f, doc, asterdoc.DocumentPDFOptions{
+			Title:   title,
+			BaseDir: a.vault.Root,
+		})
+		_ = f.Close()
+		if pdfErr == nil {
+			exportBytesPath = pdfPath
+		} else {
+			_ = os.Remove(pdfPath)
+		}
+	}
+	if exportBytesPath == "" {
+		// Fallback to sharing raw .asterml if headless environment has no CJK PDF font.
+		asterPath := filepath.Join(shareDir, sanitizeExportStem(title)+".asterml")
+		if wErr := asterdoc.WriteFileAtomic(asterPath, []byte(doc.Source)); wErr != nil {
+			return wErr
+		}
+		exportBytesPath = asterPath
+		exportFilter = mygo.FileFilter{Name: "AsterML", Extensions: []string{"asterml"}}
+	}
+	err = a.ShareFile(exportBytesPath, title)
+	if errors.Is(err, errors.ErrUnsupported) {
+		raw, rErr := os.ReadFile(exportBytesPath)
+		if rErr != nil {
+			return rErr
+		}
+		_, err = a.saveExportBytes(c, filepath.Base(exportBytesPath), "保存分享文件", exportFilter, raw)
+		return err
+	}
+	return err
+}
+
+func buildTidyObservationsFromDoc(doc *asterdoc.Document, docTitle string) []labio.TidyObservation {
+	if doc == nil {
+		return nil
+	}
+	groupNames := map[string]string{}
+	groupRoles := map[string]string{}
+	for _, g := range doc.GroupList() {
+		groupNames[g.ID] = firstNonEmpty(g.Name, g.ID)
+		groupRoles[g.ID] = g.Role
+	}
+	graph := asterdoc.BuildSciGraph(doc)
+	defaultPlateID := ""
+	if graph != nil {
+		if pl := graph.PrimaryPlate(); pl != nil {
+			defaultPlateID = pl.ID
+		}
+	}
+
+	var dataTables []map[string]any
+	for _, m := range doc.Modules {
+		if m.Kind == "data_table" {
+			dataTables = append(dataTables, m.Data)
+		} else if m.Kind == "step" {
+			if blks, ok := m.Data["blocks"].([]any); ok {
+				for _, raw := range blks {
+					if bm, ok := raw.(map[string]any); ok && fmt.Sprint(bm["kind"]) == "data_table" {
+						dataTables = append(dataTables, bm)
+					}
+				}
+			}
+		}
+	}
+
+	var out []labio.TidyObservation
+	for _, dt := range dataTables {
+		metricName := firstNonEmpty(stringField(dt, "title"), "value")
+		metricUnit := ""
+		valueKey := ""
+		if cols, ok := dt["columns"].([]any); ok {
+			for _, rc := range cols {
+				cm, _ := rc.(map[string]any)
+				if cm == nil {
+					continue
+				}
+				k := stringField(cm, "key")
+				vk := stringField(cm, "value_kind")
+				if (vk == "number" || k == "value" || k == "reading") && valueKey == "" {
+					valueKey = k
+					if lbl := stringField(cm, "label"); lbl != "" {
+						metricName = lbl
+					}
+					metricUnit = stringField(cm, "unit")
+				}
+			}
+		}
+		if valueKey == "" {
+			valueKey = "value"
+		}
+		plateID := firstNonEmpty(stringField(dt, "container_ref"), stringField(dt, "plate_id"), defaultPlateID)
+		rows, _ := dt["rows"].([]any)
+		for _, rr := range rows {
+			rm, _ := rr.(map[string]any)
+			if rm == nil {
+				continue
+			}
+			well := strings.ToUpper(strings.TrimSpace(firstNonEmpty(stringField(rm, "well"), stringField(rm, "well_id"))))
+			var grp, role, sampleID string
+			var rep int
+			if well != "" && graph != nil {
+				if unit, ok := graph.UnitForWell(plateID, well); ok {
+					grp = firstNonEmpty(unit.GroupName, unit.GroupID)
+					role = groupRoles[unit.GroupID]
+					if unit.Blank && role == "" {
+						role = "blank"
+					}
+					sampleID = unit.SampleID
+					rep = unit.RepIndex
+				}
+			}
+			if g := stringField(rm, "group"); g != "" {
+				grp = firstNonEmpty(groupNames[g], g)
+				if role == "" {
+					role = groupRoles[g]
+				}
+			}
+			if sid := firstNonEmpty(stringField(rm, "sample_id"), stringField(rm, "sample")); sid != "" {
+				sampleID = sid
+			}
+			if rVal, ok := asFloat(rm["replicate"]); ok && rVal > 0 {
+				rep = int(rVal)
+			}
+			tp := stringField(rm, "timepoint")
+			rawVal, hasVal := rm[valueKey]
+			if !hasVal {
+				for _, alt := range []string{"value", "reading", "od450", "ct"} {
+					if v, ok := rm[alt]; ok {
+						rawVal, hasVal = v, true
+						break
+					}
+				}
+			}
+			obs := labio.TidyObservation{
+				Experiment: docTitle,
+				Group:      grp,
+				Role:       role,
+				Timepoint:  tp,
+				Replicate:  rep,
+				Well:       well,
+				SampleID:   sampleID,
+				Metric:     metricName,
+				Unit:       metricUnit,
+			}
+			if !hasVal || rawVal == nil {
+				obs.Missing = true
+			} else if num, ok := asFloat(rawVal); ok {
+				obs.Value = num
+			} else {
+				obs.Missing = true
+				obs.RawValue = fmt.Sprint(rawVal)
+			}
+			out = append(out, obs)
+		}
+	}
+	return out
+}
+
+func buildDocxDocumentFromAsterDoc(doc *asterdoc.Document, title, vaultRoot string) labio.DocxDocument {
+	out := labio.DocxDocument{Title: title}
+	if doc == nil {
+		return out
+	}
+	if fm, _, ok := asterdoc.ScanFrontmatter(doc.Source); ok {
+		if fm.ScheduledDate != "" {
+			out.Metadata = append(out.Metadata, labio.DocxMetaKV{Key: "计划日期", Value: fm.ScheduledDate})
+		}
+		if fm.Stage != "" {
+			out.Metadata = append(out.Metadata, labio.DocxMetaKV{Key: "阶段状态", Value: fm.Stage})
+		}
+	}
+	fnDoc := asterdoc.ParseFootnotes(doc.Source)
+	fnNumByID := map[string]int{}
+	if fnDoc != nil {
+		for _, e := range fnDoc.Entries {
+			out.Footnotes = append(out.Footnotes, e.Body)
+			fnNumByID[e.ID] = len(out.Footnotes)
+		}
+	}
+
+	segs := asterdoc.SplitDocumentSegments(doc.Source, doc)
+	var curSec *labio.DocxSection
+	ensureSec := func() *labio.DocxSection {
+		if curSec == nil {
+			out.Sections = append(out.Sections, labio.DocxSection{Heading: "实验内容", Level: 1})
+			curSec = &out.Sections[len(out.Sections)-1]
+		}
+		return curSec
+	}
+	for _, seg := range segs {
+		switch seg.Kind {
+		case asterdoc.SegmentProse:
+			for _, ln := range strings.Split(seg.Text, "\n") {
+				tr := strings.TrimSpace(ln)
+				if tr == "" || strings.HasPrefix(tr, "[^") && strings.Contains(tr, "]:") {
+					continue
+				}
+				if hs, isStep := asterdoc.ParseHeadingStepLine(tr); isStep {
+					lvl := 1
+					if hs.Level > 1 {
+						lvl = 2
+					}
+					out.Sections = append(out.Sections, labio.DocxSection{Heading: hs.Title, Level: lvl})
+					curSec = &out.Sections[len(out.Sections)-1]
+					continue
+				}
+				if strings.HasPrefix(tr, "#") {
+					lvl := len(tr) - len(strings.TrimLeft(tr, "#"))
+					if lvl < 1 {
+						lvl = 1
+					} else if lvl > 3 {
+						lvl = 3
+					}
+					heading := strings.TrimSpace(strings.TrimLeft(tr, "#"))
+					if heading != "" {
+						out.Sections = append(out.Sections, labio.DocxSection{Heading: heading, Level: lvl})
+						curSec = &out.Sections[len(out.Sections)-1]
+					}
+					continue
+				}
+				sec := ensureSec()
+				if strings.HasPrefix(tr, "- ") || strings.HasPrefix(tr, "* ") {
+					sec.Bullets = append(sec.Bullets, strings.TrimSpace(tr[2:]))
+					continue
+				}
+				var fnIDs []int
+				for id, num := range fnNumByID {
+					if strings.Contains(tr, "[^"+id+"]") {
+						fnIDs = append(fnIDs, num)
+					}
+				}
+				sec.Paragraphs = append(sec.Paragraphs, labio.DocxPara{Text: tr, FootnoteIDs: fnIDs})
+			}
+		case asterdoc.SegmentModule:
+			if seg.Module == nil {
+				continue
+			}
+			sec := ensureSec()
+			appendModuleToDocxSection(sec, seg.Module.Kind, seg.Module.Data, seg.Module.Plate, vaultRoot)
+		}
+	}
+	return out
+}
+
+func appendModuleToDocxSection(sec *labio.DocxSection, kind string, data map[string]any, plate *asterdoc.Plate, vaultRoot string) {
+	switch kind {
+	case "step":
+		title := stringField(data, "title")
+		if title != "" {
+			sec.Paragraphs = append(sec.Paragraphs, labio.DocxPara{Text: title})
+		}
+		if blks, ok := data["blocks"].([]any); ok {
+			for _, raw := range blks {
+				if bm, ok := raw.(map[string]any); ok {
+					appendModuleToDocxSection(sec, stringField(bm, "kind"), bm, nil, vaultRoot)
+				}
+			}
+		}
+	case "group_table":
+		tbl := labio.DocxTable{Caption: stringField(data, "title"), Headers: []string{"组别", "角色", "条件", "样本量"}}
+		if rows, ok := data["rows"].([]any); ok {
+			for _, rr := range rows {
+				if rm, ok := rr.(map[string]any); ok {
+					nStr := firstNonEmpty(fmt.Sprint(rm["independent_n"]), fmt.Sprint(rm["technical_repeats"]))
+					if nStr == "<nil>" {
+						nStr = ""
+					}
+					tbl.Rows = append(tbl.Rows, []string{stringField(rm, "name"), stringField(rm, "role"), stringField(rm, "condition"), nStr})
+				}
+			}
+		}
+		sec.Tables = append(sec.Tables, tbl)
+	case "param_table":
+		tbl := labio.DocxTable{Caption: stringField(data, "title"), Headers: []string{"参数", "设定值", "单位", "实测值"}}
+		if rows, ok := data["rows"].([]any); ok {
+			for _, rr := range rows {
+				if rm, ok := rr.(map[string]any); ok {
+					tbl.Rows = append(tbl.Rows, []string{stringField(rm, "label"), stringField(rm, "value"), stringField(rm, "unit"), stringField(rm, "actual")})
+				}
+			}
+		}
+		sec.Tables = append(sec.Tables, tbl)
+	case "data_table":
+		var headers, keys []string
+		if cols, ok := data["columns"].([]any); ok {
+			for _, rc := range cols {
+				if cm, ok := rc.(map[string]any); ok {
+					keys = append(keys, stringField(cm, "key"))
+					headers = append(headers, firstNonEmpty(stringField(cm, "label"), stringField(cm, "key")))
+				}
+			}
+		}
+		if len(headers) == 0 {
+			headers = []string{"well", "value"}
+			keys = []string{"well", "value"}
+		}
+		tbl := labio.DocxTable{Caption: stringField(data, "title"), Headers: headers}
+		if rows, ok := data["rows"].([]any); ok {
+			for _, rr := range rows {
+				if rm, ok := rr.(map[string]any); ok {
+					rowVals := make([]string, len(keys))
+					for i, k := range keys {
+						rowVals[i] = stringField(rm, k)
+					}
+					tbl.Rows = append(tbl.Rows, rowVals)
+				}
+			}
+		}
+		sec.Tables = append(sec.Tables, tbl)
+	case "plate":
+		if plate != nil {
+			tbl := labio.DocxTable{Caption: firstNonEmpty(plate.Title, fmt.Sprintf("%d 孔板布局", plate.Format)), Headers: []string{"组别", "分配孔位"}}
+			for g, ws := range plate.Groups {
+				tbl.Rows = append(tbl.Rows, []string{g, strings.Join(ws, ", ")})
+			}
+			if len(tbl.Rows) > 0 {
+				sec.Tables = append(sec.Tables, tbl)
+			}
+		}
+	case "figure":
+		src := stringField(data, "src")
+		capText := firstNonEmpty(stringField(data, "caption"), stringField(data, "title"))
+		if src != "" && vaultRoot != "" && strings.EqualFold(filepath.Ext(src), ".png") {
+			abs := filepath.Join(vaultRoot, filepath.FromSlash(strings.TrimPrefix(src, "./")))
+			if b, err := os.ReadFile(abs); err == nil {
+				sec.Figures = append(sec.Figures, labio.DocxFigure{Caption: capText, PNGBytes: b})
+			}
+		} else if capText != "" {
+			sec.Paragraphs = append(sec.Paragraphs, labio.DocxPara{Text: "[附图] " + capText})
+		}
+	}
+}
+
+func stringField(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func asFloat(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case float32:
+		return float64(x), true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(x), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }
