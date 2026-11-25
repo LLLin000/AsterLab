@@ -101,8 +101,11 @@ type View struct {
 	DefaultPlateFormat int
 	DefaultExcessPct   int
 	ScrollToStepID     string
+	ScrollToModuleID   string
 	SlashItems             []SlashCommandItem
 	VaultCompletionTargets []string
+	PantryCompletionItems  []PantryMentionItem
+	OnOpenVaultLink        func(relPath string)
 	OnExecuteSlash         func(item SlashCommandItem, stepID string, insertOffset int)
 	OnAttachPhotoToWell    func(plateID string, wells []string)
 	OnDuplicateBlock      func(stepID, blockID string)
@@ -535,6 +538,10 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				modHover := modRow.Hovered()
 				modRow.Children(func() {
 					modWrap := ui.Column(c.Key("top-mod:" + m.ID)).FillWidth().Gap(float32(tok.Spacing4))
+					if v.ScrollToModuleID != "" && v.ScrollToModuleID == m.ID {
+						modWrap.ScrollIntoView()
+						v.ScrollToModuleID = ""
+					}
 					if v.inPairedRow {
 						modWrap.FillHeight()
 					}

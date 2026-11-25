@@ -2,11 +2,13 @@ package asterdoc
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
@@ -16,6 +18,16 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 )
+
+// PantryMentionItem summarizes one Pantry reagent or biosample exposed in inline `@` completions.
+type PantryMentionItem struct {
+	ID        string
+	Name      string
+	LabelCode string
+	Location  string
+	ItemType  string // "reagent" | "biosample"
+	Status    string // "" | "normal" | "near_expiry" | "expired" | "exhausted"
+}
 
 // SlashCommandItem represents one host-registered command exposed in Live Preview `/`
 // menus, inter-block `+` menus, and mobile insert drawers (populated from astercmd.Registry).
@@ -68,6 +80,7 @@ var (
 	reMDCode          = regexp.MustCompile("`([^`\r\n]+?)`")
 	reMDStrike        = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
 	reWikiBracket     = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
+	reMDInlineMention = regexp.MustCompile(`\[@([^\]\r\n]+)\]\((asterlab://pantry\?code=[^)\r\n]+|#[A-Za-z0-9_.:-]+)\)`)
 	reMDDisplayMath   = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
 	reMDInlineMath    = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
 	rePlainSciPower   = regexp.MustCompile(`\b(?:10|[a-zA-Z]{1,3})\^(?:\{[+-]?[0-9a-zA-Z]+\}|[+-]?[0-9]+)`)
@@ -132,6 +145,24 @@ func ComputeLivePreviewDecorations(
 	allowCheckToggle bool,
 	onToggleCheck func(start, end int, checked bool),
 	onClickTarget func(objID, sub string),
+) (styles []editor.LineStyle, repls []editor.Replacement, diags []editor.Diagnostic) {
+	return computeLivePreviewDecorationsFull(text, activeLine, focused, t, tok, doc, docOffset, allowCheckToggle, nil, onToggleCheck, onClickTarget, nil, nil)
+}
+
+func computeLivePreviewDecorationsFull(
+	text string,
+	activeLine int,
+	focused bool,
+	t *ui.Theme,
+	tok theme.Tokens,
+	doc *Document,
+	docOffset int,
+	allowCheckToggle bool,
+	pantryByKey map[string]PantryMentionItem,
+	onToggleCheck func(start, end int, checked bool),
+	onClickTarget func(objID, sub string),
+	onLocatePantry func(code string),
+	onOpenVault func(relPath string),
 ) (styles []editor.LineStyle, repls []editor.Replacement, diags []editor.Diagnostic) {
 	fontFamily := "sans-serif"
 	if t != nil && t.Font != "" {
@@ -591,7 +622,60 @@ func ComputeLivePreviewDecorations(
 					)
 				}
 			}
+			codeSpans := reMDCode.FindAllStringSubmatchIndex(lineText, -1)
+			inCodeSpan := func(pos int) bool {
+				for _, cs := range codeSpans {
+					if pos >= cs[0] && pos < cs[1] {
+						return true
+					}
+				}
+				return false
+			}
 			for _, m := range reWikiBracket.FindAllStringSubmatchIndex(lineText, -1) {
+				if inCodeSpan(m[0]) {
+					continue
+				}
+				isEmbed := m[2] >= 0 && m[3] > m[2]
+				target := strings.TrimSpace(lineText[m[4]:m[5]])
+				disp := target
+				if m[6] >= 0 && strings.TrimSpace(lineText[m[6]:m[7]]) != "" {
+					disp = strings.TrimSpace(lineText[m[6]:m[7]])
+				} else if !isEmbed {
+					disp = strings.TrimSuffix(filepath.Base(target), filepath.Ext(target))
+				}
+				if !isEmbed && onOpenVault != nil && target != "" {
+					docRel := target
+					pillLabel := firstNonEmpty(disp, target)
+					pillW := estimateChipWidth(pillLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					repls = append(repls, editor.Replacement{
+						Start:       lineStart + m[0],
+						End:         lineStart + m[1],
+						Width:       pillW,
+						Interactive: true,
+						Label:       pillLabel,
+						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+							e.Row().AlignItems(ui.Center).Children(func() {
+								pill := ui.ButtonBase(c).
+									Padding(0, float32(tok.Spacing8)*0.75).
+									Radius(float32(tok.ControlRadius)).
+									Background(tok.AccentSoftBg.Alpha(0.55)).
+									Border(1, tok.Accent.Alpha(0.28)).
+									KeepFocus().Label(pillLabel)
+								pill.Children(func() {
+									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Icon(c, lucide.FileText()).Size(float32(tok.TextMeta), float32(tok.TextMeta)).TextColor(tok.Accent)
+										ui.Text(c, pillLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+									})
+								})
+								components.Tooltip(c, pill, "打开实验文档："+docRel)
+								if pill.Clicked() {
+									onOpenVault(docRel)
+								}
+							})
+						},
+					})
+					continue
+				}
 				// Hide `[[` and `]]` (and leading `!` if inline)
 				openEnd := m[4]
 				closeStart := m[5]
@@ -605,16 +689,115 @@ func ComputeLivePreviewDecorations(
 					editor.Replacement{Start: lineStart + closeStart, End: lineStart + m[1]},
 				)
 			}
-			// Obsidian-style inline LaTeX (`$...$`) on non-active lines (skipping code spans & currency like $10)
-			codeSpans := reMDCode.FindAllStringSubmatchIndex(lineText, -1)
-			inCodeSpan := func(pos int) bool {
-				for _, cs := range codeSpans {
-					if pos >= cs[0] && pos < cs[1] {
-						return true
-					}
+			for _, m := range reMDInlineMention.FindAllStringSubmatchIndex(lineText, -1) {
+				if inCodeSpan(m[0]) || (m[1] < len(lineText) && lineText[m[1]] == '{') {
+					continue
 				}
-				return false
+				rawLabel := strings.TrimSpace(lineText[m[2]:m[3]])
+				href := strings.TrimSpace(lineText[m[4]:m[5]])
+				if rawLabel == "" || href == "" {
+					continue
+				}
+				if strings.HasPrefix(href, "asterlab://pantry?code=") {
+					rawCode := strings.TrimPrefix(href, "asterlab://pantry?code=")
+					if dec, err := url.QueryUnescape(rawCode); err == nil && dec != "" {
+						rawCode = dec
+					}
+					pInfo, hasInfo := pantryByKey[rawCode]
+					if !hasInfo {
+						pInfo, hasInfo = pantryByKey[rawLabel]
+					}
+					bgCol := tok.AccentSoftBg.Alpha(0.62)
+					fgCol := tok.Accent
+					bdCol := tok.Accent.Alpha(0.30)
+					icon := lucide.FlaskConical()
+					tip := "点击在储藏室中定位"
+					if hasInfo {
+						if pInfo.ItemType == "biosample" {
+							icon = lucide.Snowflake()
+						}
+						switch pInfo.Status {
+						case "expired":
+							bgCol = tok.DangerBg
+							fgCol = tok.DangerText
+							bdCol = tok.Danger.Alpha(0.45)
+							tip = "已过期 · "
+						case "near_expiry", "exhausted":
+							bgCol = tok.WarningBg
+							fgCol = tok.WarningText
+							bdCol = tok.Warning.Alpha(0.45)
+							tip = "临期/余量不足 · "
+						default:
+							tip = ""
+						}
+						if pInfo.Location != "" {
+							tip += pInfo.Location + " · 点击定位储藏室"
+						} else {
+							tip += "点击定位储藏室"
+						}
+					}
+					chipLabel := "@" + rawLabel
+					chipW := estimateChipWidth(chipLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					codeCapture := rawCode
+					repls = append(repls, editor.Replacement{
+						Start:       lineStart + m[0],
+						End:         lineStart + m[1],
+						Width:       chipW,
+						Interactive: true,
+						Label:       chipLabel,
+						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+							e.Row().AlignItems(ui.Center).Children(func() {
+								pill := ui.ButtonBase(c).
+									Padding(0, float32(tok.Spacing8)*0.75).
+									Radius(float32(tok.ControlRadius)).
+									Background(bgCol).Border(1, bdCol).
+									KeepFocus().Label(chipLabel)
+								pill.Children(func() {
+									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Icon(c, icon).Size(float32(tok.TextMeta), float32(tok.TextMeta)).TextColor(fgCol)
+										ui.Text(c, rawLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(fgCol).SingleLine()
+									})
+								})
+								components.Tooltip(c, pill, tip)
+								if pill.Clicked() && onLocatePantry != nil {
+									onLocatePantry(codeCapture)
+								}
+							})
+						},
+					})
+				} else if strings.HasPrefix(href, "#") {
+					objID := strings.TrimSpace(strings.TrimPrefix(href, "#"))
+					chipLabel := "@" + rawLabel
+					chipW := estimateChipWidth(chipLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					repls = append(repls, editor.Replacement{
+						Start:       lineStart + m[0],
+						End:         lineStart + m[1],
+						Width:       chipW,
+						Interactive: true,
+						Label:       chipLabel,
+						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+							e.Row().AlignItems(ui.Center).Children(func() {
+								pill := ui.ButtonBase(c).
+									Padding(0, float32(tok.Spacing8)*0.75).
+									Radius(float32(tok.ControlRadius)).
+									Background(tok.AccentSoftBg.Alpha(0.55)).
+									Border(1, tok.Accent.Alpha(0.28)).
+									KeepFocus().Label(chipLabel)
+								pill.Children(func() {
+									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Icon(c, lucide.Link2()).Size(float32(tok.TextMeta), float32(tok.TextMeta)).TextColor(tok.Accent)
+										ui.Text(c, rawLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+									})
+								})
+								if pill.Clicked() && onClickTarget != nil && objID != "" {
+									onClickTarget(objID, "")
+								}
+							})
+						},
+					})
+				}
 			}
+			// Obsidian-style inline LaTeX (`$...$`) on non-active lines (skipping code spans & currency like $10)
 			var mathSpans [][]int
 			for _, m := range reMDInlineMath.FindAllStringSubmatchIndex(lineText, -1) {
 				if inCodeSpan(m[0]) || inCodeSpan(m[1]-1) {
@@ -1202,7 +1385,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			st.ShowCompletions(slashStart, buildSlashItems())
 			return true
 		}
-		if atStart, wrapped, ok := findRelationAtTrigger(full, off); ok && v.Doc != nil {
+		if atStart, wrapped, ok := findRelationAtTrigger(full, off); ok {
 			items := v.buildRelationTargetCompletions(wrapped)
 			if len(items) > 0 {
 				st.ShowCompletions(atStart, items)
@@ -1285,8 +1468,23 @@ func (v *View) renderLiveMarkdownSegmentFull(
 	if v.Doc != nil {
 		docHash = FastSourceHash("", v.Doc.Source)
 	}
+	for _, pm := range v.PantryCompletionItems {
+		docHash = FastSourceHash(pm.ID+"|"+pm.Status+"|"+pm.Location+"|"+pm.LabelCode, "") ^ (docHash * 1315423911)
+	}
 	if ver != entry.lastVersion || activeLine != entry.lastActiveLn || focused != entry.lastFocused || dark != entry.lastDark || readOnly != entry.lastReadOnly || docHash != entry.lastDocHash || entry.docOffset != entry.lastDocOffset {
-		styles, repls, diags := ComputeLivePreviewDecorations(
+		pantryByKey := map[string]PantryMentionItem{}
+		for _, pm := range v.PantryCompletionItems {
+			if pm.LabelCode != "" {
+				pantryByKey[pm.LabelCode] = pm
+			}
+			if pm.ID != "" {
+				pantryByKey[pm.ID] = pm
+			}
+			if pm.Name != "" {
+				pantryByKey[pm.Name] = pm
+			}
+		}
+		styles, repls, diags := computeLivePreviewDecorationsFull(
 			curBuf,
 			activeLine,
 			focused,
@@ -1295,6 +1493,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.Doc,
 			entry.docOffset,
 			allowCheckToggle,
+			pantryByKey,
 			func(start, end int, checked bool) {
 				raw := st.Buffer.String()
 				if start < 0 || end > len(raw) || start >= end {
@@ -1321,6 +1520,8 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			func(objID, sub string) {
 				v.focusRelationTarget(objID, sub)
 			},
+			v.OnLocatePantryCode,
+			v.OnOpenVaultLink,
 		)
 		st.SetLineStyles(styles)
 		entry.baseRepls = repls
@@ -1599,6 +1800,26 @@ func completionIconForItem(it editor.Completion) *ui.SVG {
 	if strings.HasPrefix(slash, "/step") {
 		return lucide.Layers()
 	}
+	if strings.HasPrefix(it.Detail, "样本") {
+		return lucide.Snowflake()
+	}
+	if strings.HasPrefix(it.Detail, "试剂") {
+		return lucide.FlaskConical()
+	}
+	switch it.Detail {
+	case "孔板":
+		return lucide.Grid2x2()
+	case "计算器":
+		return lucide.Calculator()
+	case "参数表":
+		return lucide.SlidersHorizontal()
+	case "分组", "分组表", "实验分组":
+		return lucide.Table2()
+	case "步骤", "步骤引用":
+		return lucide.Layers()
+	case "实验文档", "实验库文件":
+		return lucide.FileText()
+	}
 	if strings.HasPrefix(it.Label, "@") {
 		return lucide.Link2()
 	}
@@ -1606,7 +1827,7 @@ func completionIconForItem(it editor.Completion) *ui.SVG {
 }
 
 // renderStyledCompletionMenu renders a clean TopInspo / Notion / Linear-inspired command
-// dropdown for `/`, `{@`, and `[[` completions.
+// dropdown for `/`, `@`, `{@`, and `[[` completions.
 // UI-18: For `/` component commands, uses a crisp 2-column visual picker (compact list on left,
 // live GPU vector wireframe mini-preview on right — zero verbose text walls!).
 func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *editor.CompletionMenu) {
@@ -1624,8 +1845,8 @@ func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *ed
 	isSlashMenu := strings.HasPrefix(strings.TrimSpace(items[0].Detail), "/")
 	headerTitle := "插入科研组件"
 	if strings.HasPrefix(items[0].Label, "@") {
-		headerTitle = "关联实验对象"
-	} else if items[0].Detail == "实验库文件" {
+		headerTitle = "引用试剂、组件或文档"
+	} else if items[0].Detail == "实验库文件" || items[0].Detail == "实验文档" {
 		headerTitle = "引用实验库文件"
 	}
 
@@ -1815,117 +2036,274 @@ func renderSlashVisualPreview(c *ui.Context, tok theme.Tokens, it editor.Complet
 }
 
 func (v *View) focusRelationTarget(objectID, subTarget string) {
-	if objectID == "" {
+	if objectID == "" || v.Doc == nil {
 		return
 	}
-	if v.Doc != nil {
-		if p, _ := v.findPlate(objectID); p != nil && subTarget != "" {
+	if p, _ := v.findPlate(objectID); p != nil {
+		if subTarget != "" {
 			v.SetPlateSelection(p.ID, []string{strings.ToUpper(subTarget)})
+		}
+		v.ScrollToModuleID = p.ID
+		return
+	}
+	flat, _ := flattenModules(v.Doc.Modules)
+	for _, m := range flat {
+		if m.ID == objectID {
+			if m.Kind == "step" {
+				v.ScrollToStepID = m.ID
+			} else {
+				v.ScrollToModuleID = m.ID
+			}
 			return
 		}
-		for _, m := range v.Doc.Modules {
-			if m.Kind == "step" && m.ID == objectID {
-				v.ScrollToStepID = m.ID
+		if m.Kind == "group_table" {
+			for _, g := range v.Doc.GroupList() {
+				if g.ID == objectID {
+					v.ScrollToModuleID = m.ID
+					return
+				}
+			}
+		}
+	}
+	if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
+		for _, sn := range stTree.Flat {
+			if sn.ID == objectID {
+				v.ScrollToStepID = sn.ID
 				return
 			}
 		}
 	}
 }
 
+func sanitizeInlineMentionLabel(s string) string {
+	s = strings.TrimSpace(s)
+	repl := strings.NewReplacer("[", "(", "]", ")", "\r", " ", "\n", " ")
+	return strings.TrimSpace(repl.Replace(s))
+}
+
 func (v *View) buildRelationTargetCompletions(alreadyInBraces bool) []editor.Completion {
-	if v.Doc == nil {
-		return nil
-	}
-	wrap := func(raw string) string {
-		if alreadyInBraces {
-			return raw
+	if alreadyInBraces {
+		if v.Doc == nil {
+			return nil
 		}
-		return "{" + raw + "}"
-	}
-	var out []editor.Completion
-	flat, _ := flattenModules(v.Doc.Modules)
-	for _, m := range flat {
-		switch m.Kind {
-		case "plate":
-			title := firstNonEmpty(textValue(m.Data, "title"), m.ID)
-			out = append(out, editor.Completion{
-				Label:      "@" + title,
-				Detail:     "孔板",
-				Kind:       editor.CompletionModule,
-				Insert:     wrap("@" + m.ID),
-				FilterText: "@" + m.ID + " " + title + " 孔板",
-			})
-			var p *Plate
-			if m.Plate != nil {
-				p = m.Plate
-			} else if parsed, err := plateFromData(m.Data); err == nil {
-				cp := parsed
-				p = &cp
-			}
-			if p != nil {
-				lblMap := PlateGroupLabelMap(v.Doc)
-				for well, gid := range p.WellGroups() {
-					gLbl := firstNonEmpty(lblMap[gid], gid)
-					out = append(out, editor.Completion{
-						Label:      fmt.Sprintf("@%s · %s", title, well),
-						Detail:     gLbl,
-						Kind:       editor.CompletionField,
-						Insert:     wrap("@" + m.ID + ":" + well),
-						FilterText: "@" + m.ID + ":" + well + " " + title + " " + well + " " + gLbl,
-					})
+		var out []editor.Completion
+		flat, _ := flattenModules(v.Doc.Modules)
+		for _, m := range flat {
+			switch m.Kind {
+			case "plate":
+				title := firstNonEmpty(textValue(m.Data, "title"), m.ID)
+				out = append(out, editor.Completion{
+					Label:      "@" + title,
+					Detail:     "孔板",
+					Kind:       editor.CompletionModule,
+					Insert:     "@" + m.ID,
+					FilterText: "@" + m.ID + " " + title + " 孔板",
+				})
+				var p *Plate
+				if m.Plate != nil {
+					p = m.Plate
+				} else if parsed, err := plateFromData(m.Data); err == nil {
+					cp := parsed
+					p = &cp
 				}
+				if p != nil {
+					lblMap := PlateGroupLabelMap(v.Doc)
+					for well, gid := range p.WellGroups() {
+						gLbl := firstNonEmpty(lblMap[gid], gid)
+						out = append(out, editor.Completion{
+							Label:      fmt.Sprintf("@%s · %s", title, well),
+							Detail:     gLbl,
+							Kind:       editor.CompletionField,
+							Insert:     "@" + m.ID + ":" + well,
+							FilterText: "@" + m.ID + ":" + well + " " + title + " " + well + " " + gLbl,
+						})
+					}
+				}
+			case "calculator":
+				title := firstNonEmpty(textValue(m.Data, "title"), "计算器")
+				out = append(out, editor.Completion{
+					Label:      "@" + title,
+					Detail:     "计算器",
+					Kind:       editor.CompletionFunction,
+					Insert:     "@" + m.ID,
+					FilterText: "@" + m.ID + " " + title + " 计算器",
+				})
+			case "step":
+				title := firstNonEmpty(textValue(m.Data, "title"), m.ID)
+				out = append(out, editor.Completion{
+					Label:      "@步骤 · " + title,
+					Detail:     "步骤",
+					Kind:       editor.CompletionFunction,
+					Insert:     "@" + m.ID,
+					FilterText: "@" + m.ID + " " + title + " 步骤",
+				})
 			}
-		case "calculator":
-			title := firstNonEmpty(textValue(m.Data, "title"), "计算器")
+		}
+		for _, g := range v.Doc.GroupList() {
+			name := firstNonEmpty(g.Name, g.ID)
 			out = append(out, editor.Completion{
-				Label:      "@" + title,
-				Detail:     "计算器",
-				Kind:       editor.CompletionFunction,
-				Insert:     wrap("@" + m.ID),
-				FilterText: "@" + m.ID + " " + title + " 计算器",
-			})
-		case "step":
-			title := firstNonEmpty(textValue(m.Data, "title"), m.ID)
-			out = append(out, editor.Completion{
-				Label:      "@步骤 · " + title,
-				Detail:     "步骤",
-				Kind:       editor.CompletionFunction,
-				Insert:     wrap("@" + m.ID),
-				FilterText: "@" + m.ID + " " + title + " 步骤",
+				Label:      "@" + name,
+				Detail:     "实验分组",
+				Kind:       editor.CompletionVariable,
+				Insert:     "@" + g.ID,
+				FilterText: "@" + g.ID + " " + name + " 分组",
 			})
 		}
+		if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
+			for _, sn := range stTree.Flat {
+				if sn.SourceKind != "heading" {
+					continue
+				}
+				out = append(out, editor.Completion{
+					Label:      fmt.Sprintf("@步骤 %s · %s", sn.Number, sn.Title),
+					Detail:     "步骤引用",
+					Kind:       editor.CompletionFunction,
+					Insert:     "@" + sn.ID,
+					FilterText: "@" + sn.ID + " " + sn.Title + " " + sn.Number + " 步骤",
+				})
+			}
+		}
+		return out
 	}
-	for _, g := range v.Doc.GroupList() {
-		name := firstNonEmpty(g.Name, g.ID)
+
+	// Option A: Lightweight standalone `@` entity mention popup (reagents -> doc objects -> vault docs)
+	var out []editor.Completion
+	seenPantry := map[string]bool{}
+	for _, pm := range v.PantryCompletionItems {
+		name := sanitizeInlineMentionLabel(pm.Name)
+		code := firstNonEmpty(pm.LabelCode, pm.ID, name)
+		if name == "" || code == "" || seenPantry[code] {
+			continue
+		}
+		seenPantry[code] = true
+		tag := "试剂"
+		kind := editor.CompletionConstant
+		if pm.ItemType == "biosample" {
+			tag = "样本"
+			kind = editor.CompletionType
+		}
+		switch pm.Status {
+		case "expired":
+			tag += " · 已过期"
+		case "near_expiry":
+			tag += " · 临期"
+		case "exhausted":
+			tag += " · 已耗尽"
+		}
 		out = append(out, editor.Completion{
 			Label:      "@" + name,
-			Detail:     "实验分组",
-			Kind:       editor.CompletionVariable,
-			Insert:     wrap("@" + g.ID),
-			FilterText: "@" + g.ID + " " + name + " 分组",
+			Detail:     tag,
+			Kind:       kind,
+			Insert:     fmt.Sprintf("[@%s](asterlab://pantry?code=%s)", name, url.QueryEscape(code)),
+			FilterText: "@" + name + " " + pm.LabelCode + " " + pm.Location + " " + tag,
 		})
 	}
-	if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
-		for _, sn := range stTree.Flat {
-			if sn.SourceKind != "heading" {
+
+	if v.Doc != nil {
+		flat, _ := flattenModules(v.Doc.Modules)
+		for _, m := range flat {
+			var detail string
+			var kind editor.CompletionKind
+			var fallbackTitle string
+			switch m.Kind {
+			case "plate":
+				detail, kind, fallbackTitle = "孔板", editor.CompletionModule, "孔板"
+			case "calculator":
+				detail, kind, fallbackTitle = "计算器", editor.CompletionFunction, "计算器"
+			case "param_table":
+				detail, kind, fallbackTitle = "参数表", editor.CompletionField, "参数表"
+			case "group_table":
+				detail, kind, fallbackTitle = "分组表", editor.CompletionField, "实验分组"
+			case "data_table":
+				detail, kind, fallbackTitle = "数据表", editor.CompletionField, "数据记录表"
+			default:
+				continue
+			}
+			title := sanitizeInlineMentionLabel(firstNonEmpty(textValue(m.Data, "title"), fallbackTitle, m.ID))
+			out = append(out, editor.Completion{
+				Label:      "@" + title,
+				Detail:     detail,
+				Kind:       kind,
+				Insert:     fmt.Sprintf("[@%s](#%s)", title, m.ID),
+				FilterText: "@" + title + " " + m.ID + " " + detail,
+			})
+		}
+		for _, g := range v.Doc.GroupList() {
+			name := sanitizeInlineMentionLabel(firstNonEmpty(g.Name, g.ID))
+			if name == "" {
 				continue
 			}
 			out = append(out, editor.Completion{
-				Label:      fmt.Sprintf("@步骤 %s · %s", sn.Number, sn.Title),
-				Detail:     "步骤引用",
-				Kind:       editor.CompletionFunction,
-				Insert:     wrap("@" + sn.ID),
-				FilterText: "@" + sn.ID + " " + sn.Title + " " + sn.Number + " 步骤",
+				Label:      "@" + name,
+				Detail:     "分组",
+				Kind:       editor.CompletionVariable,
+				Insert:     fmt.Sprintf("[@%s](#%s)", name, g.ID),
+				FilterText: "@" + name + " " + g.ID + " 实验分组",
 			})
 		}
+		if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
+			for _, sn := range stTree.Flat {
+				title := sanitizeInlineMentionLabel(firstNonEmpty(sn.Title, sn.ID))
+				if title == "" {
+					continue
+				}
+				lbl := fmt.Sprintf("步骤 %s · %s", sn.Number, title)
+				if sn.Number == "" {
+					lbl = "步骤 · " + title
+				}
+				out = append(out, editor.Completion{
+					Label:      "@" + lbl,
+					Detail:     "步骤",
+					Kind:       editor.CompletionFunction,
+					Insert:     fmt.Sprintf("[@%s](#%s)", lbl, sn.ID),
+					FilterText: "@" + lbl + " " + sn.ID + " " + title + " 步骤",
+				})
+			}
+		}
+	}
+
+	for _, tgt := range v.VaultCompletionTargets {
+		tgt = strings.TrimSpace(tgt)
+		if tgt == "" {
+			continue
+		}
+		base := strings.TrimSuffix(filepath.Base(tgt), filepath.Ext(tgt))
+		insert := "[[" + tgt + "|" + base + "]]"
+		if strings.TrimSuffix(tgt, filepath.Ext(tgt)) == base {
+			insert = "[[" + tgt + "]]"
+		}
+		out = append(out, editor.Completion{
+			Label:      "@" + base,
+			Detail:     "实验文档",
+			Kind:       editor.CompletionSnippet,
+			Insert:     insert,
+			FilterText: "@" + base + " " + tgt + " 实验文档",
+		})
 	}
 	return out
 }
 
+func isAtTriggerBoundaryRune(r rune) bool {
+	if unicode.IsSpace(r) || unicode.Is(unicode.Han, r) {
+		return true
+	}
+	switch r {
+	case '(', '[', '{', ',', ':', ';', '，', '、', '：', '；', '（', '【', '「':
+		return true
+	}
+	return false
+}
+
 func findRelationAtTrigger(text string, cursor int) (atPos int, alreadyInBraces bool, ok bool) {
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(text) {
+		cursor = len(text)
+	}
 	lineStart := strings.LastIndexByte(text[:cursor], '\n') + 1
 	before := text[lineStart:cursor]
-	// Case 1: Inside `{@ ...` (backward compatible)
+	// Case 1: Inside `{@ ...` (backward compatible for attach/plate relations)
 	openBrace := strings.LastIndexByte(before, '{')
 	closeBrace := strings.LastIndexByte(before, '}')
 	if openBrace >= 0 && closeBrace <= openBrace {
@@ -1937,20 +2315,20 @@ func findRelationAtTrigger(text string, cursor int) (atPos int, alreadyInBraces 
 			}
 		}
 	}
-	// Case 2: Zero-brace standalone `@` (preceded by start-of-line or whitespace, NEVER `#@` or email!)
+	// Case 2: Zero-brace standalone `@` (start of line, punctuation, whitespace, or CJK character; NEVER `#@` or email!)
 	atIdx := strings.LastIndexByte(before, '@')
 	if atIdx < 0 {
 		return 0, false, false
 	}
 	if atIdx > 0 {
-		prev := before[atIdx-1]
-		if prev != ' ' && prev != '\t' && prev != '(' && prev != '[' && !strings.HasSuffix(before[:atIdx], "（") {
+		prevRune, _ := utf8.DecodeLastRuneInString(before[:atIdx])
+		if !isAtTriggerBoundaryRune(prevRune) {
 			return 0, false, false
 		}
 	}
 	absAt := lineStart + atIdx
 	tail := text[absAt+1 : cursor]
-	if strings.ContainsAny(tail, " \t}\n") {
+	if strings.ContainsAny(tail, " \t}\n])") {
 		return 0, false, false
 	}
 	return absAt, false, true

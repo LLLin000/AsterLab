@@ -788,6 +788,10 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 
 				blockRow := ui.Row(c.Key("blk-row-"+bid)).FillWidth().AlignItems(ui.Start).
 					Gap(float32(tok.Spacing4)).Transition(theme.AccordionTransition())
+				if v.ScrollToModuleID != "" && v.ScrollToModuleID == bid {
+					blockRow.ScrollIntoView()
+					v.ScrollToModuleID = ""
+				}
 				rowHovered := blockRow.Hovered()
 				blockRow.Children(func() {
 					if editable {
