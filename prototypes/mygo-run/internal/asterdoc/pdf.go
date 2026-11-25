@@ -11,10 +11,32 @@ import (
 )
 
 var chineseFontCandidates = []string{
+	// Windows
 	"C:/Windows/Fonts/simhei.ttf",
+	"C:/Windows/Fonts/Deng.ttf",
 	"C:/Windows/Fonts/simsunb.ttf",
 	"C:/Windows/Fonts/NotoSansSC-VF.ttf",
+	"C:/Windows/Fonts/NotoSansSC-Regular.ttf",
+	// macOS
+	"/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+	"/Library/Fonts/Arial Unicode.ttf",
+	"/Library/Fonts/NotoSansSC-Regular.ttf",
+	"/Library/Fonts/NotoSansCJKsc-Regular.otf",
+	"/System/Library/Fonts/PingFang.ttc",
+	"/System/Library/Fonts/STHeiti Light.ttc",
+	"/System/Library/Fonts/STHeiti Medium.ttc",
+	// Linux
+	"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+	"/usr/share/fonts/google-noto-cjk/NotoSansCJKsc-Regular.otf",
+	"/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
 	"/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+	"/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+	"/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttf",
+	// Android
+	"/system/fonts/NotoSansCJK-Regular.ttc",
+	"/system/fonts/NotoSansSC-Regular.ttf",
+	"/system/fonts/DroidSansFallback.ttf",
 }
 
 // ExportPDF writes a deterministic, multi-page PDF from a frozen document's
@@ -32,12 +54,13 @@ func ExportPDFWithRun(w io.Writer, title, revision, sourceHash, runID string, pr
 	pdf.SetModificationDate(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
 	pdf.SetMargins(16, 16, 16)
 	pdf.SetAutoPageBreak(true, 16)
+	pdf.AliasNbPages("{nb}")
 	font := "Helvetica"
 	needsCJK := containsCJK(title, revision, sourceHash, runID, previews)
 	if needsCJK {
 		for _, path := range chineseFontCandidates {
 			data, err := os.ReadFile(path)
-			if err != nil {
+			if err != nil || !probeFontLoadsCleanly(data) {
 				continue
 			}
 			pdf.AddUTF8FontFromBytes("AsterCJK", "", data)
@@ -60,7 +83,7 @@ func ExportPDFWithRun(w io.Writer, title, revision, sourceHash, runID string, pr
 	pdf.SetFooterFunc(func() {
 		pdf.SetY(-12)
 		pdf.SetFont(font, "", 8)
-		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d", pdf.PageNo()), "", 0, "C", false, 0, "")
+		pdf.CellFormat(0, 8, fmt.Sprintf("Page %d / {nb}", pdf.PageNo()), "", 0, "C", false, 0, "")
 	})
 	pdf.AddPage()
 	pdf.SetFont(font, "", 18)
@@ -98,12 +121,13 @@ func ExportFrozenPDFWithRunRecords(w io.Writer, title string, frozen FrozenAster
 		return fmt.Errorf("frozen document parse failed: %w", err)
 	}
 	return ExportDocumentPDF(w, doc, DocumentPDFOptions{
-		Title:      title,
-		Revision:   fmt.Sprint(frozen.Revision),
-		SourceHash: frozen.SourceHash,
-		RunID:      runID,
-		Plan:       plan,
-		RunRecords: runRecords,
+		Title:            title,
+		Revision:         fmt.Sprint(frozen.Revision),
+		SourceHash:       frozen.SourceHash,
+		RunID:            runID,
+		Plan:             plan,
+		RunRecords:       runRecords,
+		IncludeFootnotes: true,
 	})
 }
 
