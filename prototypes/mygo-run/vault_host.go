@@ -576,9 +576,7 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
 					})
 					tSel.Popup(func(p ui.Element) {
-						if len(templates) > 8 {
-							tSel.SearchField(&a.newExpTplQuery).Label("筛选模板").Placeholder("搜索模板…")
-						}
+						tSel.SearchField(&a.newExpTplQuery).Label("筛选模板").Placeholder("搜索模板…")
 						q := strings.ToLower(strings.TrimSpace(a.newExpTplQuery))
 						ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.8).Children(func() {
 							ui.Column(c).FillWidth().Gap(2).Children(func() {
