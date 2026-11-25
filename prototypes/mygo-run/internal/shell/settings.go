@@ -369,6 +369,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						}
 					})
 					if sel.Trigger.Changed() {
+						mygo.Haptics.Selection()
 						s.notifySettingsChanged()
 					}
 				},
@@ -395,6 +396,58 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						s.MobileDockForceNav = false
 						s.notifySettingsChanged()
 					}
+				},
+			},
+			components.SettingsItem{
+				ID:          "mobile-toolbar-customize",
+				Title:       "自定义移动端编辑工具栏",
+				Description: "调整键盘上方工具栏按钮的显示与排列顺序",
+				Keywords:    []string{"toolbar", "customize", "order", "visible", "工具栏", "排序", "显隐", "移动端"},
+				Stacked:     true,
+				Build: func(c *ui.Context) {
+					specs := s.MobileToolbarOrderedSpecs()
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							components.Text(c, fmt.Sprintf("共 %d 项操作，可开关显隐并上下排序", len(specs))).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+							if components.Button(c, "恢复默认工具栏", components.ButtonGhost).Clicked() {
+								mygo.Haptics.Selection()
+								s.ResetMobileToolbarConfig()
+							}
+						})
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+							for idx, spec := range specs {
+								idx := idx
+								spec := spec
+								vis := s.IsMobileToolbarActionVisible(spec.ID)
+								ui.Row(c.Key("mb-tb-cfg-"+spec.ID)).FillWidth().AlignItems(ui.Center).
+									Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+									Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+									Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Icon(c, spec.Icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
+									components.Text(c, spec.Label).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+										SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+									components.Badge(c, spec.Group, components.BadgeOptions{Tone: components.BadgeNeutral})
+									upBtn := components.IconButton(c.Key("mb-tb-up-"+spec.ID), lucide.ChevronUp(), "上移 "+spec.Label, components.IconButtonCompact).
+										Disabled(idx == 0)
+									if upBtn.Clicked() {
+										mygo.Haptics.Selection()
+										s.MoveMobileToolbarAction(spec.ID, -1)
+									}
+									dnBtn := components.IconButton(c.Key("mb-tb-dn-"+spec.ID), lucide.ChevronDown(), "下移 "+spec.Label, components.IconButtonCompact).
+										Disabled(idx == len(specs)-1)
+									if dnBtn.Clicked() {
+										mygo.Haptics.Selection()
+										s.MoveMobileToolbarAction(spec.ID, 1)
+									}
+									if components.Switch(c.Key("mb-tb-vis-"+spec.ID), &vis, "显示 "+spec.Label, components.SwitchOptions{HideLabel: true}).Changed() {
+										mygo.Haptics.Selection()
+										s.SetMobileToolbarActionVisible(spec.ID, vis)
+									}
+								})
+							}
+						})
+					})
 				},
 			},
 		)

@@ -8,8 +8,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"gopkg.in/yaml.v3"
@@ -205,6 +207,10 @@ func (v *View) renderNLHoverOverlay(
 	if st == nil || st.sug == nil {
 		return
 	}
+	if v.MobileCompact {
+		v.mobileNLSheetOpen = true
+		return
+	}
 	phase := float32(0.42)
 	if !theme.ReducedMotionEnabled() {
 		elapsed := c.Now().Sub(st.openedAt).Seconds()
@@ -314,15 +320,25 @@ func (v *View) renderNLSuggestionPopoverMulti(
 	}
 	st.sug = sugs[st.activeIdx]
 
-	ui.Column(c).Width(float32(tok.Spacing48)*8.2).Gap(float32(tok.Spacing8)).Children(func() {
+	col := ui.Column(c).Gap(float32(tok.Spacing8))
+	if v.MobileCompact {
+		col.FillWidth()
+	} else {
+		col.Width(float32(tok.Spacing48) * 8.2)
+	}
+	col.Children(func() {
 		if len(sugs) > 1 {
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 				inlineBadge(c, fmt.Sprintf("检测到 %d 个并行动作", len(sugs)), components.BadgeOptions{Tone: components.BadgeAccent})
 				for i, item := range sugs {
 					i, item := i, item
 					isSel := i == st.activeIdx
+					tabH := float32(tok.Spacing24) - 2
+					if v.MobileCompact {
+						tabH = float32(tok.Spacing32) + float32(tok.Spacing4)
+					}
 					tab := ui.ButtonBase(c.Key(fmt.Sprintf("nl-mtab:%d", i))).
-						Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
+						Height(tabH).Padding(0, float32(tok.Spacing8)).
 						AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label(fmt.Sprintf("切换第 %d 个动作：%s", i+1, item.KindLabel))
 					fg := tok.TextMuted
 					if isSel {
@@ -496,9 +512,13 @@ func (v *View) renderNLSuggestionPopoverInner(
 		}
 
 		// 4. Action Footer: [✨ 下方插入组件] + optional [全部插入 (N)] + [替换原句]
+		actionBtnH := float32(tok.Spacing24) + float32(tok.Spacing4)
+		if v.MobileCompact {
+			actionBtnH = float32(tok.Spacing48)
+		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing4)*0.5, 0, 0, 0).Children(func() {
 			if len(allSugs) > 1 {
-				insAllBtn := ui.ButtonBase(c.Key("nl-ins-all")).Grow(1).Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
+				insAllBtn := ui.ButtonBase(c.Key("nl-ins-all")).Grow(1).Height(actionBtnH).
 					Center().Radius(float32(tok.ControlRadius)).Background(tok.Accent).Label(fmt.Sprintf("全部插入 (%d 个组件)", len(allSugs)))
 				if insAllBtn.Hovered() {
 					insAllBtn.Background(tok.Accent.Alpha(0.88))
@@ -516,6 +536,9 @@ func (v *View) renderNLSuggestionPopoverInner(
 					}
 					if next, err := ApplyNLSuggestionToSource(v.Doc.Source, globalLineStart, globalLineEnd, false, allMods); err == nil {
 						v.OnChange(next)
+						if v.MobileCompact {
+							mygo.Haptics.Success()
+						}
 					}
 					if onDismiss != nil {
 						onDismiss()
@@ -523,7 +546,7 @@ func (v *View) renderNLSuggestionPopoverInner(
 				}
 			}
 
-			insBtn := ui.ButtonBase(c.Key("nl-ins-below")).Grow(1).Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
+			insBtn := ui.ButtonBase(c.Key("nl-ins-below")).Grow(1).Height(actionBtnH).
 				Center().Radius(float32(tok.ControlRadius)).Label("下方插入组件")
 			if len(allSugs) > 1 {
 				insBtn.Background(tok.Surface).Border(1, tok.Border)
@@ -541,20 +564,27 @@ func (v *View) renderNLSuggestionPopoverInner(
 				insBtn.Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 						ui.Icon(c, lucide.Plus()).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).TextColor(tok.AccentText)
-						ui.Text(c, "下方插入组件").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.AccentText).SingleLine()
+						insLabel := "下方插入组件"
+						if v.MobileCompact {
+							insLabel = "一键插入组件"
+						}
+						ui.Text(c, insLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.AccentText).SingleLine()
 					})
 				})
 			}
 			if insBtn.Clicked() && v.Doc != nil && v.OnChange != nil {
 				if next, err := ApplyNLSuggestionToSource(v.Doc.Source, globalLineStart, globalLineEnd, false, sug.Modules); err == nil {
 					v.OnChange(next)
+					if v.MobileCompact {
+						mygo.Haptics.Success()
+					}
 				}
 				if onDismiss != nil {
 					onDismiss()
 				}
 			}
 
-			repBtn := ui.ButtonBase(c.Key("nl-replace-line")).Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
+			repBtn := ui.ButtonBase(c.Key("nl-replace-line")).Height(actionBtnH).
 				Padding(0, float32(tok.Spacing12)).Center().Radius(float32(tok.ControlRadius)).
 				Background(tok.Surface).Border(1, tok.Border).Label("替换原句")
 			if repBtn.Hovered() {
@@ -566,6 +596,9 @@ func (v *View) renderNLSuggestionPopoverInner(
 			if repBtn.Clicked() && v.Doc != nil && v.OnChange != nil {
 				if next, err := ApplyNLSuggestionToSource(v.Doc.Source, globalLineStart, globalLineEnd, true, sug.Modules); err == nil {
 					v.OnChange(next)
+					if v.MobileCompact {
+						mygo.Haptics.Success()
+					}
 				}
 				if onDismiss != nil {
 					onDismiss()
@@ -794,5 +827,188 @@ func shortNLChipLabel(sug *NLSuggestion) (*ui.SVG, string) {
 		return lucide.SlidersHorizontal(), "参数"
 	default:
 		return lucide.Sparkles(), "组件"
+	}
+}
+
+func lineBoundsInString(bufStr string, off int) (lineIdx, lnStart, lnEnd int) {
+	off = min(max(0, off), len(bufStr))
+	lnStart = strings.LastIndexByte(bufStr[:off], '\n') + 1
+	lnEnd = len(bufStr)
+	if nl := strings.IndexByte(bufStr[off:], '\n'); nl >= 0 {
+		lnEnd = off + nl
+	}
+	lineIdx = strings.Count(bufStr[:lnStart], "\n")
+	return lineIdx, lnStart, lnEnd
+}
+
+// OpenMobileNLSheetForLine analyzes the sentence containing byte offset off inside
+// editorKey and opens the touch-friendly bottom Sheet preview when suggestions exist.
+func (v *View) OpenMobileNLSheetForLine(editorKey string, bufStr string, off int) bool {
+	if v == nil || v.ReadOnly || v.LabMode || v.Doc == nil {
+		return false
+	}
+	lineIdx, lnStart, lnEnd := lineBoundsInString(bufStr, off)
+	lineText := bufStr[lnStart:lnEnd]
+	docOffset := 0
+	if editorKey != "" && v.liveEditors != nil {
+		if ent := v.liveEditors[editorKey]; ent != nil {
+			docOffset = ent.docOffset
+		}
+	}
+	globalStart := docOffset + lnStart
+	globalEnd := docOffset + lnEnd
+	sugs := AnalyzeLabSentenceWithContext(v.Doc, lineText, globalStart, nil)
+	if len(sugs) == 0 {
+		return false
+	}
+	v.nlHover = &nlHoverState{
+		editorKey:   editorKey,
+		lineIdx:     lineIdx,
+		lineStart:   lnStart,
+		lineEnd:     lnEnd,
+		globalStart: globalStart,
+		globalEnd:   globalEnd,
+		lineText:    lineText,
+		sug:         sugs[0],
+		sugs:        sugs,
+		activeIdx:   0,
+		openedAt:    time.Now(),
+		byShortcut:  true,
+	}
+	v.mobileNLSheetOpen = true
+	if v.MobileCompact {
+		mygo.Haptics.Selection()
+	}
+	return true
+}
+
+// OpenMobileNLSheet opens the NL structuring preview bottom Sheet for the active
+// cursor line (or the first convertible sentence in the document when no editor is focused).
+func (v *View) OpenMobileNLSheet() bool {
+	if v == nil || v.ReadOnly || v.LabMode || v.Doc == nil {
+		return false
+	}
+	if key := v.activeWritableLiveKey(); key != "" {
+		if ent := v.liveEditors[key]; ent != nil && ent.state != nil && ent.state.Buffer != nil {
+			bufStr := strings.ReplaceAll(ent.state.Buffer.String(), "\r\n", "\n")
+			if v.OpenMobileNLSheetForLine(key, bufStr, ent.state.Cursor()) {
+				return true
+			}
+		}
+	}
+	// Fallback: scan document prose segments for a convertible line
+	src := v.Doc.Source
+	segs := SplitDocumentSegments(src, v.Doc)
+	for _, seg := range segs {
+		if seg.Kind != SegmentProse {
+			continue
+		}
+		off := seg.Start
+		for _, rawLine := range strings.SplitAfter(seg.Text, "\n") {
+			trimmed := strings.TrimSpace(strings.TrimRight(rawLine, "\r\n"))
+			if len([]rune(trimmed)) >= 6 {
+				if sugs := AnalyzeLabSentenceWithContext(v.Doc, trimmed, off, nil); len(sugs) > 0 {
+					lineEnd := off + len(strings.TrimRight(rawLine, "\r\n"))
+					v.nlHover = &nlHoverState{
+						editorKey:   "",
+						lineIdx:     0,
+						lineStart:   0,
+						lineEnd:     len(trimmed),
+						globalStart: off,
+						globalEnd:   lineEnd,
+						lineText:    trimmed,
+						sug:         sugs[0],
+						sugs:        sugs,
+						activeIdx:   0,
+						openedAt:    time.Now(),
+						byShortcut:  true,
+					}
+					v.mobileNLSheetOpen = true
+					if v.MobileCompact {
+						mygo.Haptics.Selection()
+					}
+					return true
+				}
+			}
+			off += len(rawLine)
+		}
+	}
+	return false
+}
+
+// HasActiveNLSuggestion reports whether the focused line currently has an NL-to-module suggestion.
+func (v *View) HasActiveNLSuggestion() bool {
+	if v == nil || v.ReadOnly || v.LabMode || v.Doc == nil {
+		return false
+	}
+	if key := v.activeWritableLiveKey(); key != "" {
+		if ent := v.liveEditors[key]; ent != nil && ent.state != nil && ent.state.Buffer != nil {
+			bufStr := strings.ReplaceAll(ent.state.Buffer.String(), "\r\n", "\n")
+			_, lnStart, lnEnd := lineBoundsInString(bufStr, ent.state.Cursor())
+			lnTxt := strings.TrimSpace(bufStr[lnStart:lnEnd])
+			if len([]rune(lnTxt)) >= 6 {
+				sugs := AnalyzeLabSentenceWithContext(v.Doc, lnTxt, ent.docOffset+lnStart, nil)
+				return len(sugs) > 0
+			}
+		}
+	}
+	return v.nlHover != nil && v.nlHover.sug != nil
+}
+
+func (v *View) renderMobileNLSheetOverlay(c *ui.Context, tok theme.Tokens) {
+	if v == nil {
+		return
+	}
+	if !v.MobileCompact {
+		v.mobileNLSheetOpen = false
+		return
+	}
+	if v.mobileNLSheetOpen && (v.nlHover == nil || v.nlHover.sug == nil) {
+		v.mobileNLSheetOpen = false
+	}
+	wasOpen := v.mobileNLSheetOpen
+	mobile.Sheet(c, &v.mobileNLSheetOpen, mobile.SheetOptions{
+		Detents:    []float32{0.58, 0.90},
+		Background: &tok.Surface,
+		Label:      "智能转结构预览",
+	}, func() {
+		if v.nlHover == nil || v.nlHover.sug == nil {
+			return
+		}
+		st := v.nlHover
+		dismiss := func() {
+			v.AltHoverPreviewQuery = ""
+			v.mobileNLSheetOpen = false
+			v.nlHover = nil
+		}
+		ui.Column(c.Key("nl-mobile-sheet-body")).FillWidth().FillHeight().
+			Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing16), float32(tok.Spacing16)).
+			Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.Sparkles()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+				ui.Text(c, "智能转结构预览").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				clsBtn := ui.ButtonBase(c.Key("nl-ms-close")).Size(float32(tok.Spacing48), float32(tok.Spacing48)).
+					Radius(float32(tok.ControlRadius)).Center().Label("关闭转结构预览")
+				clsBtn.Children(func() {
+					ui.Icon(c, lucide.X()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
+				})
+				if clsBtn.Clicked() {
+					dismiss()
+				}
+			})
+			if strings.TrimSpace(st.lineText) != "" {
+				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.7)).Children(func() {
+					ui.Text(c, strings.TrimSpace(st.lineText)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				})
+			}
+			ui.Scroll(c.Key("nl-ms-scroll")).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				v.renderNLSuggestionPopoverMulti(c, tok, st, dismiss)
+			})
+		})
+	})
+	if wasOpen && !v.mobileNLSheetOpen {
+		v.AltHoverPreviewQuery = ""
+		v.nlHover = nil
 	}
 }

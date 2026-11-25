@@ -261,6 +261,9 @@ type app struct {
 	newExpNudgeSeq   int
 	lastVaultSig     string
 	lastPantrySig    string
+
+	mobileState      mobileLifecycleState
+	mobileMemWarnOff func()
 }
 
 func (a *app) nextOp() string {
@@ -5462,6 +5465,7 @@ func main() {
 			}
 		})
 	})
+	a.installMobileLifecycle()
 	mygo.App.WhenReady(func() {
 		if pngIcon := theme.AppIconPNG(); len(pngIcon) > 0 {
 			_ = mygo.App.Dock.SetIcon(pngIcon)
@@ -5476,6 +5480,7 @@ func main() {
 			}
 		}
 		a.windowReady = true
+		a.applyRestoredMobileState()
 		a.wireUpdaterCallbacks()
 		a.wireFeedbackAndWelcome(rollbackNotice)
 		if startupAsterml != "" {
@@ -5828,6 +5833,7 @@ func (a *app) renderExperimentMissingRunPrompt(c *ui.Context, tab shell.Workspac
 }
 
 func contentPage(c *ui.Context, a *app) {
+	a.syncMobileLifecycleState()
 	a.pollPDFExport(c)
 	a.pollTimers()
 	ui.Column(c).Fill().Children(func() {

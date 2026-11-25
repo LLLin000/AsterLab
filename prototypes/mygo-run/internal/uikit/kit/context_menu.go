@@ -1,18 +1,30 @@
 package kit
 
 import (
+	"runtime"
+	"strings"
+
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
 )
 
+const (
+	mobileContextBreakpoint = float32(680)
+	mobileSheetMinRowHeight = float32(48)
+)
+
 type menuState struct {
 	open            bool
+	asSheet         bool
 	below           bool
 	dx, dy          float32
 	focus, keyboard bool
 	pointer         [2]float32
+	lastItems       int
 }
 
 type menuRow struct {
@@ -20,12 +32,13 @@ type menuRow struct {
 	enabled bool
 }
 
-// Menu builds items inside a ContextMenu panel.
+// Menu builds items inside a ContextMenu panel or mobile bottom sheet.
 type Menu struct {
 	c       *ui.Context
 	st      *menuState
 	tok     theme.Tokens
 	moved   bool
+	asSheet bool
 	pending *MenuItem
 	divide  bool
 	shown   bool
@@ -41,9 +54,19 @@ type MenuItem struct {
 	built, chosen   bool
 }
 
-// ContextMenu attaches a right-click / keyboard context menu to target using
-// a cursor-positioned 1x1 IgnoreInput anchor rather than target itself, so left-clicks
-// anywhere inside the same card/row (outside the menu bounds) dismiss it cleanly.
+func isMobileContextViewport(c *ui.Context) bool {
+	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	w, _ := c.Size()
+	return w > 0 && w < mobileContextBreakpoint
+}
+
+// ContextMenu attaches a right-click / keyboard context menu on desktop (via PopoverBase)
+// and a touch-native LongPressed() + haptic bottom Sheet (>=48dp rows) when viewport < 680dp or on mobile OS.
 func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 	if c == nil || build == nil {
 		return
@@ -52,20 +75,35 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 	if st == nil {
 		return
 	}
+	mobileOS := runtime.GOOS == "android" || runtime.GOOS == "ios"
+	mobileViewport := isMobileContextViewport(c)
+
 	asked := false
 	target.ContextMenu(func(*ui.Menu) { asked = true })
 	if asked {
-		if x, y, over := target.PointerPosition(); over {
-			*st = menuState{open: true, dx: x, dy: y, focus: true}
+		if mobileOS {
+			mygo.Haptics.Medium()
+			*st = menuState{open: true, asSheet: true, focus: true, lastItems: st.lastItems}
+		} else if x, y, over := target.PointerPosition(); over {
+			*st = menuState{open: true, asSheet: false, dx: x, dy: y, focus: true, lastItems: st.lastItems}
 		} else {
-			*st = menuState{open: true, below: true, focus: true, keyboard: true}
+			*st = menuState{open: true, asSheet: false, below: true, focus: true, keyboard: true, lastItems: st.lastItems}
 		}
 	}
-	if !st.open {
+	if mobileViewport && target.LongPressed() {
+		mygo.Haptics.Medium()
+		*st = menuState{open: true, asSheet: true, focus: true, lastItems: st.lastItems}
+	}
+
+	if target.IsDisabled() && st.open {
+		st.open = false
+	}
+
+	if st.asSheet {
+		renderMobileContextSheet(c, st, build)
 		return
 	}
-	if target.IsDisabled() {
-		st.open = false
+	if !st.open {
 		return
 	}
 
@@ -94,6 +132,7 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 			build(m)
 			m.flush()
 		})
+		st.lastItems = len(m.items)
 		switch {
 		case !st.open:
 		case panel.Shortcut(0, ui.KeyDown):
@@ -110,6 +149,65 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 			panel.Focus()
 		}
 		st.focus = false
+	})
+}
+
+func renderMobileContextSheet(c *ui.Context, st *menuState, build func(m *Menu)) {
+	tok := theme.GetTokens(c.Theme())
+	rowH := float32(tok.Spacing48)
+	if rowH < mobileSheetMinRowHeight {
+		rowH = mobileSheetMinRowHeight
+	}
+	_, winH := c.Size()
+	if winH <= 0 {
+		winH = 800
+	}
+	estCount := st.lastItems
+	if estCount <= 0 {
+		estCount = 5
+	}
+	needH := float32(estCount)*rowH + rowH + float32(tok.Spacing32) + float32(tok.Spacing24)
+	detent := needH / winH
+	if detent < 0.34 {
+		detent = 0.34
+	}
+	if detent > 0.88 {
+		detent = 0.88
+	}
+	detents := []float32{detent}
+	if detent < 0.82 {
+		detents = append(detents, 0.88)
+	}
+	bg := tok.Surface
+
+	mobile.Sheet(c, &st.open, mobile.SheetOptions{
+		Detents:    detents,
+		Background: &bg,
+		Label:      "操作菜单",
+	}, func() {
+		ui.Column(c).Fill().Padding(float32(tok.Spacing4), float32(tok.Spacing16), float32(tok.Spacing12), float32(tok.Spacing16)).
+			Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				m := &Menu{c: c, st: st, tok: tok, asSheet: true}
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+					build(m)
+					m.flush()
+				})
+				st.lastItems = len(m.items)
+			})
+			cancelBtn := ui.ButtonBase(c.Key("kit-sheet-cancel")).FillWidth().MinHeight(rowH).
+				Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Center().Label("取消")
+			if cancelBtn.Pressed() {
+				cancelBtn.Background(tok.GhostActive)
+			}
+			cancelBtn.Children(func() {
+				ui.Text(c, "取消").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Accent)
+			})
+			if st.open && cancelBtn.Clicked() {
+				mygo.Haptics.Selection()
+				st.open = false
+			}
+		})
 	})
 }
 
@@ -176,6 +274,52 @@ func (m *Menu) flush() {
 	m.dividing()
 	m.shown = true
 	c, tok := m.c, m.tok
+	if m.asSheet {
+		rowH := float32(tok.Spacing48)
+		if rowH < mobileSheetMinRowHeight {
+			rowH = mobileSheetMinRowHeight
+		}
+		b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).
+			FillWidth().MinWidth(0).MinHeight(rowH).
+			Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+			Radius(float32(tok.ControlRadius)).
+			Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).
+			TextColor(tok.Text)
+		if it.check {
+			b.Role(ui.RoleMenuItemCheckBox).Checked(it.checked)
+		} else {
+			b.Role(ui.RoleMenuItem)
+		}
+		m.items = append(m.items, menuRow{e: b, enabled: !it.disabled})
+
+		bg := tok.Canvas
+		fg := tok.Text
+		if it.disabled {
+			fg = tok.TextDisabled
+		} else if strings.Contains(it.label, "删除") || strings.Contains(it.label, "移入回收站") {
+			fg = tok.DangerText
+		}
+		if b.Pressed() && !it.disabled {
+			bg = tok.GhostActive
+		}
+		b.Background(bg).TextColor(fg)
+		b.Children(func() {
+			if it.check {
+				mark := ui.Box(c).Size(float32(tok.Spacing16), float32(tok.Spacing16)).Center().Shrink(0)
+				if it.checked {
+					mark.Children(func() {
+						ui.Icon(c, lucide.Check()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					})
+				}
+			}
+			ui.Text(c, it.label).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").FontSize(float32(tok.TextBody))
+		})
+		if m.st.open && !it.disabled && b.Clicked() {
+			mygo.Haptics.Selection()
+			it.chosen, m.st.open = true, false
+		}
+		return
+	}
 	b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).FillWidth().MinWidth(0).
 		Padding(float32(tok.Spacing4)+2, float32(tok.Spacing8)).
 		Radius(float32(tok.ControlRadius)).

@@ -1,0 +1,58 @@
+{
+  "name": "AsterLab",
+  "slug": "asterlab",
+  "identifier": "party.asterlab.app",
+  "version": "0.1.0",
+  "copyright": "© 2026 AsterLab",
+  "icon": "assets/mobile/icon-1024.png",
+  "main": ".",
+  "out": "dist",
+  "urlSchemes": [
+    "asterlab"
+  ],
+  "fileAssociations": [
+    {
+      "ext": [
+        "asterml"
+      ],
+      "name": "AsterLab Experiment Document",
+      "mimeType": "application/x-asterml",
+      "role": "Editor"
+    }
+  ],
+  "android": {
+    "minSdk": 26,
+    "permissions": [
+      "CAMERA",
+      "VIBRATE",
+      "INTERNET"
+    ],
+    "adaptiveIcon": {
+      "foreground": "assets/mobile/android-adaptive-foreground.png",
+      "background": "#0c0b0a"
+    },
+    "splash": "#0c0b0a"
+  },
+  "ios": {
+    "minimumSystemVersion": "17.0",
+    "distribution": "app-store",
+    "orientations": [
+      "portrait",
+      "landscape"
+    ],
+    "launchScreen": {
+      "background": "#0c0b0a",
+      "image": "assets/mobile/ios-launch-logo.png"
+    },
+    "infoPlist": {
+      "NSCameraUsageDescription": "Capture experiment plates, gels, microscopy views, and benchtop observations directly into your lab notebook.",
+      "NSPhotoLibraryUsageDescription": "Import existing microscopy images, gel photos, and benchtop attachments into your lab notebook.",
+      "UIFileSharingEnabled": true,
+      "LSSupportsOpeningDocumentsInPlace": true,
+      "NSAppTransportSecurity": {
+        "NSAllowsLocalNetworking": true
+      },
+      "ITSAppUsesNonExemptEncryption": false
+    }
+  }
+}

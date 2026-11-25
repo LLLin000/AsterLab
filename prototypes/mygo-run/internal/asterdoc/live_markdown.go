@@ -11,8 +11,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -67,6 +69,8 @@ type liveEditorEntry struct {
 	sparkLineIdx         int
 	sparkHasSug          bool
 	sparkSug             *NLSuggestion
+	stepID               string
+	onCommit             func(nextText string) (ownedSource string)
 }
 
 var (
@@ -1250,6 +1254,8 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		v.liveEditors[key] = entry
 	}
 	entry.docOffset = docOffset
+	entry.stepID = stepID
+	entry.onCommit = onCommit
 	st := entry.state
 	st.Label = a11yLabel
 	if isTail && !readOnly {
@@ -1515,13 +1521,23 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			return false
 		}
 		off = min(max(0, off), len(full))
-		if slashStart, _, isSlash := ShouldTriggerSlashAt(full, off); isSlash && len(v.SlashItems) > 0 {
+		if slashStart, q, isSlash := ShouldTriggerSlashAt(full, off); isSlash && len(v.SlashItems) > 0 {
+			if v.MobileCompact {
+				st.ShowCompletions(-1, nil)
+				v.openMobilePickerAt(key, "slash", slashStart, off, false, q)
+				return true
+			}
 			st.ShowCompletions(slashStart, buildSlashItems())
 			return true
 		}
 		if atStart, wrapped, ok := findRelationAtTrigger(full, off); ok {
 			items := v.buildRelationTargetCompletions(wrapped)
 			if len(items) > 0 {
+				if v.MobileCompact {
+					st.ShowCompletions(-1, nil)
+					v.openMobilePickerAt(key, "mention", atStart, off, wrapped, full[atStart+1:off])
+					return true
+				}
 				st.ShowCompletions(atStart, items)
 				return true
 			}
@@ -1633,7 +1649,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 				return v.pillHoveredFNID == id || v.railHoveredFNID == id || v.editingFootnoteID == id || v.openFootnotePopoverID == id
 			},
 			isPopOpen: func(id string) bool {
-				return !v.ShowRightSidenotes && v.openFootnotePopoverID == id
+				return !v.MobileCompact && !v.ShowRightSidenotes && v.openFootnotePopoverID == id
 			},
 			setPopOpen: func(id string, open bool) {
 				if !open && v.openFootnotePopoverID == id {
@@ -1647,6 +1663,11 @@ func (v *View) renderLiveMarkdownSegmentFull(
 				}
 			},
 			onClickFN: func(id string) {
+				if v.MobileCompact {
+					v.OpenMobileFootnoteSheet(id)
+					mygo.Haptics.Light()
+					return
+				}
 				if v.ShowRightSidenotes {
 					if v.footnoteCollapsed != nil {
 						v.footnoteCollapsed[id] = false
@@ -1787,7 +1808,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		}
 
 		// Instant zero-delay real Alt+Hover tracking (rock-solid while Alt is held OR while pointer is on card/line)
-		if !readOnly && v.AltHoverPreviewQuery == "" {
+		if !v.MobileCompact && !readOnly && v.AltHoverPreviewQuery == "" {
 			_, py, insideEd := edEl.PointerPosition()
 			hitLine := -1
 			if insideEd {
@@ -1871,26 +1892,45 @@ func (v *View) renderLiveMarkdownSegmentFull(
 					if lineH < float32(tok.TextBody)*1.3 {
 						lineH = float32(tok.TextBody) * 1.56
 					}
-					chipIcon, chipLbl := shortNLChipLabel(entry.sparkSug)
-					btnH := float32(tok.Spacing24) - 2
-					sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
-						Absolute().Top(lineTop + (lineH-btnH)/2).Right(2).
-						Height(btnH).Padding(0, float32(tok.Spacing8)).Center().
-						Radius(float32(tok.ControlRadius)).
-						Background(tok.AccentSoftBg.Alpha(0.72)).Border(1, tok.Accent.Alpha(0.28)).
-						Label("转为" + chipLbl + "组件")
-					if sparkBtn.Hovered() {
-						sparkBtn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
-					}
-					sparkBtn.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Icon(c, chipIcon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-							ui.Text(c, chipLbl).FontSize(float32(tok.TextMeta)-1).Bold().TextColor(tok.Accent).SingleLine()
+					if v.MobileCompact {
+						btnH := float32(tok.Spacing32)
+						sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark-mb:%s:%d", key, activeLine))).
+							Absolute().Top(lineTop + (lineH-btnH)/2).Right(2).
+							Height(btnH).Padding(0, float32(tok.Spacing12)).Center().
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.45)).
+							Label("✨ 转结构")
+						sparkBtn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, lucide.Sparkles()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+								ui.Text(c, "转结构").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+							})
 						})
-					})
-					components.Tooltip(c, sparkBtn, "转为交互组件（点击或 Alt+Enter）")
-					if sparkBtn.Clicked() {
-						activateNLHoverForLine(curBuf, lnStart, true)
+						if sparkBtn.Clicked() {
+							v.OpenMobileNLSheetForLine(key, curBuf, lnStart)
+						}
+					} else {
+						chipIcon, chipLbl := shortNLChipLabel(entry.sparkSug)
+						btnH := float32(tok.Spacing24) - 2
+						sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
+							Absolute().Top(lineTop + (lineH-btnH)/2).Right(2).
+							Height(btnH).Padding(0, float32(tok.Spacing8)).Center().
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.AccentSoftBg.Alpha(0.72)).Border(1, tok.Accent.Alpha(0.28)).
+							Label("转为" + chipLbl + "组件")
+						if sparkBtn.Hovered() {
+							sparkBtn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
+						}
+						sparkBtn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, chipIcon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+								ui.Text(c, chipLbl).FontSize(float32(tok.TextMeta)-1).Bold().TextColor(tok.Accent).SingleLine()
+							})
+						})
+						components.Tooltip(c, sparkBtn, "转为交互组件（点击或 Alt+Enter）")
+						if sparkBtn.Clicked() {
+							activateNLHoverForLine(curBuf, lnStart, true)
+						}
 					}
 				}
 			}
@@ -1957,25 +1997,30 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			edEl.Focus()
 			v.lastFocusedLiveKey = key
 			if v.pendingInjectSlash && len(v.SlashItems) > 0 {
-				full := st.Buffer.String()
-				cursor := min(max(0, st.Cursor()), len(full))
-				// Ensure `/` lands on a clean line start so ShouldTriggerSlashAt is guaranteed true
-				lineStart := strings.LastIndexByte(full[:cursor], '\n') + 1
-				injectStr := "/"
-				slashStart := cursor
-				if strings.TrimSpace(full[lineStart:cursor]) != "" {
-					injectStr = "\n/"
-					slashStart = cursor + 1
+				if v.MobileCompact {
+					cursor := min(max(0, st.Cursor()), len(st.Buffer.String()))
+					v.openMobilePickerAt(key, "slash", cursor, cursor, false, "")
+				} else {
+					full := st.Buffer.String()
+					cursor := min(max(0, st.Cursor()), len(full))
+					// Ensure `/` lands on a clean line start so ShouldTriggerSlashAt is guaranteed true
+					lineStart := strings.LastIndexByte(full[:cursor], '\n') + 1
+					injectStr := "/"
+					slashStart := cursor
+					if strings.TrimSpace(full[lineStart:cursor]) != "" {
+						injectStr = "\n/"
+						slashStart = cursor + 1
+					}
+					st.Buffer.Edit(editor.Edit{Start: cursor, End: cursor, Text: injectStr})
+					nextCursor := cursor + len(injectStr)
+					st.Select(nextCursor, nextCursor)
+					entry.toolbarSlashStart = cursor
+					entry.toolbarSlashLen = len(injectStr)
+					entry.toolbarSlashActive = true
+					entry.syncedText = st.Buffer.String()
+					entry.lastCompletionVer = st.Buffer.Version()
+					st.ShowCompletions(slashStart, buildSlashItems())
 				}
-				st.Buffer.Edit(editor.Edit{Start: cursor, End: cursor, Text: injectStr})
-				nextCursor := cursor + len(injectStr)
-				st.Select(nextCursor, nextCursor)
-				entry.toolbarSlashStart = cursor
-				entry.toolbarSlashLen = len(injectStr)
-				entry.toolbarSlashActive = true
-				entry.syncedText = st.Buffer.String()
-				entry.lastCompletionVer = st.Buffer.Version()
-				st.ShowCompletions(slashStart, buildSlashItems())
 			}
 			v.pendingFocusLiveKey = ""
 			v.pendingInjectSlash = false
@@ -2086,8 +2131,13 @@ func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *ed
 	}
 
 	panelW := float32(tok.Spacing48) * 6.8
-	if isSlashMenu {
+	if isSlashMenu && !v.MobileCompact {
 		panelW = float32(tok.Spacing48) * 9.2
+	}
+	if v.MobileCompact {
+		if winW, _ := c.Size(); winW > 32 && panelW > winW-24 {
+			panelW = winW - 24
+		}
 	}
 	panel.Background(tok.Surface).
 		Border(1, borderCol).
@@ -2118,6 +2168,9 @@ func (v *View) renderStyledCompletionMenu(c *ui.Context, panel ui.Element, m *ed
 							Gap(float32(tok.Spacing8)).
 							Padding(float32(tok.Spacing4)*1.25, float32(tok.Spacing8)).
 							Radius(float32(tok.ControlRadius))
+						if v.MobileCompact {
+							row.MinHeight(float32(tok.Spacing48))
+						}
 						if sel {
 							row.Background(tok.AccentSoftBg)
 						} else if row.Hovered() {
@@ -2669,4 +2722,262 @@ func (v *View) renderRelationHoverContent(c *ui.Context, tok theme.Tokens, rr Re
 			ui.Text(c, "备注: "+rr.Note).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		}
 	})
+}
+
+// OpenMobilePickerSheet opens the full-width bottom Sheet picker for "slash" (/) or "mention" (@).
+func (v *View) OpenMobilePickerSheet(mode string) {
+	if v == nil || v.ReadOnly || v.LabMode {
+		return
+	}
+	if mode != "mention" {
+		mode = "slash"
+	}
+	targetKey, ent := v.targetWritableLiveEntry()
+	off := 0
+	if ent != nil && ent.state != nil && ent.state.Buffer != nil {
+		off = min(max(0, ent.state.Cursor()), len(ent.state.Buffer.String()))
+	}
+	v.openMobilePickerAt(targetKey, mode, off, off, false, "")
+}
+
+func (v *View) openMobilePickerAt(targetKey, mode string, replaceStart, replaceEnd int, inBraces bool, query string) {
+	if mode != "mention" {
+		mode = "slash"
+	}
+	v.mobilePickerMode = mode
+	v.mobilePickerTargetKey = targetKey
+	v.mobilePickerReplaceStart = replaceStart
+	v.mobilePickerReplaceEnd = replaceEnd
+	v.mobilePickerInBraces = inBraces
+	v.mobilePickerQuery = query
+	v.mobilePickerOpen = true
+	if v.MobileCompact {
+		mygo.Haptics.Selection()
+	}
+}
+
+func (v *View) renderMobilePickerSheet(c *ui.Context, tok theme.Tokens) {
+	if v == nil {
+		return
+	}
+	if !v.MobileCompact {
+		v.mobilePickerOpen = false
+		return
+	}
+	isMention := v.mobilePickerMode == "mention"
+	title := "插入科学组件 (/)"
+	searchPh := "搜索组件、步骤、表格或 / 命令…"
+	if isMention {
+		title = "引用试剂、组件或文档 (@)"
+		searchPh = "搜索试剂、样本、孔板、步骤或文档…"
+	}
+
+	mobile.Sheet(c, &v.mobilePickerOpen, mobile.SheetOptions{
+		Detents:    []float32{0.62, 0.92},
+		Background: &tok.Surface,
+		Label:      title,
+	}, func() {
+		q := strings.ToLower(strings.TrimSpace(v.mobilePickerQuery))
+		ui.Column(c.Key("mb-picker-sheet:" + v.mobilePickerMode)).FillWidth().FillHeight().
+			Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing16), float32(tok.Spacing16)).
+			Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ico := lucide.Plus()
+				if isMention {
+					ico = lucide.AtSign()
+				}
+				ui.Icon(c, ico).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+				ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				clsBtn := ui.ButtonBase(c.Key("mb-pk-close")).Size(float32(tok.Spacing48), float32(tok.Spacing48)).
+					Radius(float32(tok.ControlRadius)).Center().Label("关闭选择器")
+				clsBtn.Children(func() {
+					ui.Icon(c, lucide.X()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
+				})
+				if clsBtn.Clicked() {
+					v.mobilePickerOpen = false
+				}
+			})
+
+			ui.Box(c).FillWidth().Children(func() {
+				components.TextBox(c, &v.mobilePickerQuery, components.TextBoxOptions{
+					LeadingIcon: lucide.Search(),
+				}).FillWidth().MinHeight(float32(tok.Spacing48)).Placeholder(searchPh).Keyboard(ui.KeyboardSearch)
+			})
+
+			ui.Scroll(c.Key("mb-pk-scroll")).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+					if !isMention {
+						shown := 0
+						for idx, si := range v.SlashItems {
+							if q != "" {
+								hay := strings.ToLower(si.Label + " " + si.Slash + " " + si.Detail + " " + si.SearchTerms)
+								if !strings.Contains(hay, q) {
+									continue
+								}
+							}
+							shown++
+							si := si
+							comp := editor.Completion{Label: si.Label, Detail: si.Slash}
+							row := ui.ButtonBase(c.Key(fmt.Sprintf("mb-pk-slash:%d:%s", idx, si.CommandID))).
+								FillWidth().MinHeight(float32(tok.Spacing48)).
+								Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+								Radius(float32(tok.ControlRadius)).
+								Background(tok.Elevated).Border(1, tok.Border.Alpha(0.65)).
+								Label(si.Label)
+							if row.Pressed() {
+								row.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.45))
+							}
+							row.Children(func() {
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+									ui.Row(c).Size(float32(tok.Spacing32), float32(tok.Spacing32)).Center().
+										Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).Shrink(0).Children(func() {
+										ui.Icon(c, completionIconForItem(comp)).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+									})
+									ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+										ui.Text(c, si.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+										if si.Detail != "" {
+											ui.Text(c, si.Detail).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+										}
+									})
+									if si.Slash != "" {
+										ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
+											Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Shrink(0).Children(func() {
+											ui.Text(c, si.Slash).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+										})
+									}
+								})
+							})
+							if row.Clicked() {
+								mygo.Haptics.Selection()
+								v.applyMobileSlashSelection(si)
+								v.mobilePickerOpen = false
+							}
+						}
+						if shown == 0 {
+							ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).Center().Children(func() {
+								ui.Text(c, "未找到匹配的组件命令").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							})
+						}
+						return
+					}
+
+					items := v.buildRelationTargetCompletions(v.mobilePickerInBraces)
+					shown := 0
+					for idx, it := range items {
+						if q != "" {
+							hay := strings.ToLower(it.Label + " " + it.Detail + " " + it.FilterText)
+							if !strings.Contains(hay, q) {
+								continue
+							}
+						}
+						shown++
+						it := it
+						row := ui.ButtonBase(c.Key(fmt.Sprintf("mb-pk-at:%d:%s", idx, it.Insert))).
+							FillWidth().MinHeight(float32(tok.Spacing48)).
+							Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.Elevated).Border(1, tok.Border.Alpha(0.65)).
+							Label(it.Label)
+						if row.Pressed() {
+							row.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.45))
+						}
+						row.Children(func() {
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+								ui.Row(c).Size(float32(tok.Spacing32), float32(tok.Spacing32)).Center().
+									Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).Shrink(0).Children(func() {
+									ui.Icon(c, completionIconForItem(it)).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+								})
+								ui.Text(c, it.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+								if it.Detail != "" {
+									ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Shrink(0).Children(func() {
+										ui.Text(c, it.Detail).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+									})
+								}
+							})
+						})
+						if row.Clicked() {
+							mygo.Haptics.Selection()
+							v.applyMobileMentionSelection(it)
+							v.mobilePickerOpen = false
+						}
+					}
+					if shown == 0 {
+						ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).Center().Children(func() {
+							ui.Text(c, "未找到匹配的试剂、组件或文档").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						})
+					}
+				})
+			})
+		})
+	})
+}
+
+func (v *View) applyMobileSlashSelection(si SlashCommandItem) {
+	if v == nil {
+		return
+	}
+	insertAt := -1
+	stepID := ""
+	if v.liveEditors != nil {
+		if ent := v.liveEditors[v.mobilePickerTargetKey]; ent != nil && ent.state != nil && ent.state.Buffer != nil && !ent.state.ReadOnly {
+			stepID = ent.stepID
+			bufStr := ent.state.Buffer.String()
+			s := min(max(0, v.mobilePickerReplaceStart), len(bufStr))
+			e := min(max(s, v.mobilePickerReplaceEnd), len(bufStr))
+			if e > s {
+				ent.state.Buffer.Edit(editor.Edit{Start: s, End: e, Text: ""})
+				ent.state.Select(s, s)
+				v.commitLiveEditorEntry(v.mobilePickerTargetKey, ent)
+			}
+			insertAt = ent.docOffset + s
+		}
+	}
+	if v.OnExecuteSlash != nil {
+		v.OnExecuteSlash(si, stepID, insertAt)
+		return
+	}
+	if v.Doc != nil && v.OnChange != nil && si.Kind != "" {
+		blk := DefaultStarterBlockWithPrefs(v.Doc, stepID, si.Kind, v.DefaultPlateFormat, v.DefaultExcessPct)
+		if nextSrc, _, err := InsertTopLevelModuleInSource(v.Doc.Source, insertAt, blk); err == nil {
+			v.OnChange(nextSrc)
+		}
+	}
+}
+
+func (v *View) applyMobileMentionSelection(it editor.Completion) {
+	if v == nil || it.Insert == "" {
+		return
+	}
+	if v.liveEditors != nil {
+		targetKey := v.mobilePickerTargetKey
+		ent := v.liveEditors[targetKey]
+		if ent == nil {
+			targetKey, ent = v.targetWritableLiveEntry()
+		}
+		if ent != nil && ent.state != nil && ent.state.Buffer != nil && !ent.state.ReadOnly {
+			bufStr := ent.state.Buffer.String()
+			s := min(max(0, v.mobilePickerReplaceStart), len(bufStr))
+			e := min(max(s, v.mobilePickerReplaceEnd), len(bufStr))
+			if targetKey != v.mobilePickerTargetKey {
+				s = min(max(0, ent.state.Cursor()), len(bufStr))
+				e = s
+			}
+			ent.state.Buffer.Edit(editor.Edit{Start: s, End: e, Text: it.Insert})
+			nextCur := s + len(it.Insert)
+			ent.state.Select(nextCur, nextCur)
+			v.commitLiveEditorEntry(targetKey, ent)
+			return
+		}
+	}
+	if v.Doc != nil && v.OnChange != nil {
+		src := v.Doc.Source
+		insPos := len(src)
+		if fnDoc := ParseFootnotes(src); fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < insPos {
+			insPos = fnDoc.TrailingDefStart
+		}
+		if nextSrc, err := ReplaceByteRange(src, insPos, insPos, it.Insert); err == nil {
+			v.OnChange(nextSrc)
+		}
+	}
 }
