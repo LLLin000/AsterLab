@@ -41,6 +41,46 @@ func HasFootnotes(source string) bool {
 	return doc != nil && len(doc.Entries) > 0
 }
 
+// FindFootnoteRefAtOffset returns the footnote ID when byte offset lies inside an
+// inline `[^id]` reference outside code spans/fences and definition blocks.
+func FindFootnoteRefAtOffset(source string, offset int) (string, bool) {
+	if source == "" || !strings.Contains(source, "[^") {
+		return "", false
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(source) {
+		offset = len(source)
+	}
+	doc := ParseFootnotes(source)
+	inDef := func(pos int) bool {
+		if doc == nil {
+			return false
+		}
+		for _, e := range doc.Entries {
+			if e.DefStart >= 0 && pos >= e.DefStart && pos <= e.DefEnd {
+				return true
+			}
+		}
+		return false
+	}
+	masked := maskCodeRegions(source)
+	for _, m := range reFootnoteRefInline.FindAllStringSubmatchIndex(masked, -1) {
+		s, e := m[0], m[1]
+		if inDef(s) || (e < len(source) && source[e] == ':') {
+			continue
+		}
+		if offset >= s && offset <= e {
+			id := strings.TrimSpace(source[m[2]:m[3]])
+			if id != "" {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
 type rawFootnoteDef struct {
 	id       string
 	body     string

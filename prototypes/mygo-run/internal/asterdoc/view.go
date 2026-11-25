@@ -7,8 +7,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -196,6 +199,24 @@ type View struct {
 	openFootnotePopoverID string
 	footnoteDrafts        map[string]*string
 	footnoteFocusPending  string
+
+	// Mobile-native bottom sheets, touch swipe ergonomics, and active-context tracking.
+	mobileFootnoteSheetOpen  bool
+	mobileFootnoteSheetID    string
+	mobilePickerOpen         bool
+	mobilePickerMode         string // "slash" | "mention"
+	mobilePickerQuery        string
+	mobilePickerTargetKey    string
+	mobilePickerReplaceStart int
+	mobilePickerReplaceEnd   int
+	mobilePickerInBraces     bool
+	mobileNLSheetOpen        bool
+	activeModuleID           string
+	activeStepID             string
+	activeBlockID            string
+	swipeStates              map[string]*mobile.SwipeState
+	swipeFlashTimers         map[string]time.Time
+	OnMobileOpenTimer        func()
 }
 
 var (
@@ -264,6 +285,8 @@ func (v *View) Render(c *ui.Context) {
 	}
 	protocol.RenderMarkdownWith(c, v.Doc.Source, v.codeBlock)
 	v.plateOverlay(c)
+	tok := theme.GetTokens(c.Theme())
+	v.renderMobileSheets(c, tok)
 }
 
 func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
@@ -588,6 +611,9 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				modHover := modRow.Hovered()
 				modRow.Children(func() {
 					modWrap := ui.Column(c.Key("top-mod:" + m.ID)).FillWidth().Gap(float32(tok.Spacing4))
+					if modWrap.Hovered() || modWrap.Pressed() {
+						v.activeModuleID = m.ID
+					}
 					if v.ScrollToModuleID != "" && v.ScrollToModuleID == m.ID {
 						modWrap.ScrollIntoView()
 						v.ScrollToModuleID = ""
@@ -681,6 +707,30 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 					scopeCol.Children(func() {
 						// 1. Step header line (at current container's x-axis)
 						renderSingleSegment(vs, i == len(visualSegs)-1)
+						if v.stepCollapsed == nil {
+							v.stepCollapsed = map[string]bool{}
+						}
+						if v.stepCollapsed[sn.ID] {
+							if j > i+1 {
+								expandBtn := ui.ButtonBase(c.Key("step-fold-expand:"+sn.ID)).
+									MinHeight(float32(tok.Spacing32)).
+									Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+									Radius(float32(tok.ControlRadius)).
+									Background(tok.Elevated).Border(1, tok.Border).
+									AlignItems(ui.Center).
+									Label("展开折叠步骤 " + sn.Title)
+								expandBtn.Children(func() {
+									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+										ui.Text(c, "步骤已折叠 · 点击展开").FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).SingleLine()
+									})
+								})
+								if expandBtn.Clicked() {
+									v.stepCollapsed[sn.ID] = false
+								}
+							}
+							return
+						}
 						// 2. Step body inside ONE continuous vertical guide rail + clean indent!
 						if j > i+1 {
 							railColor := tok.BorderStrong.Alpha(0.60)
@@ -876,6 +926,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 		v.railHoveredFNID = ""
 		buildDocCol()
 	}
+	v.renderMobileSheets(c, tok)
 }
 
 func (v *View) ensureFootnoteDraft(id, body string) *string {
@@ -917,6 +968,10 @@ func (v *View) deleteFootnoteByID(id string) {
 	}
 	if v.openFootnotePopoverID == id {
 		v.openFootnotePopoverID = ""
+	}
+	if v.mobileFootnoteSheetID == id {
+		v.mobileFootnoteSheetID = ""
+		v.mobileFootnoteSheetOpen = false
 	}
 	if nextSrc != v.Doc.Source {
 		v.OnChange(nextSrc)
@@ -2571,10 +2626,14 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 					ui.Checkbox(c, bools[input.Name], "")
 				case "int", "integer", "number", "decimal":
 					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-						ui.DecimalInput(c, draft[input.Name], "", "", "1")
+						kb := ui.KeyboardDecimal
+						if input.Type == "int" || input.Type == "integer" {
+							kb = ui.KeyboardNumber
+						}
+						ui.DecimalInput(c, draft[input.Name], "", "", "1").Keyboard(kb)
 					})
 				case "quantity":
-					ui.DecimalInput(c, draft[input.Name], "", "", "1").Label(input.Name)
+					ui.DecimalInput(c, draft[input.Name], "", "", "1").Label(input.Name).Keyboard(ui.KeyboardDecimal)
 					ui.Box(c).Width(96).Children(func() {
 						ui.TextInput(c, draft[input.Name+"__unit"]).Label(input.Name + " unit").FillWidth()
 					})
@@ -3153,4 +3212,735 @@ func expandSegmentsForStepContainers(source string, segs []DocSegment, stepTree 
 	}
 	return out
 }
+
+// OpenMobileFootnoteSheet opens the keyboard-safe half-height bottom Sheet footnote editor.
+func (v *View) OpenMobileFootnoteSheet(id string) {
+	if v == nil || id == "" {
+		return
+	}
+	if v.footnoteDrafts != nil {
+		delete(v.footnoteDrafts, id)
+	}
+	v.mobileFootnoteSheetID = id
+	v.mobileFootnoteSheetOpen = true
+	v.openFootnotePopoverID = ""
+	if !v.ReadOnly {
+		v.editingFootnoteID = id
+		v.footnoteFocusPending = id
+	}
+}
+
+// CloseMobileFootnoteSheet commits any pending edit (when commit is true) and closes the sheet.
+func (v *View) CloseMobileFootnoteSheet(commit bool) {
+	if v == nil {
+		return
+	}
+	id := v.mobileFootnoteSheetID
+	if commit && id != "" && !v.ReadOnly && v.footnoteDrafts != nil {
+		if d, ok := v.footnoteDrafts[id]; ok && d != nil {
+			v.commitFootnoteBody(id, *d)
+		}
+	}
+	v.mobileFootnoteSheetOpen = false
+	v.mobileFootnoteSheetID = ""
+	v.openFootnotePopoverID = ""
+	if v.editingFootnoteID == id {
+		v.editingFootnoteID = ""
+	}
+}
+
+// MobileFootnoteSheetOpen reports whether the mobile footnote bottom Sheet is currently open.
+func (v *View) MobileFootnoteSheetOpen() bool {
+	return v != nil && v.mobileFootnoteSheetOpen
+}
+
+// MobileFootnoteSheetID returns the footnote ID currently displayed in the mobile bottom Sheet.
+func (v *View) MobileFootnoteSheetID() string {
+	if v == nil {
+		return ""
+	}
+	return v.mobileFootnoteSheetID
+}
+
+// ActiveMobileSheetKind reports which mobile bottom Sheet is open ("footnote", "slash", "mention", "nl", or "").
+func (v *View) ActiveMobileSheetKind() string {
+	if v == nil || !v.MobileCompact {
+		return ""
+	}
+	if v.mobileFootnoteSheetOpen {
+		return "footnote"
+	}
+	if v.mobilePickerOpen {
+		if v.mobilePickerMode == "mention" {
+			return "mention"
+		}
+		return "slash"
+	}
+	if v.mobileNLSheetOpen {
+		return "nl"
+	}
+	return ""
+}
+
+// DismissActiveMobileSheet closes whichever mobile bottom Sheet is open (for back/Escape handling).
+func (v *View) DismissActiveMobileSheet() bool {
+	switch v.ActiveMobileSheetKind() {
+	case "footnote":
+		v.CloseMobileFootnoteSheet(true)
+		return true
+	case "slash", "mention":
+		v.mobilePickerOpen = false
+		return true
+	case "nl":
+		v.mobileNLSheetOpen = false
+		v.nlHover = nil
+		v.AltHoverPreviewQuery = ""
+		return true
+	default:
+		return false
+	}
+}
+
+func (v *View) renderMobileSheets(c *ui.Context, tok theme.Tokens) {
+	if v == nil {
+		return
+	}
+	v.renderMobileFootnoteSheet(c, tok)
+	v.renderMobilePickerSheet(c, tok)
+	v.renderMobileNLSheetOverlay(c, tok)
+}
+
+func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
+	if v == nil {
+		return
+	}
+	if !v.MobileCompact {
+		v.mobileFootnoteSheetOpen = false
+		return
+	}
+	// Promote any footnote popover trigger (e.g. from InsertFootnoteAtActiveCursor) into the bottom Sheet.
+	if !v.ShowRightSidenotes && v.openFootnotePopoverID != "" {
+		v.mobileFootnoteSheetID = v.openFootnotePopoverID
+		v.mobileFootnoteSheetOpen = true
+		v.openFootnotePopoverID = ""
+	}
+	if v.mobileFootnoteSheetOpen && (v.Doc == nil || v.mobileFootnoteSheetID == "") {
+		v.mobileFootnoteSheetOpen = false
+	}
+	var fnEntry *FootnoteEntry
+	if v.mobileFootnoteSheetOpen && v.Doc != nil {
+		if fnDoc := ParseFootnotes(v.Doc.Source); fnDoc != nil {
+			fnEntry = fnDoc.ByID[v.mobileFootnoteSheetID]
+		}
+		if fnEntry == nil {
+			v.mobileFootnoteSheetOpen = false
+			v.mobileFootnoteSheetID = ""
+		}
+	}
+
+	wasOpen := v.mobileFootnoteSheetOpen
+	mobile.Sheet(c, &v.mobileFootnoteSheetOpen, mobile.SheetOptions{
+		Detents:    []float32{0.52, 0.85},
+		Background: &tok.Surface,
+		Label:      "批注编辑器",
+	}, func() {
+		if fnEntry == nil {
+			return
+		}
+		fn := *fnEntry
+		editable := !v.ReadOnly && v.Can(PermDocumentEdit)
+		if v.footnoteCollapsed == nil {
+			v.footnoteCollapsed = map[string]bool{}
+		}
+		collapsed := v.footnoteCollapsed[fn.ID]
+
+		ui.Column(c.Key("fn-mobile-sheet:"+fn.ID)).FillWidth().FillHeight().
+			Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing16), float32(tok.Spacing16)).
+			Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Row(c).Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).Center().
+					Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Children(func() {
+					ui.Text(c, fmt.Sprintf("批注 %d", fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+				})
+				ui.Spacer(c)
+				foldLbl := "折叠"
+				foldIcon := lucide.ChevronUp()
+				if collapsed {
+					foldLbl = "展开"
+					foldIcon = lucide.ChevronDown()
+				}
+				foldBtn := ui.ButtonBase(c.Key("fn-ms-fold:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
+					Padding(0, float32(tok.Spacing12)).Center().
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Label(foldLbl + "批注")
+				foldBtn.Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Icon(c, foldIcon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+						ui.Text(c, foldLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
+					})
+				})
+				if foldBtn.Clicked() {
+					v.footnoteCollapsed[fn.ID] = !collapsed
+					mygo.Haptics.Selection()
+				}
+				if editable {
+					delBtn := ui.ButtonBase(c.Key("fn-ms-del:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
+						Padding(0, float32(tok.Spacing12)).Center().
+						Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger.Alpha(0.35)).Label("删除批注")
+					delBtn.Children(func() {
+						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Icon(c, lucide.Trash()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.DangerText)
+							ui.Text(c, "删除").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.DangerText).SingleLine()
+						})
+					})
+					if delBtn.Clicked() {
+						v.deleteFootnoteByID(fn.ID)
+						v.CloseMobileFootnoteSheet(false)
+						mygo.Haptics.Warning()
+						return
+					}
+				}
+				clsBtn := ui.ButtonBase(c.Key("fn-ms-done:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
+					Padding(0, float32(tok.Spacing12)).Center().
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Label("关闭批注编辑器")
+				clsBtn.Children(func() {
+					ui.Text(c, "完成").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+				})
+				if clsBtn.Clicked() {
+					v.CloseMobileFootnoteSheet(true)
+					mygo.Haptics.Light()
+					return
+				}
+			})
+
+			if collapsed {
+				expandCard := ui.ButtonBase(c.Key("fn-ms-collapsed-card:"+fn.ID)).FillWidth().
+					MinHeight(float32(tok.Spacing48)).
+					Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+					Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).Border(1, tok.Border).
+					Label("展开批注内容")
+				expandCard.Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						prev := firstNonEmpty(singleLineFootnotePreview(fn.Body), "批注已折叠，点击展开编辑…")
+						ui.Text(c, prev).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+						ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent).Shrink(0)
+					})
+				})
+				if expandCard.Clicked() {
+					v.footnoteCollapsed[fn.ID] = false
+					mygo.Haptics.Selection()
+				}
+				return
+			}
+
+			if editable {
+				draft := v.ensureFootnoteDraft(fn.ID, fn.Body)
+				ti := ui.TextInputBase(c, draft).
+					FillWidth().Multiline(true).
+					MinHeight(float32(tok.Spacing48)*2).
+					FontSize(float32(tok.TextBody)).
+					TextColor(tok.Text).
+					Padding(float32(tok.Spacing12), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).
+					Border(1, tok.Border).
+					Placeholder("输入操作注意事项、试剂配制提示或踩坑提醒…")
+				if v.footnoteFocusPending == fn.ID {
+					ti.AutoFocus()
+					v.footnoteFocusPending = ""
+				}
+				if ti.Shortcut(ui.Cmd, ui.KeyEnter) {
+					v.commitFootnoteBody(fn.ID, *draft)
+					v.CloseMobileFootnoteSheet(false)
+					mygo.Haptics.Success()
+					return
+				}
+				saveBtn := ui.ButtonBase(c.Key("fn-ms-save:"+fn.ID)).FillWidth().
+					Height(float32(tok.Spacing48)).Center().
+					Radius(float32(tok.ControlRadius)).Background(tok.Accent).Label("保存批注")
+				saveBtn.Children(func() {
+					ui.Text(c, "保存批注").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.AccentText).SingleLine()
+				})
+				if saveBtn.Clicked() {
+					v.commitFootnoteBody(fn.ID, *draft)
+					v.CloseMobileFootnoteSheet(false)
+					mygo.Haptics.Success()
+				}
+			} else {
+				ui.Scroll(c.Key("fn-ms-ro:"+fn.ID)).FillWidth().Grow(1).MinHeight(0).Children(func() {
+					ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
+						FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+				})
+			}
+		})
+	})
+	if wasOpen && !v.mobileFootnoteSheetOpen {
+		v.CloseMobileFootnoteSheet(true)
+	}
+}
+
+func (v *View) targetWritableLiveEntry() (string, *liveEditorEntry) {
+	if v == nil || v.liveEditors == nil {
+		return "", nil
+	}
+	if key := v.activeWritableLiveKey(); key != "" {
+		if ent := v.liveEditors[key]; ent != nil && ent.state != nil && ent.state.Buffer != nil && !ent.state.ReadOnly {
+			return key, ent
+		}
+	}
+	for k, ent := range v.liveEditors {
+		if ent != nil && ent.state != nil && ent.state.Buffer != nil && !ent.state.ReadOnly {
+			return k, ent
+		}
+	}
+	return "", nil
+}
+
+func (v *View) commitLiveEditorEntry(key string, ent *liveEditorEntry) {
+	if v == nil || ent == nil || ent.state == nil || ent.state.Buffer == nil {
+		return
+	}
+	curBuf := strings.ReplaceAll(ent.state.Buffer.String(), "\r\n", "\n")
+	if curBuf == ent.syncedText {
+		return
+	}
+	prevLen := len(ent.syncedText)
+	ent.syncedText = curBuf
+	ent.lastVersion = 0
+	if ent.onCommit != nil {
+		ent.lastOwnedSource = ent.onCommit(curBuf)
+		return
+	}
+	if v.Doc != nil && v.OnChange != nil && ent.docOffset >= 0 && ent.docOffset+prevLen <= len(v.Doc.Source) {
+		if nextSrc, err := ReplaceByteRange(v.Doc.Source, ent.docOffset, ent.docOffset+prevLen, curBuf); err == nil {
+			ent.lastOwnedSource = nextSrc
+			v.OnChange(nextSrc)
+		}
+	}
+}
+
+// SetTestLiveEditor registers a writable liveEditorEntry in tests without requiring a GPU window.
+func (v *View) SetTestLiveEditor(key, text string, docOffset, cursor int, onCommit func(nextText string) string) *editor.State {
+	if v.liveEditors == nil {
+		v.liveEditors = map[string]*liveEditorEntry{}
+	}
+	norm := strings.ReplaceAll(text, "\r\n", "\n")
+	st := &editor.State{Buffer: editor.NewBuffer(norm)}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > len(norm) {
+		cursor = len(norm)
+	}
+	st.Select(cursor, cursor)
+	v.liveEditors[key] = &liveEditorEntry{
+		state:             st,
+		syncedText:        norm,
+		lastActiveLn:      -1,
+		toolbarSlashStart: -1,
+		docOffset:         docOffset,
+		onCommit:          onCommit,
+	}
+	v.lastFocusedLiveKey = key
+	return st
+}
+
+// DispatchMobileAction dispatches one of the 15 mobile toolbar actions onto the active
+// AsterDoc view/editor state so experiment_page.go can wire shell toolbar taps cleanly.
+func (v *View) DispatchMobileAction(action string) bool {
+	if v == nil {
+		return false
+	}
+	switch action {
+	case "add_footnote":
+		if v.ReadOnly || v.Doc == nil {
+			return false
+		}
+		if key, ent := v.targetWritableLiveEntry(); key != "" && ent != nil {
+			curBuf := strings.ReplaceAll(ent.state.Buffer.String(), "\r\n", "\n")
+			localOff := min(max(0, ent.state.Cursor()), len(curBuf))
+			globalOff := min(max(0, ent.docOffset+localOff), len(v.Doc.Source))
+			if id, ok := FindFootnoteRefAtOffset(v.Doc.Source, globalOff); ok {
+				if v.MobileCompact {
+					v.OpenMobileFootnoteSheet(id)
+					mygo.Haptics.Light()
+				} else {
+					v.editingFootnoteID = id
+					v.footnoteFocusPending = id
+					if !v.ShowRightSidenotes {
+						v.openFootnotePopoverID = id
+					}
+				}
+				return true
+			}
+		}
+		v.InsertFootnoteAtActiveCursor()
+		if v.MobileCompact && v.editingFootnoteID != "" {
+			v.OpenMobileFootnoteSheet(v.editingFootnoteID)
+			mygo.Haptics.Light()
+		}
+		return v.editingFootnoteID != ""
+
+	case "trigger_mention":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		if v.MobileCompact {
+			v.OpenMobilePickerSheet("mention")
+			return true
+		}
+		if key, ent := v.targetWritableLiveEntry(); key != "" && ent != nil {
+			st := ent.state
+			cur := st.Cursor()
+			st.Buffer.Edit(editor.Edit{Start: cur, End: cur, Text: "@"})
+			st.Select(cur+1, cur+1)
+			v.commitLiveEditorEntry(key, ent)
+			st.ShowCompletions(cur, v.buildRelationTargetCompletions(false))
+			return true
+		}
+		return false
+
+	case "trigger_slash":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		if v.MobileCompact {
+			v.OpenMobilePickerSheet("slash")
+			return true
+		}
+		v.TriggerSlashFromToolbar()
+		return true
+
+	case "trigger_nl":
+		if v.LabMode || v.ReadOnly || v.Doc == nil {
+			return false
+		}
+		return v.OpenMobileNLSheet()
+
+	case "format_heading":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		v.lastFocusedLiveKey = key
+		v.applyMarkdownLineTransform(cycleMarkdownHeading)
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "format_bold":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		v.lastFocusedLiveKey = key
+		v.applyMarkdownInlineWrap("**", "**")
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "format_checklist":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		v.lastFocusedLiveKey = key
+		v.applyMarkdownLineTransform(func(line string) string {
+			return toggleMarkdownPrefix(line, "- [ ] ")
+		})
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "format_bullet":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		v.lastFocusedLiveKey = key
+		v.applyMarkdownLineTransform(func(line string) string {
+			return toggleMarkdownPrefix(line, "- ")
+		})
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "indent":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		if !indentLiveEditorLines(ent.state) {
+			return false
+		}
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "outdent":
+		if v.LabMode || v.ReadOnly {
+			return false
+		}
+		key, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		if !outdentLiveEditorLines(ent.state) {
+			return false
+		}
+		v.commitLiveEditorEntry(key, ent)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+
+	case "cursor_left":
+		_, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		moved := moveLiveEditorCursorRune(ent.state, -1)
+		if moved && v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return moved
+
+	case "cursor_right":
+		_, ent := v.targetWritableLiveEntry()
+		if ent == nil {
+			return false
+		}
+		moved := moveLiveEditorCursorRune(ent.state, +1)
+		if moved && v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return moved
+
+	case "move_block_up":
+		return v.moveActiveBlock(-1)
+
+	case "move_block_down":
+		return v.moveActiveBlock(+1)
+
+	case "fold_block":
+		return v.toggleFoldActiveBlock()
+	}
+	return false
+}
+
+func indentLiveEditorLines(st *editor.State) bool {
+	if st == nil || st.Buffer == nil {
+		return false
+	}
+	full := st.Buffer.String()
+	cursor := min(max(0, st.Cursor()), len(full))
+	lineStart := strings.LastIndexByte(full[:cursor], '\n') + 1
+	st.Buffer.Edit(editor.Edit{Start: lineStart, End: lineStart, Text: "  "})
+	st.Select(cursor+2, cursor+2)
+	return true
+}
+
+func outdentLiveEditorLines(st *editor.State) bool {
+	if st == nil || st.Buffer == nil {
+		return false
+	}
+	full := st.Buffer.String()
+	cursor := min(max(0, st.Cursor()), len(full))
+	lineStart := strings.LastIndexByte(full[:cursor], '\n') + 1
+	remove := 0
+	if lineStart < len(full) && full[lineStart] == '\t' {
+		remove = 1
+	} else {
+		for remove < 2 && lineStart+remove < len(full) && full[lineStart+remove] == ' ' {
+			remove++
+		}
+	}
+	if remove == 0 {
+		return false
+	}
+	st.Buffer.Edit(editor.Edit{Start: lineStart, End: lineStart + remove, Text: ""})
+	nextCursor := max(lineStart, cursor-remove)
+	st.Select(nextCursor, nextCursor)
+	return true
+}
+
+func moveLiveEditorCursorRune(st *editor.State, dir int) bool {
+	if st == nil || st.Buffer == nil || dir == 0 {
+		return false
+	}
+	full := st.Buffer.String()
+	cur := min(max(0, st.Cursor()), len(full))
+	if dir < 0 {
+		if cur <= 0 {
+			return false
+		}
+		prev := cur - 1
+		for prev > 0 && (full[prev]&0xC0) == 0x80 {
+			prev--
+		}
+		st.Select(prev, prev)
+		st.Run(editor.ScrollCursorCenter)
+		return true
+	}
+	if cur >= len(full) {
+		return false
+	}
+	next := cur + 1
+	for next < len(full) && (full[next]&0xC0) == 0x80 {
+		next++
+	}
+	st.Select(next, next)
+	st.Run(editor.ScrollCursorCenter)
+	return true
+}
+
+func swapLineInEditorBuffer(st *editor.State, delta int) bool {
+	if st == nil || st.Buffer == nil || delta == 0 {
+		return false
+	}
+	full := strings.ReplaceAll(st.Buffer.String(), "\r\n", "\n")
+	lines := strings.Split(full, "\n")
+	if len(lines) <= 1 {
+		return false
+	}
+	cur := min(max(0, st.Cursor()), len(full))
+	lineIdx := strings.Count(full[:cur], "\n")
+	targetIdx := lineIdx + delta
+	if targetIdx < 0 || targetIdx >= len(lines) {
+		return false
+	}
+	lineStart := strings.LastIndexByte(full[:cur], '\n') + 1
+	col := cur - lineStart
+
+	lines[lineIdx], lines[targetIdx] = lines[targetIdx], lines[lineIdx]
+	nextFull := strings.Join(lines, "\n")
+	st.Buffer.Edit(editor.Edit{Start: 0, End: len(st.Buffer.String()), Text: nextFull})
+
+	newLineStart := 0
+	for i := 0; i < targetIdx; i++ {
+		newLineStart += len(lines[i]) + 1
+	}
+	newCur := newLineStart + min(col, len(lines[targetIdx]))
+	st.Select(newCur, newCur)
+	return true
+}
+
+func (v *View) moveActiveBlock(delta int) bool {
+	if v == nil || v.LabMode || v.ReadOnly || v.Doc == nil || delta == 0 {
+		return false
+	}
+	// 1. If a nested step block is targeted via OnMoveStepBlock, delegate cleanly.
+	if v.activeStepID != "" && v.activeBlockID != "" && v.OnMoveStepBlock != nil {
+		dir := "up"
+		if delta > 0 {
+			dir = "down"
+		}
+		v.OnMoveStepBlock(v.activeStepID, v.activeBlockID, dir)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+	}
+	// 2. If a live prose editor has multiple lines and can move the current line up/down, swap lines.
+	if key, ent := v.targetWritableLiveEntry(); ent != nil {
+		if swapLineInEditorBuffer(ent.state, delta) {
+			v.commitLiveEditorEntry(key, ent)
+			if v.MobileCompact {
+				mygo.Haptics.Selection()
+			}
+			return true
+		}
+	}
+	// 3. Otherwise, move the active top-level module if one is selected.
+	if v.activeModuleID != "" && v.OnChange != nil {
+		if next, err := MoveTopLevelModuleInSource(v.Doc.Source, v.activeModuleID, delta); err == nil && next != v.Doc.Source {
+			v.OnChange(next)
+			if v.MobileCompact {
+				mygo.Haptics.Selection()
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func (v *View) toggleFoldActiveBlock() bool {
+	if v == nil || v.Doc == nil {
+		return false
+	}
+	if v.stepCollapsed == nil {
+		v.stepCollapsed = map[string]bool{}
+	}
+	if key, ent := v.targetWritableLiveEntry(); key != "" && ent != nil {
+		cur := min(max(0, ent.state.Cursor()), len(ent.state.Buffer.String()))
+		globalOff := ent.docOffset + cur
+		if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
+			if owner := StepOwnerAtOffset(stTree, globalOff); owner != nil {
+				v.stepCollapsed[owner.ID] = !v.stepCollapsed[owner.ID]
+				if v.MobileCompact {
+					mygo.Haptics.Selection()
+				}
+				return true
+			}
+		}
+		ent.state.Run(editor.ToggleFold)
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+	}
+	targetStep := v.activeStepID
+	if targetStep == "" && v.activeModuleID != "" {
+		if m := findModuleByID(v.Doc, v.activeModuleID); m != nil && m.Kind == "step" {
+			targetStep = m.ID
+		}
+	}
+	if targetStep == "" {
+		for _, m := range v.Doc.Modules {
+			if m.Kind == "step" {
+				targetStep = m.ID
+				break
+			}
+		}
+		if targetStep == "" {
+			if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil && len(stTree.Flat) > 0 {
+				targetStep = stTree.Flat[0].ID
+			}
+		}
+	}
+	if targetStep != "" {
+		v.stepCollapsed[targetStep] = !v.stepCollapsed[targetStep]
+		if v.MobileCompact {
+			mygo.Haptics.Selection()
+		}
+		return true
+	}
+	return false
+}
+
 
