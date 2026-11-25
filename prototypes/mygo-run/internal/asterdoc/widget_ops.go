@@ -750,24 +750,39 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 					runit := textValue(rm, "unit")
 					formulaStr := strings.TrimSpace(textValue(rm, "formula"))
 
-					// Subtle top caption row inside hero stage: only show tabs when multiple formula outputs exist
-					// (avoid repeating the single output label that already appears in the bench strip below — UI-06).
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					// Wrap multi-output formula result chips so each output looks clearly clickable and shows its computed value cleanly (UI-01).
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						if len(formulaIdxs) > 1 {
 							for fPos, rIdx := range formulaIdxs {
 								fPos, rIdx := fPos, rIdx
 								fLbl := firstNonEmpty(textValue(rows[rIdx], "label"), fmt.Sprintf("结果 %d", fPos+1))
+								chipTxt := fLbl
+								if res.Err == nil && rIdx < len(res.Rows) {
+									fu := textValue(rows[rIdx], "unit")
+									vTxt := formatNumber(res.Rows[rIdx].Amount)
+									if fu != "" {
+										vTxt += " " + DisplayUnit(fu)
+									}
+									chipTxt = fmt.Sprintf("%s · %s", fLbl, vTxt)
+								}
 								isSel := fPos == activeFPos
 								tab := ui.ButtonBase(c.Key(fmt.Sprintf("calc-ftab:%s:%d", moduleID, fPos))).
-									Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
+									Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
 									AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("查看公式：" + fLbl)
 								tfg := tok.TextMuted
 								if isSel {
-									tab.Background(tok.Surface).Border(1, tok.Border)
-									tfg = tok.Text
+									tab.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
+									tfg = tok.Accent
+								} else {
+									bg := tok.Surface
+									if tab.Hovered() {
+										bg = tok.GhostHover
+										tfg = tok.Text
+									}
+									tab.Background(bg).Border(1, tok.Border)
 								}
 								tab.Children(func() {
-									ui.Text(c, fLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tfg).SingleLine()
+									ui.Text(c, chipTxt).FontSize(float32(tok.TextMeta)).Bold().TextColor(tfg).FontFeatures("tnum").SingleLine()
 								})
 								if tab.Clicked() {
 									*activeFormulaIdxStr = strconv.Itoa(fPos)
@@ -853,29 +868,22 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						})
 					})
 
-					// Readable Bench Action Summary Strip (especially helpful when multiple outputs exist!)
-					if res.Err == nil && len(formulaIdxs) > 0 {
-						var recipeParts []string
-						for _, fIdx := range formulaIdxs {
-							if fIdx < len(res.Rows) {
-								fl := firstNonEmpty(textValue(rows[fIdx], "label"), textValue(rows[fIdx], "key"))
-								fu := textValue(rows[fIdx], "unit")
-								valTxt := formatNumber(res.Rows[fIdx].Amount)
-								if fu != "" {
-									valTxt += " " + DisplayUnit(fu)
-								}
-								recipeParts = append(recipeParts, fmt.Sprintf("%s %s", fl, valTxt))
-							}
+					// When only 1 formula output exists, keep a single concise readout hint if non-trivial;
+					// multi-output formulas already display live clickable value chips at the top without '+' concatenation (UI-01).
+					if res.Err == nil && len(formulaIdxs) == 1 && activeRowIdx < len(res.Rows) {
+						fl := firstNonEmpty(textValue(rows[activeRowIdx], "label"), textValue(rows[activeRowIdx], "key"))
+						fu := textValue(rows[activeRowIdx], "unit")
+						valTxt := formatNumber(res.Rows[activeRowIdx].Amount)
+						if fu != "" {
+							valTxt += " " + DisplayUnit(fu)
 						}
-						if len(recipeParts) > 0 {
-							ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-								Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.65)).
-								AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(tok.Accent)
-								ui.Text(c, "台面配液操作："+strings.Join(recipeParts, "   +   ")).
-									FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum")
-							})
-						}
+						ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.65)).
+							AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(tok.Accent)
+							ui.Text(c, fmt.Sprintf("%s：%s", fl, valTxt)).
+								FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum")
+						})
 					}
 				}
 			})
@@ -2343,6 +2351,7 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 
 	editableDesign := v.Mode == ModeDesign && !v.ReadOnly && v.Can(PermDocumentEdit)
 	scopeBadge := "步骤证据"
+	var containerSubtitle string
 	switch scope {
 	case "design_ref":
 		scopeBadge = "设计参考"
@@ -2351,7 +2360,10 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 		if pl, _ := v.findPlate(containerRef); pl != nil && strings.TrimSpace(pl.Title) != "" {
 			plateLabel = pl.Title
 		}
-		scopeBadge = fmt.Sprintf("%s × %d 视野", firstNonEmpty(plateLabel, "孔板"), slots)
+		scopeBadge = fmt.Sprintf("按格归档 · ×%d 视野", slots)
+		if plateLabel != "" {
+			containerSubtitle = fmt.Sprintf("关联容器：%s（点击或拖图到下方格位即可绑定）", plateLabel)
+		}
 	}
 
 	var docPlates []*Plate
@@ -2456,6 +2468,9 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 			if editableDesign && !v.UnifiedLive {
 				ui.Row(c.Key("att-cfg:"+moduleID)).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderConfigControls)
 			}
+			if containerSubtitle != "" {
+				ui.Text(c, containerSubtitle).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			}
 			if mediaHint != "" {
 				ui.Text(c, "采集要求："+mediaHint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			}
@@ -2521,6 +2536,7 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 								label := fmt.Sprintf("%s %d/%d", wID, nCnt, slots)
 								bg := tok.Elevated
 								fg := tok.TextMuted
+								borderCol := tok.Border
 								if nCnt >= slots {
 									bg = tok.SuccessBg
 									fg = tok.Success
@@ -2528,18 +2544,39 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 									bg = tok.AccentSoftBg
 									fg = tok.Accent
 								}
-								if v.Mode == ModeRun && !v.ReadOnly && v.OnLinkAsset != nil {
-									pill := ui.ButtonBase(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, tok.Border).Label(label)
+								sampleName := strings.TrimSpace(pl.Samples[wID])
+								canLiveBind := !v.ReadOnly && v.UnifiedLive && (v.OnPickAttachmentForWell != nil || v.OnPickAttachmentFile != nil)
+								canRunBind := v.Mode == ModeRun && !v.ReadOnly && v.OnLinkAsset != nil
+								if canLiveBind || canRunBind {
+									pill := ui.ButtonBase(c.Key("att-well:"+moduleID+":"+wID)).
+										Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, borderCol).Label("挂载照片到 " + wID)
+									if pill.Hovered() || pill.FileDragOver() {
+										pill.Background(tok.AccentSoftBg).Border(1, tok.Accent)
+										fg = tok.Accent
+									}
 									pill.Children(func() {
-										ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
+										ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum")
 									})
-									if pill.Clicked() {
-										v.OnLinkAsset(v.StepID, moduleID, wID)
+									tip := "点击选择或拖入图片绑定到 " + wID
+									if sampleName != "" {
+										tip = fmt.Sprintf("点击选择或拖入图片到 %s（%s）", wID, sampleName)
+									}
+									components.Tooltip(c, pill, tip)
+									if dropped := pill.DroppedFiles(); len(dropped) > 0 && v.OnAttachFilesForWell != nil {
+										v.OnAttachFilesForWell(v.StepID, moduleID, wID, dropped)
+									} else if pill.Clicked() {
+										if canRunBind {
+											v.OnLinkAsset(v.StepID, moduleID, wID)
+										} else if v.OnPickAttachmentForWell != nil {
+											v.OnPickAttachmentForWell(v.StepID, moduleID, wID)
+										} else if v.OnPickAttachmentFile != nil {
+											v.OnPickAttachmentFile(v.StepID, moduleID)
+										}
 									}
 								} else {
 									ui.Row(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, tok.Border).Children(func() {
+										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, borderCol).Children(func() {
 										ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).FontFeatures("tnum")
 									})
 								}

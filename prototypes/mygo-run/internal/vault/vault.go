@@ -863,6 +863,40 @@ func SanitizeFileName(name string) string {
 	return s
 }
 
+// NormalizeFolderPath validates and normalizes a vault-relative folder path using '/' separators.
+// Empty string or "/" resolves to "" (vault root). Single names create root folders; nested "a/b"
+// paths create nested subfolders. Rejects traversal ("..", "."), empty segments, and system roots.
+func NormalizeFolderPath(raw string) (string, error) {
+	norm := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	norm = strings.Trim(norm, "/")
+	if norm == "" {
+		return "", nil
+	}
+	parts := strings.Split(norm, "/")
+	cleaned := make([]string, 0, len(parts))
+	for i, part := range parts {
+		seg := strings.TrimSpace(part)
+		if seg == "" {
+			return "", fmt.Errorf("文件夹路径包含空目录名")
+		}
+		if seg == "." || seg == ".." {
+			return "", fmt.Errorf("文件夹路径不能包含 . 或 ..")
+		}
+		if i == 0 && (strings.EqualFold(seg, SystemDirName) || strings.EqualFold(seg, AssetsDirName) || strings.EqualFold(seg, TemplatesDirName)) {
+			return "", fmt.Errorf("不能使用系统保留目录 %q", seg)
+		}
+		sanitized := SanitizeFileName(seg)
+		if sanitized == "" {
+			return "", fmt.Errorf("文件夹名称 %q 包含无效字符", seg)
+		}
+		if i == 0 && (strings.EqualFold(sanitized, SystemDirName) || strings.EqualFold(sanitized, AssetsDirName) || strings.EqualFold(sanitized, TemplatesDirName)) {
+			return "", fmt.Errorf("不能使用系统保留目录 %q", sanitized)
+		}
+		cleaned = append(cleaned, sanitized)
+	}
+	return strings.Join(cleaned, "/"), nil
+}
+
 // MigrateLegacyExperiments safely imports any existing `legacyDataDir/experiments/*/experiment.asterml`
 // into the vault once, flattening legacy exec/record sections into single-source `.asterml`.
 func (v *Vault) MigrateLegacyExperiments(legacyDataDir string) (int, error) {

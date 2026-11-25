@@ -733,6 +733,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 	dirDraft := v.ensureWidgetDraft("pl_dir:"+plate.ID, "row")
 
 	writeLayerValues := func(layerName string, values map[string]string) {
+		wellGroups := plate.WellGroups()
 		nextLayers := copyNestedFactorMap(plate.Layers)
 		if nextLayers[layerName] == nil {
 			nextLayers[layerName] = map[string]string{}
@@ -744,18 +745,31 @@ func (v *View) renderUnifiedPlateFloatingBar(
 				nextLayers[layerName][w] = val
 			}
 		}
-		nextFactors := copyNestedFactorMap(plate.Factors)
-		if nextFactors[layerName] == nil {
-			nextFactors[layerName] = map[string]string{}
-		}
-		for w, val := range values {
-			if strings.TrimSpace(val) == "" {
-				delete(nextFactors[layerName], w)
-			} else {
-				nextFactors[layerName][w] = val
+		patch := map[string]any{"layers": nextLayers}
+		// Only mirror into factors for wells already bound to a group, because
+		// validatePlate rejects factors on ungrouped wells (blank-plate gradients live in layers).
+		if len(wellGroups) > 0 {
+			nextFactors := copyNestedFactorMap(plate.Factors)
+			if nextFactors[layerName] == nil {
+				nextFactors[layerName] = map[string]string{}
+			}
+			wroteFactor := false
+			for w, val := range values {
+				if _, ok := wellGroups[w]; !ok {
+					continue
+				}
+				wroteFactor = true
+				if strings.TrimSpace(val) == "" {
+					delete(nextFactors[layerName], w)
+				} else {
+					nextFactors[layerName][w] = val
+				}
+			}
+			if wroteFactor || len(plate.Factors) > 0 {
+				patch["factors"] = nextFactors
 			}
 		}
-		v.emitAnyModuleEdit(plate.ID, map[string]any{"layers": nextLayers, "factors": nextFactors})
+		v.emitAnyModuleEdit(plate.ID, patch)
 		v.plateColorBy[plate.ID] = "factor"
 		v.plateFactorKey[plate.ID] = layerName
 	}
@@ -826,19 +840,52 @@ func (v *View) renderUnifiedPlateFloatingBar(
 		if !isLayerMode {
 			layerTarget = "浓度梯度"
 		}
-		vals := map[string]string{}
-		cur := startVal
+		minR, maxR, minC, maxC := 999, -1, 999, -1
 		for _, w := range sorted {
+			if r, col, ok := wellRowColParsed(w); ok {
+				if r < minR {
+					minR = r
+				}
+				if r > maxR {
+					maxR = r
+				}
+				if col < minC {
+					minC = col
+				}
+				if col > maxC {
+					maxC = col
+				}
+			}
+		}
+		vals := map[string]string{}
+		for idx, w := range sorted {
+			step := idx
+			if r, col, ok := wellRowColParsed(w); ok && maxR >= 0 && maxC >= 0 {
+				if *dirDraft == "col" {
+					if maxR > minR {
+						step = r - minR
+					} else {
+						step = col - minC
+					}
+				} else {
+					if maxC > minC {
+						step = col - minC
+					} else {
+						step = r - minR
+					}
+				}
+			}
+			cur := startVal
+			if *opDraft == "*" {
+				cur = startVal * math.Pow(facVal, float64(step))
+			} else {
+				cur = startVal / math.Pow(facVal, float64(step))
+			}
 			lbl := formatNumber(round4(cur))
 			if strings.TrimSpace(*unitDraft) != "" {
 				lbl += " " + strings.TrimSpace(*unitDraft)
 			}
 			vals[w] = lbl
-			if *opDraft == "*" {
-				cur *= facVal
-			} else {
-				cur /= facVal
-			}
 		}
 		writeLayerValues(layerTarget, vals)
 		v.PlateSampleError = ""
@@ -924,7 +971,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 						preset := preset
 						stBtn := components.ButtonOutline
 						if *opDraft == preset.op && *factorDraft == preset.fac {
-							stBtn = components.ButtonSecondary
+							stBtn = components.ButtonPrimary
 						}
 						if components.Button(c, preset.lbl, stBtn).Clicked() {
 							*opDraft = preset.op

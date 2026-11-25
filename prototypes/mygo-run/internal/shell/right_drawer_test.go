@@ -75,3 +75,32 @@ func TestRightDrawerContextPerActiveTab(t *testing.T) {
 		t.Fatalf("pantry tab should yield drawerCtxPantry, got %d", got)
 	}
 }
+
+func TestQuickCalcModeIsolationAndMolarCalc(t *testing.T) {
+	st := RightCalcState{
+		Stock:           "100",
+		StockUnit:       "µg/mL",
+		Target:          "50",
+		TargetUnit:      "ng/mL",
+		FinalVol:        "4",
+		VolUnit:         "mL",
+		MolarTarget:     "10",
+		MolarTargetUnit: "mM",
+		MolarVol:        "5",
+		MolarVolUnit:    "mL",
+		MolarMass:       "1449.25",
+	}
+	v1, dil, msg := computeQuickDilution(st)
+	if msg != "" || math.Abs(v1-2.0) > 0.01 || math.Abs(dil-3998.0) > 0.01 {
+		t.Fatalf("dilution = (%.3f, %.3f, %q), want (2.0, 3998.0, \"\")", v1, dil, msg)
+	}
+	massMg, msg2 := computeQuickMolarMass(st)
+	wantMg := 10e-3 * 5e-3 * 1449.25 * 1000.0
+	if msg2 != "" || math.Abs(massMg-wantMg) > 0.001 {
+		t.Fatalf("molar = (%.4f, %q), want (%.4f, \"\")", massMg, msg2, wantMg)
+	}
+	// Ensure dilution fields & units were never altered
+	if st.TargetUnit != "ng/mL" || st.MolarTargetUnit != "mM" {
+		t.Fatalf("expected isolated mode units, got dilution=%q molar=%q", st.TargetUnit, st.MolarTargetUnit)
+	}
+}

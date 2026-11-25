@@ -178,6 +178,7 @@ type Shell struct {
 	RightOpen        bool
 	RightTab         int
 	RightCalc        RightCalcState
+	BenchTimer       BenchTimerState
 	PantryItems      []QuickPantryItem
 	OutlineSteps     []OutlineItem
 	OutlineOnlySteps bool

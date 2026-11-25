@@ -451,7 +451,6 @@ func (a *app) openNewExperimentDialogAt(folderRel, dateYMD, startTimeHHMM string
 	if a.newExpTemplate == "" {
 		a.newExpTemplate = "templates/空白实验.asterml"
 	}
-	a.newExpNewFolder = ""
 	a.newExpErr = ""
 	a.newExpOpen = true
 }
@@ -496,32 +495,37 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 				}
 			})
 
-			// Location (Project folder picker + inline new folder) + Date + Optional Start Time (UI-20 aligned)
+			// Location (standard path input + quick-pick existing folder dropdown) + Date + Optional Start Time
 			ui.Row(c).FillWidth().AlignItems(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "保存位置").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
-					sel := components.Select(c, &a.newExpFolder)
-					sel.Trigger.Children(func() {
-						lbl := a.newExpFolder
-						if lbl == "" {
-							lbl = "根目录"
-						}
-						ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text).SingleLine()
-					})
-					sel.Popup(func(p ui.Element) {
-						for _, f := range folders {
-							f := f
-							lbl := f
-							if lbl == "" {
-								lbl = "根目录"
-							}
-							sel.Item(f).Children(func() {
-								ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
-							})
-						}
-						sel.Item("__new__").Children(func() {
-							ui.Text(c, "+ 新建项目文件夹…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+					ui.Text(c, "保存位置（路径）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
+					ui.Row(c).FillWidth().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							components.TextBox(c, &a.newExpFolder, components.TextBoxOptions{}).
+								Placeholder("留空存入根目录；支持 Fig4 或 Fig4/子目录")
 						})
+						folderPick := a.newExpFolder
+						ui.Box(c).Width(float32(tok.Spacing48)*2.05).Shrink(0).Children(func() {
+							sel := components.Select(c, &folderPick)
+							sel.Trigger.FillWidth().Children(func() {
+								ui.Text(c, "已有目录").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+							})
+							sel.Popup(func(p ui.Element) {
+								for _, f := range folders {
+									f := f
+									lbl := f
+									if lbl == "" {
+										lbl = "根目录 (/)"
+									}
+									sel.Item(f).Children(func() {
+										ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+									})
+								}
+							})
+						})
+						if folderPick != a.newExpFolder {
+							a.newExpFolder = folderPick
+						}
 					})
 				})
 				ui.Column(c).Width(float32(tok.Spacing48)*2.7).Shrink(0).Gap(float32(tok.Spacing4)).Children(func() {
@@ -534,11 +538,21 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 				})
 			})
 
-			if a.newExpFolder == "__new__" {
-				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, "新项目文件夹名").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
-					components.TextBox(c, &a.newExpNewFolder, components.TextBoxOptions{}).Placeholder("例如：肿瘤耐药筛选")
-				})
+			if strings.TrimSpace(a.newExpFolder) != "" {
+				if norm, normErr := vault.NormalizeFolderPath(a.newExpFolder); normErr != nil {
+					ui.Text(c, normErr.Error()).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
+				} else if norm != "" {
+					exists := false
+					for _, f := range folders {
+						if f == norm {
+							exists = true
+							break
+						}
+					}
+					if !exists {
+						ui.Text(c, "将自动新建目录："+norm).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent)
+					}
+				}
 			}
 
 			// Template picker
@@ -600,8 +614,9 @@ func (a *app) confirmCreateVaultExperiment() {
 	if a.vault == nil {
 		return
 	}
-	if a.newExpFolder == "__new__" && strings.TrimSpace(a.newExpNewFolder) == "" {
-		a.newExpErr = "请填写新项目文件夹名称"
+	folder, folderErr := vault.NormalizeFolderPath(a.newExpFolder)
+	if folderErr != nil {
+		a.newExpErr = folderErr.Error()
 		a.newExpNudgeSeq++
 		return
 	}
@@ -616,17 +631,6 @@ func (a *app) confirmCreateVaultExperiment() {
 		return
 	}
 	a.newExpErr = ""
-	folder := a.newExpFolder
-	if folder == "__new__" {
-		name := strings.TrimSpace(a.newExpNewFolder)
-		if name != "" {
-			if created, err := a.vault.CreateFolder("", name); err == nil {
-				folder = created
-			}
-		} else {
-			folder = ""
-		}
-	}
 	title := strings.TrimSpace(a.newExpTitle)
 	tplSrc := releaseBlankTemplateDoc
 	if a.newExpTemplate != "" {
