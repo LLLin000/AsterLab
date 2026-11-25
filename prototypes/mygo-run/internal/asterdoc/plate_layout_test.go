@@ -4,6 +4,10 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
+
+	"asterlab-mygo-prototype/internal/theme"
 )
 
 func TestDeterministicPlateLayoutEngineAndMultiPlateSpillover(t *testing.T) {
@@ -491,5 +495,75 @@ rows:
 	}
 	if _, _, _, err := RelayoutExistingPlate(doc, p, LayoutColMajor, false); err == nil || !strings.Contains(err.Error(), "已锁定孔位") {
 		t.Fatalf("expected RelayoutExistingPlate to block silently re-mapping recorded plate, got err=%v", err)
+	}
+}
+
+func TestPlateBlankSerialGradientAndTwoDimReplicates(t *testing.T) {
+	src := `---
+title: 空白板梯形稀释测试
+---
+
+` + "```asterlab" + `
+kind: plate
+id: plate-blank
+schema: 1
+format: 96
+topology: plate
+groups: {}
+` + "```" + `
+`
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := &View{
+		Doc:         doc,
+		Mode:        ModeDesign,
+		UnifiedLive: true,
+		Allowed:     map[string]bool{PermDocumentEdit: true},
+	}
+	v.OnUpdateModule = func(id string, props map[string]any) {
+		if _, err := doc.UpdateModule(id, props); err != nil {
+			t.Fatalf("UpdateModule(%s) failed: %v", id, err)
+		}
+	}
+
+	// Simulate user selecting B3:H4 (7 rows x 2 cols), picking ÷2按列 with start 10 uM
+	var sel []string
+	for r := 1; r <= 7; r++ {
+		for col := 3; col <= 4; col++ {
+			sel = append(sel, rowLabel(r)+string(rune('0'+col)))
+		}
+	}
+	v.plateSelections = map[string][]string{"plate-blank": sel}
+	v.plateFillMode = map[string]int{"plate-blank": 2}
+	*v.ensureWidgetDraft("pl_s:plate-blank", "100") = "10"
+	*v.ensureWidgetDraft("pl_u:plate-blank", "uM") = "uM"
+	*v.ensureWidgetDraft("pl_f:plate-blank", "2") = "2"
+	*v.ensureWidgetDraft("pl_op:plate-blank", "/") = "/"
+	*v.ensureWidgetDraft("pl_dir:plate-blank", "row") = "col"
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		v.Render(c)
+	}, 1100, 820)
+	tt.Frame()
+	if err := tt.Click("生成梯度"); err != nil {
+		t.Fatalf("click 生成梯度: %v", err)
+	}
+	tt.Frame()
+
+	p := doc.Modules[0].Plate
+	if len(p.Groups) != 0 {
+		t.Fatalf("expected groups to stay empty on blank plate serial write, got %+v", p.Groups)
+	}
+	if len(p.Layers["浓度梯度"]) != 14 {
+		t.Fatalf("expected 14 wells in 浓度梯度 layer on blank plate, got %+v", p.Layers)
+	}
+	if p.Layers["浓度梯度"]["B3"] != "10 uM" || p.Layers["浓度梯度"]["B4"] != "10 uM" ||
+		p.Layers["浓度梯度"]["C3"] != "5 uM" || p.Layers["浓度梯度"]["C4"] != "5 uM" ||
+		p.Layers["浓度梯度"]["D3"] != "2.5 uM" || p.Layers["浓度梯度"]["D4"] != "2.5 uM" ||
+		p.Layers["浓度梯度"]["H3"] != "0.1563 uM" || p.Layers["浓度梯度"]["H4"] != "0.1563 uM" {
+		t.Fatalf("unexpected 2D column-wise serial dilution values: %+v", p.Layers["浓度梯度"])
 	}
 }

@@ -261,13 +261,36 @@ func TestSlimRightCompanionDrawerOutlineAndCalc(t *testing.T) {
 		t.Fatalf("jumpedStep = %q, want step-2", jumpedStep)
 	}
 
-	// Tab 1: Quick Calculator & Timers
+	// Tab 1: Quick Calculator & Timers (defaults empty with placeholder, bottom timer always visible)
 	if err := tt.Click("速算与计时"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("取母液 V₁") || !tt.HasText("2.00 µL") {
+	if !tt.HasText("取母液 V₁") || !tt.HasText("—") || !tt.HasText("快捷倒计时") || !tt.HasText("15:00") {
+		t.Fatalf("expected blank default calc + bottom countdown timer: %q", tt.Texts())
+	}
+
+	// Populated dilution calc + standalone preset switch + toggle into Molar without cross-contamination
+	s.RightCalc.Stock = "100"
+	s.RightCalc.Target = "50"
+	s.RightCalc.FinalVol = "4"
+	tt.Frame()
+	if !tt.HasText("2.00 µL") {
 		t.Fatalf("quick dilution calculation mismatch: %q", tt.Texts())
+	}
+	if err := tt.Click("30分"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("30:00") {
+		t.Fatalf("expected timer preset 30:00 after click: %q", tt.Texts())
+	}
+	if err := tt.Click("摩尔称量"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if s.RightCalc.TargetUnit != "ng/mL" || s.RightCalc.MolarTargetUnit != "mM" {
+		t.Fatalf("mode toggle leaked unit across tabs: %+v", s.RightCalc)
 	}
 }
 
@@ -504,5 +527,23 @@ func TestThemePresetAndLiquidGlassSwitching(t *testing.T) {
 	tt.Frame()
 	if gotTok.Preset != theme.PresetWarm || gotTok.LiquidGlass || gotTok.Canvas != ui.Hex("#f7f6f3") {
 		t.Fatalf("expected warm non-glass fallback, got %+v", gotTok)
+	}
+}
+
+func TestWeekGridYToMinutesPrecisionAndSnap(t *testing.T) {
+	// rowH = 56px -> 30min = 28px. StartHr = 8, EndHr = 21.
+	rowH := float32(56)
+	startHr, endHr := 8, 21
+
+	// Within ±7px of 10:00 (y=112): snaps cleanly to 10:00
+	mins, snapped, dispY := weekGridYToMinutes(117, rowH, startHr, endHr)
+	if !snapped || mins != 10*60 || dispY != 112 {
+		t.Fatalf("near-boundary snap got (%d, %v, %.1f), want (600, true, 112.0)", mins, snapped, dispY)
+	}
+
+	// Quarter past (y = 2*56 + 14 = 126, >7px from 112 and 140): preserves 5-min precision 10:15
+	mins, snapped, dispY = weekGridYToMinutes(126, rowH, startHr, endHr)
+	if snapped || mins != 10*60+15 || dispY != 126 {
+		t.Fatalf("5-min precision got (%d, %v, %.1f), want (615, false, 126.0)", mins, snapped, dispY)
 	}
 }

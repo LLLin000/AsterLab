@@ -750,22 +750,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 		v.OnImportAssetBytes = func(data []byte, origName string) (string, error) {
 			return a.vault.ImportAssetBytes(data, origName)
 		}
-		v.OnPickAttachmentFile = func(stepID, blockID string) {
-			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
-				Parent: mygo.FocusedWindow(),
-				Title:  "选择实验照片或原始附件",
-			})
-			if pErr != nil || len(paths) == 0 {
+		attachFilesToBlock := func(stepID, blockID, wellID string, paths []string) {
+			if len(paths) == 0 {
 				return
 			}
-			picked := paths[0]
-			refPath := picked
-			if a.shell == nil || a.shell.AutoArchiveAssets {
-				if rel, impErr := a.vault.ImportAssetFile(picked); impErr == nil {
-					refPath = rel
-				}
-			}
-			// Append to block's items[] list inside `.asterml`
 			var existing []any
 			if ld.Parsed != nil {
 				for _, m := range ld.Parsed.Modules {
@@ -787,11 +775,34 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					}
 				}
 			}
-			existing = append(existing, map[string]any{
-				"id":    fmt.Sprintf("att-%d", len(existing)+1),
-				"label": filepath.Base(picked),
-				"src":   refPath,
-			})
+			wellCount := 0
+			for _, raw := range existing {
+				if wm, ok := raw.(map[string]any); ok && wellID != "" && strings.EqualFold(fmt.Sprint(wm["well_id"]), wellID) {
+					wellCount++
+				}
+			}
+			for _, picked := range paths {
+				if strings.TrimSpace(picked) == "" {
+					continue
+				}
+				refPath := picked
+				if a.shell == nil || a.shell.AutoArchiveAssets {
+					if rel, impErr := a.vault.ImportAssetFile(picked); impErr == nil {
+						refPath = rel
+					}
+				}
+				entry := map[string]any{
+					"id":    fmt.Sprintf("att-%d", len(existing)+1),
+					"label": filepath.Base(picked),
+					"src":   refPath,
+				}
+				if wellID != "" {
+					wellCount++
+					entry["well_id"] = strings.ToUpper(strings.TrimSpace(wellID))
+					entry["fov_index"] = wellCount
+				}
+				existing = append(existing, entry)
+			}
 			if stepID != "" {
 				if next, uErr := asterdoc.UpdateStepBlockInSource(ld.Source, stepID, blockID, map[string]any{"items": existing}); uErr == nil {
 					applyLiveSource(next)
@@ -801,6 +812,31 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 					applyLiveSource(next)
 				}
 			}
+		}
+		v.OnPickAttachmentFile = func(stepID, blockID string) {
+			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
+				Parent: mygo.FocusedWindow(),
+				Title:  "选择实验照片或原始附件",
+			})
+			if pErr == nil && len(paths) > 0 {
+				attachFilesToBlock(stepID, blockID, "", paths)
+			}
+		}
+		v.OnPickAttachmentForWell = func(stepID, blockID, wellID string) {
+			title := "选择实验照片或原始附件"
+			if wellID != "" {
+				title = fmt.Sprintf("为 %s 选择实验照片或附件", wellID)
+			}
+			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
+				Parent: mygo.FocusedWindow(),
+				Title:  title,
+			})
+			if pErr == nil && len(paths) > 0 {
+				attachFilesToBlock(stepID, blockID, wellID, paths)
+			}
+		}
+		v.OnAttachFilesForWell = func(stepID, blockID, wellID string, paths []string) {
+			attachFilesToBlock(stepID, blockID, wellID, paths)
 		}
 		v.OnPickFigureFile = func(stepID, blockID string) {
 			paths, pErr := mygo.Dialog.Open(mygo.OpenDialogOptions{

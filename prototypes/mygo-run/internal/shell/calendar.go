@@ -1116,45 +1116,19 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 					if dIdx >= 0 && dIdx < 7 {
 						ymd := days[dIdx].Format("2006-01-02")
 						s.SelectedDate = ymd
-						halfH := rowH * 0.5
-						nearestStep := float32(math.Round(float64(py / halfH)))
-						totalMins := int(nearestStep)*30 + startHr*60
-						if totalMins < startHr*60 {
-							totalMins = startHr * 60
-						}
-						if totalMins > endHr*60+30 {
-							totalMins = endHr*60 + 30
-						}
+						totalMins, _, _ := weekGridYToMinutes(py, rowH, startHr, endHr)
 						startHHMM := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
 						s.triggerCreateForDateTime(ymd, startHHMM)
 					}
 				}
 			}
 
-			// Smooth click-through hover timeline with gentle 30-minute magnetic snap (:00 / :30).
+			// Smooth click-through hover timeline with gentle ±7px 30-min snap and 5-min fine precision (:05/:15...).
 			axisBox.DrawOver(func(p *ui.Painter, r ui.Rect) {
 				if !s.weekHoverOn || s.weekHoverY < 0 || s.weekHoverY > totalGridH {
 					return
 				}
-				halfH := rowH * 0.5
-				nearestStep := float32(math.Round(float64(s.weekHoverY / halfH)))
-				snapY := nearestStep * halfH
-				lineY := s.weekHoverY
-				snapped := false
-				if abs32Cal(s.weekHoverY-snapY) <= 7 {
-					lineY = snapY
-					snapped = true
-				}
-				totalMins := int(math.Round(float64(lineY/rowH)*60.0)) + startHr*60
-				if snapped {
-					totalMins = int(nearestStep)*30 + startHr*60
-				}
-				if totalMins < startHr*60 {
-					totalMins = startHr * 60
-				}
-				if totalMins > (endHr+1)*60 {
-					totalMins = (endHr + 1) * 60
-				}
+				totalMins, snapped, lineY := weekGridYToMinutes(s.weekHoverY, rowH, startHr, endHr)
 				timeLbl := fmt.Sprintf("%02d:%02d", totalMins/60, totalMins%60)
 				yAbs := r.Y + lineY
 				lineRect := ui.Rect{X: r.X + gutterW, Y: yAbs - 0.75, W: r.W - gutterW, H: 1.5}
@@ -1424,6 +1398,36 @@ func (s *Shell) renderAgendaExperimentRow(c *ui.Context, tok theme.Tokens, exp E
 			}
 		}
 	})
+}
+
+// weekGridYToMinutes maps a vertical pixel offset inside the week-grid time body
+// to clock minutes, snapping within ±7 px of :00/:30 slots and resolving to
+// 5-minute increments everywhere else. Hover preview and double-click creation
+// share this helper so clicking always creates at the exact previewed time.
+func weekGridYToMinutes(y, rowH float32, startHr, endHr int) (totalMins int, snapped bool, displayY float32) {
+	if rowH <= 0 {
+		return startHr * 60, true, 0
+	}
+	halfH := rowH * 0.5
+	nearestStep := float32(math.Round(float64(y / halfH)))
+	snapY := nearestStep * halfH
+	if abs32Cal(y-snapY) <= 7 {
+		totalMins = int(nearestStep)*30 + startHr*60
+		snapped = true
+		displayY = snapY
+	} else {
+		totalMins = int(math.Round(float64(y/rowH)*12.0))*5 + startHr*60
+		displayY = y
+	}
+	minMins := startHr * 60
+	maxMins := endHr*60 + 55
+	if totalMins < minMins {
+		totalMins = minMins
+	}
+	if totalMins > maxMins {
+		totalMins = maxMins
+	}
+	return totalMins, snapped, displayY
 }
 
 func abs32Cal(v float32) float32 {

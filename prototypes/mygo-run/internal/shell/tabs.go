@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ViewMode distinguishes the 3 unified document modes inside a file tab.
@@ -100,15 +101,37 @@ type PaletteCommand struct {
 }
 
 // RightCalcState stores live wet-lab quick calculator inputs inside the companion drawer.
+// Dilution and Molar modes keep completely independent numeric & unit fields so fast
+// switching between tabs never mutates or morphs values across modes (UI-03).
 type RightCalcState struct {
-	Mode       int    // 0 = 稀释 (C1·V1 = C2·V2), 1 = 称量 (m = C·V·MW)
-	Stock      string // default "100"
-	StockUnit  string // ug/mL, mg/mL, mM, M
-	Target     string // default "50"
-	TargetUnit string // ng/mL, ug/mL, uM, mM
-	FinalVol   string // default "4"
-	VolUnit    string // mL, uL
-	MolarMass  string // g/mol, default "1449.25"
+	Initialized bool
+	Mode        int // 0 = C1V1 稀释, 1 = 摩尔称量
+	// Dilution mode inputs
+	Stock      string
+	StockUnit  string
+	Target     string
+	TargetUnit string
+	FinalVol   string
+	VolUnit    string
+	// Molar weighing mode inputs (isolated from Dilution)
+	MolarTarget     string
+	MolarTargetUnit string
+	MolarVol        string
+	MolarVolUnit    string
+	MolarMass       string // g/mol
+}
+
+// BenchTimerState stores the companion drawer's lightweight standalone bench countdown timer.
+type BenchTimerState struct {
+	Initialized  bool
+	PresetMin    int
+	CustomMin    string
+	TotalSec     int
+	RemainingSec int
+	BaseRemSec   int
+	Running      bool
+	StartedAt    time.Time
+	tickQueued   bool
 }
 
 // WorkspacePersistState serializes the Obsidian pane tree and sidebar visibility into `.asterlab/workspace.json`.

@@ -23,22 +23,40 @@ func (s *Shell) ensureRightDrawerDefaults() {
 	if s.RightTab < 0 || s.RightTab > 2 {
 		s.RightTab = 0
 	}
-	if s.RightCalc.Stock == "" {
-		s.RightCalc = RightCalcState{
-			Mode:       0,
-			Stock:      "100",
-			StockUnit:  "µg/mL",
-			Target:     "50",
-			TargetUnit: "ng/mL",
-			FinalVol:   "4",
-			VolUnit:    "mL",
-			MolarMass:  "1449.25",
+	if !s.RightCalc.Initialized {
+		s.RightCalc.Initialized = true
+		if strings.TrimSpace(s.RightCalc.StockUnit) == "" {
+			s.RightCalc.StockUnit = "µg/mL"
+		}
+		if strings.TrimSpace(s.RightCalc.TargetUnit) == "" {
+			s.RightCalc.TargetUnit = "ng/mL"
+		}
+		if strings.TrimSpace(s.RightCalc.VolUnit) == "" {
+			s.RightCalc.VolUnit = "mL"
+		}
+		if strings.TrimSpace(s.RightCalc.MolarTargetUnit) == "" {
+			s.RightCalc.MolarTargetUnit = "mM"
+		}
+		if strings.TrimSpace(s.RightCalc.MolarVolUnit) == "" {
+			s.RightCalc.MolarVolUnit = "mL"
 		}
 	}
-	// Normalize legacy ASCII micro symbols cleanly
+	// Normalize legacy ASCII micro symbols cleanly across both isolated modes.
 	s.RightCalc.StockUnit = normalizeQuickUnitDisplay(s.RightCalc.StockUnit)
 	s.RightCalc.TargetUnit = normalizeQuickUnitDisplay(s.RightCalc.TargetUnit)
 	s.RightCalc.VolUnit = normalizeQuickVolUnit(s.RightCalc.VolUnit)
+	s.RightCalc.MolarTargetUnit = normalizeQuickUnitDisplay(s.RightCalc.MolarTargetUnit)
+	s.RightCalc.MolarVolUnit = normalizeQuickVolUnit(s.RightCalc.MolarVolUnit)
+
+	if !s.BenchTimer.Initialized {
+		s.BenchTimer = BenchTimerState{
+			Initialized:  true,
+			PresetMin:    15,
+			CustomMin:    "15",
+			TotalSec:     15 * 60,
+			RemainingSec: 15 * 60,
+		}
+	}
 }
 
 type drawerContextKind uint8
@@ -515,7 +533,15 @@ func (s *Shell) renderDrawerOutline(c *ui.Context, tok theme.Tokens) {
 }
 
 func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
+	// Top: Quick calculator (C1V1 dilution / Molar weighing toggle)
+	s.renderDrawerQuickCalc(c, tok)
+
+	// Bottom: Always-visible lightweight standalone countdown timer
+	ui.Divider(c)
+	s.renderDrawerBenchTimer(c, tok)
+
 	if len(s.VaultTimers) > 0 {
+		ui.Divider(c)
 		components.Text(c, "Vault 全局计时器").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 		now := time.Now()
 		for _, vt := range s.VaultTimers {
@@ -535,9 +561,9 @@ func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
 				}
 			})
 		}
-		ui.Divider(c)
 	}
 	if len(s.ActiveTimers) > 0 {
+		ui.Divider(c)
 		components.Text(c, "运行中计时器").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 		for _, tm := range s.ActiveTimers {
 			tm := tm
@@ -554,9 +580,161 @@ func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
 				}
 			})
 		}
-		ui.Divider(c)
 	}
-	s.renderDrawerQuickCalc(c, tok)
+}
+
+func formatBenchCountdown(sec int) string {
+	if sec < 0 {
+		sec = 0
+	}
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	ss := sec % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, ss)
+	}
+	return fmt.Sprintf("%02d:%02d", m, ss)
+}
+
+func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
+	bt := &s.BenchTimer
+	if bt.Running {
+		elapsed := int(time.Since(bt.StartedAt).Seconds())
+		rem := bt.BaseRemSec - elapsed
+		if rem <= 0 {
+			bt.RemainingSec = 0
+			bt.Running = false
+		} else {
+			bt.RemainingSec = rem
+			if !bt.tickQueued {
+				bt.tickQueued = true
+				time.AfterFunc(500*time.Millisecond, func() {
+					s.BenchTimer.tickQueued = false
+					s.Invalidate()
+				})
+			}
+		}
+	}
+
+	applyMinutes := func(mins float64, preset int) {
+		secs := int(math.Round(mins * 60))
+		if secs < 1 {
+			secs = 1
+		}
+		bt.PresetMin = preset
+		bt.TotalSec = secs
+		bt.RemainingSec = secs
+		bt.BaseRemSec = secs
+		bt.Running = false
+	}
+
+	ui.Column(c.Key("rd-bench-timer")).FillWidth().Padding(float32(tok.Spacing12)).
+		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
+		Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(tok.Accent)
+			ui.Text(c, "快捷倒计时").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine()
+			ui.Spacer(c)
+			statusLbl := "就绪"
+			statusColor := tok.TextMuted
+			if bt.Running {
+				statusLbl = "计时中"
+				statusColor = tok.Accent
+			} else if bt.TotalSec > 0 && bt.RemainingSec == 0 {
+				statusLbl = "时间到"
+				statusColor = tok.Warning
+			}
+			ui.Text(c, statusLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(statusColor).SingleLine()
+		})
+
+		// Presets row: 5m / 15m / 30m / 60m
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+			for _, m := range []int{5, 15, 30, 60} {
+				m := m
+				active := bt.PresetMin == m
+				lbl := fmt.Sprintf("%d分", m)
+				btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-bt-preset-%d", m))).
+					Grow(1).MinWidth(0).Center().
+					Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+					Radius(float32(tok.ControlRadius)).Label(lbl)
+				fg := tok.TextMuted
+				if active {
+					btn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
+					fg = tok.Accent
+				} else {
+					btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+					if btn.Hovered() {
+						btn.Background(tok.AccentSoftBg.Alpha(0.5))
+						fg = tok.Text
+					}
+				}
+				btn.Children(func() {
+					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+				})
+				if btn.Clicked() {
+					bt.CustomMin = strconv.Itoa(m)
+					applyMinutes(float64(m), m)
+				}
+			}
+		})
+
+		// Custom minutes input + apply
+		ui.Row(c).FillWidth().Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "分钟").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Shrink(0)
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+				tb := components.TextBox(c, &bt.CustomMin, components.TextBoxOptions{}).
+					Placeholder("输入分钟数").FontFeatures("tnum")
+				if tb.Submitted() {
+					if v, err := strconv.ParseFloat(strings.TrimSpace(bt.CustomMin), 64); err == nil && v > 0 {
+						applyMinutes(v, 0)
+					}
+				}
+			})
+			if components.Button(c, "设定", components.ButtonSecondary).Clicked() {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(bt.CustomMin), 64); err == nil && v > 0 {
+					applyMinutes(v, 0)
+				}
+			}
+		})
+
+		// Countdown readout + Start/Pause/Reset
+		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+			Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			clockColor := tok.Text
+			if bt.Running {
+				clockColor = tok.Accent
+			} else if bt.TotalSec > 0 && bt.RemainingSec == 0 {
+				clockColor = tok.Warning
+			}
+			ui.Text(c, formatBenchCountdown(bt.RemainingSec)).
+				FontSize(float32(tok.TextPage)).Bold().TextColor(clockColor).FontFeatures("tnum")
+			ui.Spacer(c)
+			if bt.Running {
+				if components.Button(c, "暂停", components.ButtonSecondary).Clicked() {
+					bt.Running = false
+				}
+			} else {
+				if components.Button(c, "开始", components.ButtonPrimary).Clicked() {
+					if bt.RemainingSec <= 0 {
+						bt.RemainingSec = bt.TotalSec
+					}
+					if bt.RemainingSec <= 0 {
+						bt.TotalSec = 15 * 60
+						bt.RemainingSec = 15 * 60
+					}
+					bt.BaseRemSec = bt.RemainingSec
+					bt.StartedAt = time.Now()
+					bt.Running = true
+				}
+			}
+			if components.Button(c, "重置", components.ButtonGhost).Clicked() {
+				bt.Running = false
+				bt.RemainingSec = bt.TotalSec
+				bt.BaseRemSec = bt.TotalSec
+			}
+		})
+	})
 }
 
 func formatVaultTimerClock(vt vault.VaultTimerEntry, now time.Time) string {
@@ -753,7 +931,7 @@ func defaultCompatibleTargetUnit(stockUnit string) string {
 // UI-07, UI-08, UI-09: Cohesive editorial card calculator with complete wet-lab units
 // and strict compatible-unit filtering (no unusable options ever shown).
 func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
-	// Segmented mode switch
+	// Segmented mode switch: top calculator toggles between C1V1 dilution and Molar weighing.
 	ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
 		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
 		Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
@@ -795,9 +973,9 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 			s.RightCalc.TargetUnit = defaultCompatibleTargetUnit(s.RightCalc.StockUnit)
 		}
 
-		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+		ui.Column(c.Key("rd-dil-card")).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
 			Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
-			drawerLabeledInput(c, tok, "母液浓度 (C₁)", &s.RightCalc.Stock, &s.RightCalc.StockUnit, quickAllStockUnits)
+			drawerLabeledInput(c, tok, "母液浓度 (C₁)", &s.RightCalc.Stock, "例如 100", &s.RightCalc.StockUnit, quickAllStockUnits)
 			// Re-check compatibility immediately if user just changed StockUnit
 			if f1, _ := quickConcUnitBase(s.RightCalc.StockUnit); f1 != "" {
 				compatTargets = compatibleTargetUnitsFor(s.RightCalc.StockUnit)
@@ -805,14 +983,30 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 					s.RightCalc.TargetUnit = defaultCompatibleTargetUnit(s.RightCalc.StockUnit)
 				}
 			}
-			drawerLabeledInput(c, tok, "目标浓度 (C₂)", &s.RightCalc.Target, &s.RightCalc.TargetUnit, compatTargets)
-			drawerLabeledInput(c, tok, "配置总体积 (V₂)", &s.RightCalc.FinalVol, &s.RightCalc.VolUnit, quickVolUnits)
+			drawerLabeledInput(c, tok, "目标浓度 (C₂)", &s.RightCalc.Target, "例如 50", &s.RightCalc.TargetUnit, compatTargets)
+			drawerLabeledInput(c, tok, "配置总体积 (V₂)", &s.RightCalc.FinalVol, "例如 4", &s.RightCalc.VolUnit, quickVolUnits)
 
 			ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.65))
 
+			blankDil := strings.TrimSpace(s.RightCalc.Stock) == "" ||
+				strings.TrimSpace(s.RightCalc.Target) == "" ||
+				strings.TrimSpace(s.RightCalc.FinalVol) == ""
 			v1UL, diluentUL, msg := computeQuickDilution(s.RightCalc)
 			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
 				Background(tok.Surface).Border(1, tok.Accent.Alpha(0.28)).Gap(float32(tok.Spacing4)).Children(func() {
+				if blankDil {
+					ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
+						ui.Text(c, "取母液 V₁").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Spacer(c)
+						ui.Text(c.Key("rd-dil-v1-empty"), "—").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.TextMuted)
+					})
+					ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
+						ui.Text(c, "补加稀释液").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Spacer(c)
+						ui.Text(c.Key("rd-dil-dil-empty"), "—").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+					})
+					return
+				}
 				if msg != "" {
 					components.Text(c, msg).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
 					return
@@ -820,38 +1014,53 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "取母液 V₁").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					ui.Spacer(c)
-					ui.Text(c, formatQuickVolUL(v1UL)).FontSize(float32(tok.TextSection)).Bold().
-						TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+					ui.Text(c.Key("rd-dil-v1"), formatQuickVolUL(v1UL)).FontSize(float32(tok.TextSection)).Bold().
+						TextColor(tok.Accent).FontFeatures("tnum")
 				})
 				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "补加稀释液").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					ui.Spacer(c)
-					ui.Text(c, formatQuickVolUL(diluentUL)).FontSize(float32(tok.TextData)).Bold().
-						TextColor(tok.Text).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+					ui.Text(c.Key("rd-dil-dil"), formatQuickVolUL(diluentUL)).FontSize(float32(tok.TextData)).Bold().
+						TextColor(tok.Text).FontFeatures("tnum")
 				})
 			})
 		})
 		return
 	}
 
-	// Molar weighing mode: auto-coerce non-molar unit so incompatible units never appear (UI-08).
-	if fam, _ := quickConcUnitBase(s.RightCalc.TargetUnit); fam != "molar" {
-		s.RightCalc.TargetUnit = "mM"
+	// Molar weighing mode uses isolated MolarTarget/MolarTargetUnit/MolarVol/MolarVolUnit/MolarMass
+	// so switching between Dilution and Molar modes never mutates or morphs values (UI-03).
+	if fam, _ := quickConcUnitBase(s.RightCalc.MolarTargetUnit); fam != "molar" {
+		s.RightCalc.MolarTargetUnit = "mM"
 	}
-	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+	if strings.TrimSpace(s.RightCalc.MolarVolUnit) == "" {
+		s.RightCalc.MolarVolUnit = "mL"
+	}
+	ui.Column(c.Key("rd-mol-card")).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
 		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
-		drawerLabeledInput(c, tok, "目标摩尔浓度", &s.RightCalc.Target, &s.RightCalc.TargetUnit, quickMolarUnits)
-		drawerLabeledInput(c, tok, "配置总体积", &s.RightCalc.FinalVol, &s.RightCalc.VolUnit, quickVolUnits)
+		drawerLabeledInput(c, tok, "目标摩尔浓度", &s.RightCalc.MolarTarget, "例如 10", &s.RightCalc.MolarTargetUnit, quickMolarUnits)
+		drawerLabeledInput(c, tok, "配置总体积", &s.RightCalc.MolarVol, "例如 5", &s.RightCalc.MolarVolUnit, quickVolUnits)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-			ui.Text(c, "分子量 MW (g/mol)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			ui.Text(c, "分子量 MW (g/mol)").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 			components.TextBox(c, &s.RightCalc.MolarMass, components.TextBoxOptions{}).Placeholder("例如 1449.25")
 		})
 
 		ui.Box(c).FillWidth().Height(1).Background(tok.Border.Alpha(0.65))
 
+		blankMol := strings.TrimSpace(s.RightCalc.MolarTarget) == "" ||
+			strings.TrimSpace(s.RightCalc.MolarVol) == "" ||
+			strings.TrimSpace(s.RightCalc.MolarMass) == ""
 		massMg, msg := computeQuickMolarMass(s.RightCalc)
 		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
 			Background(tok.Surface).Border(1, tok.Accent.Alpha(0.28)).Gap(float32(tok.Spacing4)).Children(func() {
+			if blankMol {
+				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
+					ui.Text(c, "需称量溶质").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					ui.Spacer(c)
+					ui.Text(c.Key("rd-mol-empty"), "—").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.TextMuted)
+				})
+				return
+			}
 			if msg != "" {
 				components.Text(c, msg).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
 				return
@@ -859,19 +1068,22 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 			ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 				ui.Text(c, "需称量溶质").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				ui.Spacer(c)
-				ui.Text(c, formatQuickMassMg(massMg)).FontSize(float32(tok.TextSection)).Bold().
-					TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
+				ui.Text(c.Key("rd-mol-res"), formatQuickMassMg(massMg)).FontSize(float32(tok.TextSection)).Bold().
+					TextColor(tok.Accent).FontFeatures("tnum")
 			})
 		})
 	})
 }
 
-func drawerLabeledInput(c *ui.Context, tok theme.Tokens, label string, val *string, unit *string, units []string) {
+func drawerLabeledInput(c *ui.Context, tok theme.Tokens, label string, val *string, placeholder string, unit *string, units []string) {
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-				components.TextBox(c, val, components.TextBoxOptions{}).FontFeatures("tnum")
+				tb := components.TextBox(c, val, components.TextBoxOptions{}).FontFeatures("tnum")
+				if placeholder != "" {
+					tb.Placeholder(placeholder)
+				}
 			})
 			if unit != nil && len(units) > 0 {
 				ui.Box(c).Width(float32(tok.Spacing48) * 1.9).Shrink(0).Children(func() {
@@ -989,17 +1201,17 @@ func computeQuickDilution(st RightCalcState) (v1UL, dilUL float64, errMsg string
 }
 
 func computeQuickMolarMass(st RightCalcState) (massMg float64, errMsg string) {
-	c2, err1 := strconv.ParseFloat(strings.TrimSpace(st.Target), 64)
-	v2, err2 := strconv.ParseFloat(strings.TrimSpace(st.FinalVol), 64)
+	c2, err1 := strconv.ParseFloat(strings.TrimSpace(st.MolarTarget), 64)
+	v2, err2 := strconv.ParseFloat(strings.TrimSpace(st.MolarVol), 64)
 	mw, err3 := strconv.ParseFloat(strings.TrimSpace(st.MolarMass), 64)
 	if err1 != nil || err2 != nil || err3 != nil || c2 <= 0 || v2 <= 0 || mw <= 0 {
 		return 0, "请输入有效浓度、体积和分子量"
 	}
-	fam, f := quickConcUnitBase(st.TargetUnit)
+	fam, f := quickConcUnitBase(st.MolarTargetUnit)
 	if fam != "molar" {
 		return 0, "称量模式请选择摩尔浓度单位 (M / mM / µM / nM)"
 	}
-	volL := quickVolToUL(v2, st.VolUnit) * 1e-6
+	volL := quickVolToUL(v2, st.MolarVolUnit) * 1e-6
 	grams := (c2 * f) * volL * mw
 	return grams * 1000.0, ""
 }

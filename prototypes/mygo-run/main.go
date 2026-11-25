@@ -20,6 +20,7 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/uikit/kit"
+	"asterlab-mygo-prototype/internal/uikit/labsticker"
 	"asterlab-mygo-prototype/internal/updater"
 	"asterlab-mygo-prototype/internal/vault"
 	"asterlab-mygo-prototype/internal/workflow"
@@ -251,7 +252,6 @@ type app struct {
 	newExpOpen       bool
 	newExpFolder     string
 	devInsp          devInspectorState
-	newExpNewFolder  string
 	newExpTitle      string
 	newExpDate       string
 	newExpStartTime  string
@@ -5449,6 +5449,12 @@ func main() {
 		a.preload()
 		a.startExternalSyncLoop()
 		a.startAutoUpdateCheck()
+		labsticker.PrewarmAsync()
+		go func() {
+			defer diag.RecoverAndLog("nl-onnx-prewarm")
+			time.Sleep(250 * time.Millisecond)
+			_ = asterdoc.DefaultNLOnnxRouter()
+		}()
 		go func() {
 			defer diag.RecoverAndLog("boot-watchdog")
 			time.Sleep(10 * time.Second)

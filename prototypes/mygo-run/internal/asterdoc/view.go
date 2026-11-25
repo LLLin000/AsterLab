@@ -105,10 +105,12 @@ type View struct {
 	VaultCompletionTargets []string
 	OnExecuteSlash         func(item SlashCommandItem, stepID string, insertOffset int)
 	OnAttachPhotoToWell    func(plateID string, wells []string)
-	OnDuplicateBlock   func(stepID, blockID string)
-	OnImportAssetBytes func(data []byte, origName string) (string, error)
-	OnPickAttachmentFile func(stepID, blockID string)
-	OnSavePlateExport    func(defaultName, format string, data []byte) error
+	OnDuplicateBlock      func(stepID, blockID string)
+	OnImportAssetBytes    func(data []byte, origName string) (string, error)
+	OnPickAttachmentFile  func(stepID, blockID string)
+	OnPickAttachmentForWell func(stepID, blockID, wellID string)
+	OnAttachFilesForWell    func(stepID, blockID, wellID string, paths []string)
+	OnSavePlateExport     func(defaultName, format string, data []byte) error
 	OnCopyImage          func(pngBytes []byte) error
 	OnLocatePantryCode   func(code string)
 	OnSlashInsert      func(stepID string, afterIndex int, block map[string]any)
@@ -1148,7 +1150,7 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 		meta = fmt.Sprintf("%d 区培养皿 · 已排 %d 区", geometry.Rows*geometry.Columns, len(p.WellGroups()))
 	}
 	if v.UnifiedLive {
-		meta = fmt.Sprintf("%d/%d", len(p.WellGroups()), totalWells)
+		meta = fmt.Sprintf("%d/%d", len(wells), totalWells)
 	}
 	if p.Timepoint != "" {
 		meta += " · " + p.Timepoint

@@ -124,3 +124,54 @@ func TestVaultLifecycleFoldersDuplicateTrashUndoAndAssets(t *testing.T) {
 		t.Fatalf("restored file missing: %v", err)
 	}
 }
+
+func TestNormalizeFolderPathAndNestedCreation(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "", want: ""},
+		{in: "  /  ", want: ""},
+		{in: "Fig4-动物实验", want: "Fig4-动物实验"},
+		{in: "Fig4/子目录/第3轮", want: "Fig4/子目录/第3轮"},
+		{in: `Fig4\WinSub\Run1`, want: "Fig4/WinSub/Run1"},
+		{in: "../escape", wantErr: true},
+		{in: "Fig4/..", wantErr: true},
+		{in: "Fig4//Sub", wantErr: true},
+		{in: ".asterlab/bad", wantErr: true},
+		{in: "templates/custom", wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := NormalizeFolderPath(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("NormalizeFolderPath(%q): expected error, got %q", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("NormalizeFolderPath(%q): unexpected error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Fatalf("NormalizeFolderPath(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	root := t.TempDir()
+	v, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	nested, _ := NormalizeFolderPath("Fig4-动物实验/第1批/Day7")
+	entry, err := v.CreateExperiment(nested, "嵌套实验", "2026-11-25", "title: 嵌套实验\n")
+	if err != nil {
+		t.Fatalf("CreateExperiment nested: %v", err)
+	}
+	if entry.Folder != "Fig4-动物实验/第1批/Day7" {
+		t.Fatalf("expected nested folder Fig4-动物实验/第1批/Day7, got %q", entry.Folder)
+	}
+	if _, err := os.Stat(entry.AbsPath); err != nil {
+		t.Fatalf("expected nested file on disk: %v", err)
+	}
+}

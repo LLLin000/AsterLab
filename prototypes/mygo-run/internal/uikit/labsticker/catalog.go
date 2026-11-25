@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -358,4 +359,28 @@ func SuggestVesselID(name, location string) VesselID {
 	default:
 		return VesselEP15
 	}
+}
+
+var prewarmOnce sync.Once
+
+// PrewarmAsync warms up SVG parsing and die-cut sticker EDT bitmap caches in
+// the background shortly after startup so the first visit to Reagent Pantry or
+// Experiment views renders without a cold-start rasterization pause.
+func PrewarmAsync() {
+	prewarmOnce.Do(func() {
+		go func() {
+			time.Sleep(120 * time.Millisecond)
+			for _, sp := range AllVessels() {
+				_, _ = ParseVesselSVG(sp.ID)
+				_, _, _ = Sticker(sp.ID, StickerOptions{TargetHeightDIP: sp.DefaultHeight})
+			}
+			for _, sp := range AllBoxes() {
+				_, _ = ParseVesselSVG(sp.ID)
+				_, _, _ = Sticker(sp.ID, StickerOptions{TargetHeightDIP: sp.DefaultHeight})
+			}
+			for _, sp := range AllAnimals() {
+				_, _ = ParseAnimalSVG(sp.ID)
+			}
+		}()
+	})
 }
