@@ -1,0 +1,199 @@
+name: mobile-build
+
+# Automated iOS + Android mobile packaging via MyGo v0.10.0.
+# Runs on manual dispatch or release/mobile tags; produces Android .apk/.aab
+# and iOS Simulator .app (plus optional signed .ipa when Apple signing is enabled).
+on:
+  workflow_dispatch:
+    inputs:
+      android_target:
+        description: 'MyGo Android target (android = all ABIs, or android/arm64)'
+        required: false
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - android/arm64
+          - android/arm
+          - android/amd64
+      build_ios_signed:
+        description: 'Also build signed iOS .ipa (requires Apple signing secrets)'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+      - 'mobile-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: build-android
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Install JDK 17 for Android Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure preinstalled Android SDK & NDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=${SDK}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK}" >> "$GITHUB_ENV"
+          NDK_DIR=""
+          if [ -d "${SDK}/ndk" ]; then
+            NDK_DIR="$(find "${SDK}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1 || true)"
+          fi
+          if [ -z "${NDK_DIR}" ]; then
+            yes | "${SDK}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "${SDK}/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+            NDK_DIR="${SDK}/ndk/27.2.12479018"
+          fi
+          echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
+          echo "Using Android SDK=${SDK}, NDK=${NDK_DIR}"
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('prototypes/mygo-run/mygo.json', 'prototypes/mygo-run/go.sum') }}
+          restore-keys: android-gradle-
+
+      - name: Install MyGo CLI (v0.10.0)
+        run: |
+          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify MyGo mobile environment & build Android (.apk + .aab)
+        working-directory: prototypes/mygo-run
+        env:
+          MYGO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MYGO_ANDROID_KEYSTORE_PASSWORD }}
+          MYGO_ANDROID_KEY_PASSWORD: ${{ secrets.MYGO_ANDROID_KEY_PASSWORD }}
+        run: |
+          mygo doctor
+          TARGET="${{ inputs.android_target || 'android' }}"
+          mygo build -platform "${TARGET}"
+          ls -lh dist/android/
+
+      - name: Upload Android APK & AAB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-android-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            prototypes/mygo-run/dist/android/*.apk
+            prototypes/mygo-run/dist/android/*.aab
+
+  build-ios-sim:
+    name: build-ios-sim
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Install MyGo CLI (v0.10.0)
+        run: |
+          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Xcode & build iOS Simulator (.app)
+        working-directory: prototypes/mygo-run
+        run: |
+          xcodebuild -version
+          mygo doctor
+          mygo build -platform ios/simulator
+          ls -lh dist/ios-simulator/
+
+      - name: Upload iOS Simulator .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-ios-simulator-${{ github.sha }}
+          if-no-files-found: error
+          path: prototypes/mygo-run/dist/ios-simulator/*.app
+
+  build-ios-signed:
+    name: build-ios-signed
+    runs-on: macos-latest
+    timeout-minutes: 45
+    if: ${{ vars.ENABLE_IOS_SIGNED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.build_ios_signed) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Install MyGo CLI (v0.10.0)
+        run: |
+          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Import Apple distribution certificate & provisioning profile
+        env:
+          IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${IOS_CERTIFICATE_P12}" ] || [ -z "${IOS_PROVISIONING_PROFILE}" ]; then
+            echo "::error::Missing IOS_CERTIFICATE_P12 or IOS_PROVISIONING_PROFILE secret for signed iOS build."
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/ios-signing.keychain-db"
+          KC_PASS="$(openssl rand -base64 24)"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          echo "$IOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/ios-dist.p12"
+          security import "$RUNNER_TEMP/ios-dist.p12" -k "$KEYCHAIN" \
+            -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/ios-dist.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > "$HOME/Library/MobileDevice/Provisioning Profiles/asterlab.mobileprovision"
+
+      - name: Build signed iOS (.ipa)
+        working-directory: prototypes/mygo-run
+        run: |
+          mygo build -platform ios
+          ls -lh dist/ios-arm64/
+
+      - name: Upload signed iOS .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-ios-ipa-${{ github.sha }}
+          if-no-files-found: error
+          path: prototypes/mygo-run/dist/ios-arm64/*.ipa
