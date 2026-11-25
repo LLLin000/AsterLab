@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
@@ -129,4 +130,72 @@ func (s *Shell) BuiltinShellStorySection() kit.StorySection {
 			})
 		},
 	}
+}
+
+// RenderStewardPreviewPanel renders the live Ambient Lab Steward status pills and compact
+// 「关联体检」 drawer body for the UI Gallery Storybook.
+func RenderStewardPreviewPanel(c *ui.Context, tok theme.Tokens) {
+	demo := &Shell{
+		CurrentDocRelPath: "HAMA/L929-CCK8.asterml",
+		CurrentDiagnostics: []DiagnosticItem{
+			{
+				Code:         "PANTRY_EXPIRED",
+				Severity:     "blocking",
+				Path:         "pantry.p-old",
+				Message:      "文中提及试剂「旧批号胰酶 (Trypsin)」在储藏室中已过期（2026-10-15）",
+				PantryItemID: "p-old",
+			},
+			{
+				Code:         "PANTRY_NEAR_EXPIRY",
+				Severity:     "needs_confirmation",
+				Path:         "pantry.p-cck8",
+				Message:      "文中提及试剂「CCK-8 试剂盒」即将过期（2026-11-28）",
+				PantryItemID: "p-cck8",
+			},
+		},
+		CurrentMatchedReagents: []MatchedReagentItem{
+			{ID: "p-old", Name: "旧批号胰酶", Location: "-20°C B2", Status: "expired"},
+			{ID: "p-cck8", Name: "CCK-8 试剂盒", Location: "-20°C A1", Status: "near_expiry"},
+			{ID: "p-dmem", Name: "DMEM 培养基", Location: "4°C 上层", Status: "normal"},
+		},
+		CurrentDocSuggestions: []DocSuggestionItem{
+			{KindLabel: "参数表 (param_table)", Summary: "37°C · 5% CO₂ · 24h", ByteOffset: 120},
+			{KindLabel: "计时器 (timer)", Summary: "避光显色 90 min", ByteOffset: 240},
+		},
+		CurrentRelatedDocs: []RelatedDocItem{
+			{RelPath: "Fig4/Van-Lys-抗菌测定.asterml", Title: "Van-Lys 液体共培养抗菌测定", Date: "2026-11-20", Folder: "Fig4"},
+			{RelPath: "Cell/L929-毒性初筛-R1.asterml", Title: "L929 细胞毒性初筛（第 1 轮）", Date: "2026-11-12", Folder: "Cell"},
+		},
+		OnLocatePantry:       func(string) {},
+		OnApplyDocSuggestion: func(DocSuggestionItem) {},
+		OnOpenSearchHit:      func(string, string) {},
+	}
+	ui.Column(c.Key("sb-steward-preview")).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, "底栏状态胶囊三态：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			for _, p := range []struct {
+				txt string
+				col ui.Color
+				bg  ui.Color
+			}{
+				{"2 项提醒", tok.DangerText, tok.DangerBg},
+				{"✦ 2 处可结构化", tok.Accent, tok.AccentSoftBg},
+				{"方案就绪", tok.SuccessText, tok.Elevated},
+			} {
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
+					Radius(float32(tok.ControlRadius)).Background(p.bg).
+					Border(1, tok.BorderSubtle).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					if !strings.HasPrefix(p.txt, "✦") {
+						ui.Box(c).Size(6, 6).Radius(3).Background(p.col)
+					}
+					ui.Text(c, p.txt).FontSize(float32(tok.TextMeta)).Bold().TextColor(p.col).SingleLine()
+				})
+			}
+		})
+		ui.Box(c).FillWidth().Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.ControlRadius)).Background(tok.Surface).
+			Border(1, tok.Border).Children(func() {
+			demo.renderDrawerLinksAndDiagnostics(c, tok)
+		})
+	})
 }

@@ -1503,3 +1503,162 @@ func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
 		}
 	})
 }
+
+func TestStage6EditorialStewardStorybookVisualAudit(t *testing.T) {
+	outDir := os.Getenv("ASTERLAB_VISUAL_OUT")
+	if outDir == "" {
+		outDir = t.TempDir()
+	} else if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir visual out: %v", err)
+	}
+
+	root := filepath.Join(t.TempDir(), "s6_vault")
+	v, err := vault.Open(root)
+	if err != nil {
+		t.Fatalf("vault.Open: %v", err)
+	}
+	_ = v.SeedTemplates(defaultTemplateSeeds())
+	sh := &shell.Shell{
+		TodayDate:   "2026-11-25",
+		LiquidGlass: true,
+		Density:     theme.DensityDefault,
+	}
+	a := &app{
+		shell:      sh,
+		vault:      v,
+		vaultIndex: vault.NewVaultIndex(v),
+		docStore:   vault.NewDocStore(v),
+	}
+	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+
+	// 1 & 2. Full UI Gallery Section 7 (Light & Dark)
+	stEditorialLight := &kit.GalleryState{ActiveSection: "editorial-steward"}
+	renderVisualPNGSteps(t, outDir, "s6_01_storybook_editorial_sidenotes_light.png", 1360, 1460, false, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stEditorialLight, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(220 * time.Millisecond)
+		tt.Frame()
+		tt.Frame()
+		if !tt.HasText("边缘孔仅加等体积无菌 PBS") || !tt.HasText("关联体检") && !tt.HasText("关联试剂") {
+			t.Fatalf("expected sidenote body and steward preview in Storybook Section 7, texts=%v", tt.Texts())
+		}
+	})
+
+	stEditorialDark := &kit.GalleryState{ActiveSection: "editorial-steward"}
+	renderVisualPNGSteps(t, outDir, "s6_02_storybook_editorial_sidenotes_dark.png", 1360, 1460, true, func(c *ui.Context) {
+		kit.RenderComponentGallery(c, stEditorialDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(220 * time.Millisecond)
+		tt.Frame()
+		tt.Frame()
+	})
+
+	// 3 & 4. Direct live document canvas wide Tufte sidenotes vs narrow drawer-open superscript fallback
+	docSrc := `---
+title: L929 CCK-8 细胞活力测定
+date: 2026-11-25
+status: in_progress
+---
+
+#@ 1. 细胞接种铺板
+按每孔 5,000 个细胞接种至 [@96孔板](#ed-plate)，加入 [@DMEM 培养基](asterlab://pantry?code=R-001) 至 100 uL。最外圈 36 孔建议做边缘封闭保护[^1]，吹打混匀避免气泡。
+
+#@ 2. 梯度加药与 CCK-8 显色
+参考 [[Fig4/Van-Lys-抗菌测定.asterml|Van-Lys 抗菌测定]] 配制梯度后，加入临期试剂 [@CCK-8 试剂盒](asterlab://pantry?code=R-002)，混合工作液全程避光[^2]。
+
+#@ 3. 酶标仪读数
+37°C 孵育后在 450 nm 测定吸光度，若使用 [@旧批号胰酶](asterlab://pantry?code=R-003) 需复核细胞状态[^3]。
+
+` + "```asterlab" + `
+kind: group_table
+id: ed-gt
+schema: 1
+title: 分组表
+rows:
+  - {id: g1, name: 对照组, role: control}
+` + "```" + `
+
+` + "```asterlab" + `
+kind: plate
+id: ed-plate
+schema: 1
+title: 96孔板
+format: 24
+groups:
+  g1: [A1, A2]
+` + "```" + `
+
+[^1]: 边缘 36 孔仅加等体积无菌 PBS，防 48h 蒸发影响边缘读数。
+[^2]: CCK-8 避光分装，37°C 孵育控制在 1~1.5h 勿超 2h。
+[^3]: OD450 > 2.0 出现平台饱和时，先用培养基 1:1 稀释重测。
+`
+	doc, err := asterdoc.Parse(docSrc)
+	if err != nil {
+		t.Fatalf("Parse docSrc: %v", err)
+	}
+	pantryItems := []asterdoc.PantryMentionItem{
+		{ID: "p-dmem", Name: "DMEM 培养基", LabelCode: "R-001", Location: "4°C 上层", ItemType: "reagent", Status: "normal"},
+		{ID: "p-cck8", Name: "CCK-8 试剂盒", LabelCode: "R-002", Location: "-20°C A1", ItemType: "reagent", Status: "near_expiry"},
+		{ID: "p-old", Name: "旧批号胰酶", LabelCode: "R-003", Location: "-20°C B2", ItemType: "reagent", Status: "expired"},
+	}
+
+	wideView := &asterdoc.View{
+		Doc:                    doc,
+		Mode:                   asterdoc.ModeDesign,
+		UnifiedLive:            true,
+		ShowRightSidenotes:     true,
+		SidenoteWidth:          228,
+		PantryCompletionItems:  pantryItems,
+		VaultCompletionTargets: []string{"Fig4/Van-Lys-抗菌测定.asterml"},
+		Allowed:                map[string]bool{asterdoc.PermDocumentEdit: true},
+	}
+	renderVisualPNGSteps(t, outDir, "s6_03_live_doc_wide_sidenotes_light.png", 1365, 872, false, func(c *ui.Context) {
+		tok := theme.GetTokens(c.Theme())
+		ui.Column(c).Fill().Background(tok.Canvas).Padding(float32(tok.Spacing16), float32(tok.Spacing32)).Gap(float32(tok.Spacing16)).Children(func() {
+			ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+				wideView.RenderFloatingToolbar(c, false)
+			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+				ui.Column(c).FillWidth().MaxWidth(1040).Gap(float32(tok.Spacing12)).Children(func() {
+					ui.Text(c, "L929 CCK-8 细胞活力测定").FontSize(float32(tok.TextPage)).Bold().TextColor(tok.Text)
+					wideView.Render(c)
+				})
+			})
+		})
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(220 * time.Millisecond)
+		tt.Frame()
+		tt.Frame()
+	})
+
+	narrowView := &asterdoc.View{
+		Doc:                    doc,
+		Mode:                   asterdoc.ModeDesign,
+		UnifiedLive:            true,
+		ShowRightSidenotes:     false,
+		PantryCompletionItems:  pantryItems,
+		VaultCompletionTargets: []string{"Fig4/Van-Lys-抗菌测定.asterml"},
+		Allowed:                map[string]bool{asterdoc.PermDocumentEdit: true},
+	}
+	renderVisualPNGSteps(t, outDir, "s6_04_live_doc_narrow_drawer_light.png", 1365, 872, false, func(c *ui.Context) {
+		tok := theme.GetTokens(c.Theme())
+		ui.Row(c).Fill().Background(tok.Canvas).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).FillHeight().Padding(float32(tok.Spacing24), float32(tok.Spacing32)).Gap(float32(tok.Spacing12)).Children(func() {
+				ui.Text(c, "L929 CCK-8 细胞活力测定（窄区自动退化为上标气泡）").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				narrowView.Render(c)
+			})
+			ui.Box(c).Width(float32(tok.Spacing48)*7.2).FillHeight().Background(tok.Elevated).Border(1, tok.Border).Padding(float32(tok.Spacing12)).Children(func() {
+				shell.RenderStewardPreviewPanel(c, tok)
+			})
+		})
+	}, func(tt *ui.Tester) {
+		tt.Frame()
+		tt.Advance(220 * time.Millisecond)
+		tt.Frame()
+		tt.Frame()
+	})
+}

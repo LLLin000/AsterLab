@@ -661,7 +661,7 @@ func computeLivePreviewDecorationsFull(
 				if !isEmbed && onOpenVault != nil && target != "" {
 					docRel := target
 					pillLabel := firstNonEmpty(disp, target)
-					pillW := estimateChipWidth(pillLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					pillW := estimateInlinePillWidth(pillLabel, float32(tok.TextMeta), true)
 					repls = append(repls, editor.Replacement{
 						Start:       lineStart + m[0],
 						End:         lineStart + m[1],
@@ -752,7 +752,7 @@ func computeLivePreviewDecorationsFull(
 						}
 					}
 					chipLabel := "@" + rawLabel
-					chipW := estimateChipWidth(chipLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					chipW := estimateInlinePillWidth(rawLabel, float32(tok.TextMeta), true)
 					codeCapture := rawCode
 					repls = append(repls, editor.Replacement{
 						Start:       lineStart + m[0],
@@ -783,7 +783,7 @@ func computeLivePreviewDecorationsFull(
 				} else if strings.HasPrefix(href, "#") {
 					objID := strings.TrimSpace(strings.TrimPrefix(href, "#"))
 					chipLabel := "@" + rawLabel
-					chipW := estimateChipWidth(chipLabel, float32(tok.TextMeta)) + float32(tok.Spacing12)
+					chipW := estimateInlinePillWidth(rawLabel, float32(tok.TextMeta), true)
 					repls = append(repls, editor.Replacement{
 						Start:       lineStart + m[0],
 						End:         lineStart + m[1],
@@ -830,9 +830,9 @@ func computeLivePreviewDecorationsFull(
 							dispNum = strconv.Itoa(found.Number)
 						}
 					}
-					supW := estimateChipWidth(dispNum, float32(tok.TextMeta)) - float32(tok.Spacing12)
-					if supW < float32(tok.Spacing16)+4 {
-						supW = float32(tok.Spacing16) + 4
+					supW := estimateInlinePillWidth(dispNum, float32(tok.TextMeta), false)
+					if supW < float32(tok.Spacing16)+2 {
+						supW = float32(tok.Spacing16) + 2
 					}
 					matchOff := lineStart + m[0]
 					repls = append(repls, editor.Replacement{
@@ -1141,6 +1141,21 @@ func estimateStepPillWidth(label string, fontSize float32) float32 {
 	}
 	if w < 44 {
 		w = 44
+	}
+	return w
+}
+
+func estimateInlinePillWidth(label string, fontSize float32, hasIcon bool) float32 {
+	var w float32 = 12 // left+right pill padding + borders
+	if hasIcon {
+		w += fontSize + 6 // icon width + gap
+	}
+	for _, r := range label {
+		if r > 0x7F {
+			w += fontSize * 1.04
+		} else {
+			w += fontSize * 0.62
+		}
 	}
 	return w
 }
