@@ -32,6 +32,56 @@ func (v *View) TriggerSlashFromToolbar() {
 	v.pendingInjectSlash = true
 }
 
+// InsertFootnoteAtActiveCursor inserts a standard Markdown `[^n]` footnote at the active cursor
+// (or trailing writable segment) and focuses the inline/sidenote editor for immediate input.
+func (v *View) InsertFootnoteAtActiveCursor() {
+	if v.ReadOnly || v.Doc == nil || v.OnChange == nil {
+		return
+	}
+	if v.footnoteCollapsed == nil {
+		v.footnoteCollapsed = map[string]bool{}
+	}
+	target := v.activeWritableLiveKey()
+	if target != "" {
+		if ent := v.liveEditors[target]; ent != nil && ent.state != nil && ent.state.Buffer != nil && !ent.state.ReadOnly {
+			curBuf := strings.ReplaceAll(ent.state.Buffer.String(), "\r\n", "\n")
+			localOff := min(max(0, ent.state.Cursor()), len(curBuf))
+			globalOff := min(max(0, ent.docOffset+localOff), len(v.Doc.Source))
+			nextSrc, id := InsertFootnoteAtOffset(v.Doc.Source, globalOff, "")
+			refTok := "[^" + id + "]"
+			ent.state.Buffer.Edit(editor.Edit{Start: localOff, End: localOff, Text: refTok})
+			ent.state.Select(localOff+len(refTok), localOff+len(refTok))
+			ent.syncedText = ent.state.Buffer.String()
+			ent.lastOwnedSource = nextSrc
+			ent.lastVersion = 0
+			v.footnoteCollapsed[id] = false
+			v.editingFootnoteID = id
+			v.footnoteFocusPending = id
+			if !v.ShowRightSidenotes {
+				v.openFootnotePopoverID = id
+			}
+			v.OnChange(nextSrc)
+			return
+		}
+	}
+	fnDoc := ParseFootnotes(v.Doc.Source)
+	insertOff := len(v.Doc.Source)
+	if fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < insertOff {
+		insertOff = fnDoc.TrailingDefStart
+		for insertOff > 0 && (v.Doc.Source[insertOff-1] == '\n' || v.Doc.Source[insertOff-1] == '\r') {
+			insertOff--
+		}
+	}
+	nextSrc, id := InsertFootnoteAtOffset(v.Doc.Source, insertOff, "")
+	v.footnoteCollapsed[id] = false
+	v.editingFootnoteID = id
+	v.footnoteFocusPending = id
+	if !v.ShowRightSidenotes {
+		v.openFootnotePopoverID = id
+	}
+	v.OnChange(nextSrc)
+}
+
 func (v *View) activeWritableLiveKey() string {
 	if v.liveEditors == nil {
 		return ""
@@ -117,6 +167,9 @@ func (v *View) RenderFloatingToolbar(c *ui.Context, locked bool) {
 			v.applyMarkdownLineTransform(func(line string) string {
 				return toggleMarkdownPrefix(line, "- [ ] ")
 			})
+		})
+		toolBtn("footnote", lucide.MessageSquarePlus(), "插入批注 / 脚注 (Ctrl+Shift+M)", false, func() {
+			v.InsertFootnoteAtActiveCursor()
 		})
 
 		// 1px vertical hairline divider between Markdown formatting and Component Inserter
