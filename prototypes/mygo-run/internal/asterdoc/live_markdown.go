@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -81,6 +82,7 @@ var (
 	reMDStrike        = regexp.MustCompile(`~~([^~\r\n]+?)~~`)
 	reWikiBracket     = regexp.MustCompile(`(!?)\[\[([^\]|\r\n]+?)(?:\|([^\]\r\n]*))?\]\]`)
 	reMDInlineMention = regexp.MustCompile(`\[@([^\]\r\n]+)\]\((asterlab://pantry\?code=[^)\r\n]+|#[A-Za-z0-9_.:-]+)\)`)
+	reMDFootnoteRef   = regexp.MustCompile(`\[\^([^\s\]\r\n]+)\]`)
 	reMDDisplayMath   = regexp.MustCompile(`^\s*\$\$(.+?)\$\$\s*$`)
 	reMDInlineMath    = regexp.MustCompile(`\$([^\$\r\n]+?)\$`)
 	rePlainSciPower   = regexp.MustCompile(`\b(?:10|[a-zA-Z]{1,3})\^(?:\{[+-]?[0-9a-zA-Z]+\}|[+-]?[0-9]+)`)
@@ -129,6 +131,18 @@ func ShouldTriggerSlashAt(text string, cursor int) (startOff int, query string, 
 	return slashIdx, q, true
 }
 
+type liveFootnoteHooks struct {
+	doc        *FootnoteDoc
+	showSide   bool
+	editable   bool
+	onHover    func(id string)
+	isActiveFN func(id string) bool
+	isPopOpen  func(id string) bool
+	setPopOpen func(id string, open bool)
+	onClickFN  func(id string)
+	renderPop  func(c *ui.Context, tok theme.Tokens, fn FootnoteEntry, editable bool)
+}
+
 // ComputeLivePreviewDecorations builds MyGo editor LineStyles, Replacements, and Diagnostics
 // for Obsidian-style Live Preview: non-active lines hide Markdown syntax markers, render
 // headings at display sizes, replace `- [ ]`/`- [x]` with interactive native checkboxes, and
@@ -146,7 +160,7 @@ func ComputeLivePreviewDecorations(
 	onToggleCheck func(start, end int, checked bool),
 	onClickTarget func(objID, sub string),
 ) (styles []editor.LineStyle, repls []editor.Replacement, diags []editor.Diagnostic) {
-	return computeLivePreviewDecorationsFull(text, activeLine, focused, t, tok, doc, docOffset, allowCheckToggle, nil, onToggleCheck, onClickTarget, nil, nil)
+	return computeLivePreviewDecorationsFull(text, activeLine, focused, t, tok, doc, docOffset, allowCheckToggle, nil, nil, onToggleCheck, onClickTarget, nil, nil)
 }
 
 func computeLivePreviewDecorationsFull(
@@ -159,6 +173,7 @@ func computeLivePreviewDecorationsFull(
 	docOffset int,
 	allowCheckToggle bool,
 	pantryByKey map[string]PantryMentionItem,
+	fnHooks *liveFootnoteHooks,
 	onToggleCheck func(start, end int, checked bool),
 	onClickTarget func(objID, sub string),
 	onLocatePantry func(code string),
@@ -797,6 +812,85 @@ func computeLivePreviewDecorationsFull(
 					})
 				}
 			}
+			// Obsidian/Tufte inline Markdown footnote superscript pills `[^1]` on non-active lines
+			if reFootnoteDefLine.FindStringIndex(lineText) == nil {
+				for _, m := range reMDFootnoteRef.FindAllStringSubmatchIndex(lineText, -1) {
+					if inCodeSpan(m[0]) || (m[1] < len(lineText) && lineText[m[1]] == ':') {
+						continue
+					}
+					fnID := strings.TrimSpace(lineText[m[2]:m[3]])
+					if fnID == "" {
+						continue
+					}
+					entry := FootnoteEntry{ID: fnID}
+					dispNum := fnID
+					if fnHooks != nil && fnHooks.doc != nil {
+						if found := fnHooks.doc.ByID[fnID]; found != nil {
+							entry = *found
+							dispNum = strconv.Itoa(found.Number)
+						}
+					}
+					supW := estimateChipWidth(dispNum, float32(tok.TextMeta)) - float32(tok.Spacing12)
+					if supW < float32(tok.Spacing16)+4 {
+						supW = float32(tok.Spacing16) + 4
+					}
+					matchOff := lineStart + m[0]
+					repls = append(repls, editor.Replacement{
+						Start:       lineStart + m[0],
+						End:         lineStart + m[1],
+						Width:       supW,
+						Interactive: true,
+						Label:       "脚注 " + dispNum,
+						Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
+							e.Row().AlignItems(ui.Start).Padding(float32(tok.Spacing4)*0.3, 0, 0, 0).Children(func() {
+								active := fnHooks != nil && fnHooks.isActiveFN != nil && fnHooks.isActiveFN(fnID)
+								bg := tok.AccentSoftBg.Alpha(0.82)
+								fg := tok.Accent
+								if active {
+									bg = tok.Accent
+									fg = tok.Surface
+								}
+								pill := ui.ButtonBase(c.Key(fmt.Sprintf("fn-sup:%s:%d", fnID, matchOff))).
+									Height(float32(tok.TextMeta)+float32(tok.Spacing4)).
+									Padding(0, float32(tok.Spacing4)).Center().
+									Radius(float32(tok.ControlRadius)).
+									Background(bg).
+									KeepFocus().
+									Label("批注 " + dispNum)
+								pill.Children(func() {
+									ui.Text(c, dispNum).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
+								})
+								if pill.Hovered() && fnHooks != nil && fnHooks.onHover != nil {
+									fnHooks.onHover(fnID)
+								}
+								tip := fmt.Sprintf("批注 %s", dispNum)
+								if strings.TrimSpace(entry.Body) != "" {
+									tip = fmt.Sprintf("批注 %s：%s", dispNum, singleLineFootnotePreview(entry.Body))
+								} else {
+									tip = fmt.Sprintf("批注 %s（点击补充内容）", dispNum)
+								}
+								components.Tooltip(c, pill, tip)
+								if pill.Clicked() && fnHooks != nil && fnHooks.onClickFN != nil {
+									fnHooks.onClickFN(fnID)
+								}
+								if fnHooks != nil && fnHooks.isPopOpen != nil && fnHooks.isPopOpen(fnID) && fnHooks.renderPop != nil {
+									popOpen := true
+									components.Popover(c, pill, &popOpen, func(panel ui.Element) {
+										panel.Background(tok.Surface).
+											Border(1, tok.Border).
+											Radius(float32(tok.PanelRadius)).
+											Shadow(0, float32(tok.Spacing8), float32(tok.Spacing24), 0, tok.Text.Alpha(0.14))
+										fnHooks.renderPop(c, tok, entry, fnHooks.editable)
+									})
+									if !popOpen && fnHooks.setPopOpen != nil {
+										fnHooks.setPopOpen(fnID, false)
+									}
+								}
+							})
+						},
+					})
+				}
+			}
 			// Obsidian-style inline LaTeX (`$...$`) on non-active lines (skipping code spans & currency like $10)
 			var mathSpans [][]int
 			for _, m := range reMDInlineMath.FindAllStringSubmatchIndex(lineText, -1) {
@@ -1334,6 +1428,31 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			})
 			return
 		}
+		// Markdown footnote hover preview when hovering raw `[^id]` on an active line
+		if fnDoc := ParseFootnotes(v.Doc.Source); fnDoc != nil && len(fnDoc.Entries) > 0 {
+			bufText := st.Buffer.String()
+			for _, m := range reMDFootnoteRef.FindAllStringSubmatchIndex(bufText, -1) {
+				if req.Offset >= m[0] && req.Offset <= m[1] {
+					if m[1] < len(bufText) && bufText[m[1]] == ':' {
+						continue
+					}
+					fid := strings.TrimSpace(bufText[m[2]:m[3]])
+					if fn := fnDoc.ByID[fid]; fn != nil {
+						closeOtherHovers()
+						v.pillHoveredFNID = fid
+						fnCopy := *fn
+						st.ShowHover(m[0], m[1], "", func(hc *ui.Context) {
+							ui.Column(hc).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+								MaxWidth(float32(tok.Spacing48)*6).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Text(hc, fmt.Sprintf("批注 %d", fnCopy.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+								ui.Text(hc, firstNonEmpty(strings.TrimSpace(fnCopy.Body), "暂无批注内容")).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						})
+						return
+					}
+				}
+			}
+		}
 		if altHeld {
 			activateNLHoverForLine(st.Buffer.String(), req.Offset, false)
 		}
@@ -1484,6 +1603,68 @@ func (v *View) renderLiveMarkdownSegmentFull(
 				pantryByKey[pm.Name] = pm
 			}
 		}
+		var docFN *FootnoteDoc
+		if v.Doc != nil && HasFootnotes(v.Doc.Source) {
+			docFN = ParseFootnotes(v.Doc.Source)
+		}
+		fnHooks := &liveFootnoteHooks{
+			doc:      docFN,
+			showSide: v.ShowRightSidenotes,
+			editable: !readOnly,
+			onHover: func(id string) {
+				v.pillHoveredFNID = id
+			},
+			isActiveFN: func(id string) bool {
+				return v.pillHoveredFNID == id || v.railHoveredFNID == id || v.editingFootnoteID == id || v.openFootnotePopoverID == id
+			},
+			isPopOpen: func(id string) bool {
+				return !v.ShowRightSidenotes && v.openFootnotePopoverID == id
+			},
+			setPopOpen: func(id string, open bool) {
+				if !open && v.openFootnotePopoverID == id {
+					if v.footnoteDrafts != nil {
+						if d, ok := v.footnoteDrafts[id]; ok && d != nil {
+							v.commitFootnoteBody(id, *d)
+						}
+					}
+					v.openFootnotePopoverID = ""
+					v.editingFootnoteID = ""
+				}
+			},
+			onClickFN: func(id string) {
+				if v.ShowRightSidenotes {
+					if v.footnoteCollapsed != nil {
+						v.footnoteCollapsed[id] = false
+					}
+					if !readOnly {
+						if v.footnoteDrafts != nil {
+							delete(v.footnoteDrafts, id)
+						}
+						v.editingFootnoteID = id
+						v.footnoteFocusPending = id
+					} else {
+						v.pillHoveredFNID = id
+					}
+					return
+				}
+				if v.openFootnotePopoverID == id {
+					v.openFootnotePopoverID = ""
+					v.editingFootnoteID = ""
+				} else {
+					if v.footnoteDrafts != nil {
+						delete(v.footnoteDrafts, id)
+					}
+					v.openFootnotePopoverID = id
+					if !readOnly {
+						v.editingFootnoteID = id
+						v.footnoteFocusPending = id
+					}
+				}
+			},
+			renderPop: func(hc *ui.Context, htok theme.Tokens, fn FootnoteEntry, ed bool) {
+				v.renderFootnotePopoverContent(hc, htok, fn, ed)
+			},
+		}
 		styles, repls, diags := computeLivePreviewDecorationsFull(
 			curBuf,
 			activeLine,
@@ -1494,6 +1675,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			entry.docOffset,
 			allowCheckToggle,
 			pantryByKey,
+			fnHooks,
 			func(start, end int, checked bool) {
 				raw := st.Buffer.String()
 				if start < 0 || end > len(raw) || start >= end {
@@ -1554,6 +1736,40 @@ func (v *View) renderLiveMarkdownSegmentFull(
 
 	ui.Box(c.Key("live-md:" + key)).FillWidth().Children(func() {
 		edEl := editor.View(c, st).FillWidth()
+
+		// Record rendered line Y-offsets of inline `[^id]` refs for wide-screen right-margin collision avoidance
+		if v.ShowRightSidenotes && v.footnoteAnchorY != nil && strings.Contains(curBuf, "[^") && edEl.Bounds().H > 0 {
+			baseY := edEl.Bounds().Y - v.docRootTopY
+			lnIdx := 0
+			for pos := 0; pos <= len(curBuf); {
+				nl := strings.IndexByte(curBuf[pos:], '\n')
+				lnEnd := len(curBuf)
+				nextPos := len(curBuf) + 1
+				if nl >= 0 {
+					lnEnd = pos + nl
+					nextPos = lnEnd + 1
+				}
+				lnTxt := curBuf[pos:lnEnd]
+				if strings.Contains(lnTxt, "[^") && reFootnoteDefLine.FindStringIndex(lnTxt) == nil {
+					for _, fm := range reMDFootnoteRef.FindAllStringSubmatchIndex(lnTxt, -1) {
+						if fm[1] < len(lnTxt) && lnTxt[fm[1]] == ':' {
+							continue
+						}
+						fid := strings.TrimSpace(lnTxt[fm[2]:fm[3]])
+						if fid != "" {
+							if _, exists := v.footnoteAnchorY[fid]; !exists {
+								v.footnoteAnchorY[fid] = baseY + float32(st.LineTop(lnIdx)-st.ScrollY())
+							} else {
+								// Keep first-line anchor updated if the first ref sits in this segment
+								v.footnoteAnchorY[fid] = baseY + float32(st.LineTop(lnIdx)-st.ScrollY())
+							}
+						}
+					}
+				}
+				lnIdx++
+				pos = nextPos
+			}
+		}
 
 		// Instant zero-delay real Alt+Hover tracking (rock-solid while Alt is held OR while pointer is on card/line)
 		if !readOnly && v.AltHoverPreviewQuery == "" {
@@ -1690,6 +1906,10 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			if edEl.Shortcut(ui.Cmd, ui.KeyI) {
 				v.lastFocusedLiveKey = key
 				v.applyMarkdownInlineWrap("*", "*")
+			}
+			if edEl.Shortcut(ui.Cmd|ui.Shift, ui.KeyM) {
+				v.lastFocusedLiveKey = key
+				v.InsertFootnoteAtActiveCursor()
 			}
 			if edEl.Shortcut(ui.Alt, ui.KeyEnter) {
 				activateNLHoverForLine(st.Buffer.String(), st.Cursor(), true)

@@ -229,7 +229,7 @@ groups:
 	pantryByKey := map[string]PantryMentionItem{
 		"R-001": v.PantryCompletionItems[0],
 	}
-	_, replsUnfocused, _ := computeLivePreviewDecorationsFull(proseSeg.Text, mentionLine, false, th, tok, doc, proseSeg.Start, true, pantryByKey, nil, func(string, string) {}, func(string) {}, func(string) {})
+	_, replsUnfocused, _ := computeLivePreviewDecorationsFull(proseSeg.Text, mentionLine, false, th, tok, doc, proseSeg.Start, true, pantryByKey, nil, nil, func(string, string) {}, func(string) {}, func(string) {})
 	var gotPantryChip, gotPlateChip, gotDocChip bool
 	for _, r := range replsUnfocused {
 		switch r.Label {
@@ -246,7 +246,7 @@ groups:
 	}
 
 	// Cursor on the mention line suppresses mention pills so user edits raw Markdown cleanly.
-	_, replsFocused, _ := computeLivePreviewDecorationsFull(proseSeg.Text, mentionLine, true, th, tok, doc, proseSeg.Start, true, pantryByKey, nil, func(string, string) {}, func(string) {}, func(string) {})
+	_, replsFocused, _ := computeLivePreviewDecorationsFull(proseSeg.Text, mentionLine, true, th, tok, doc, proseSeg.Start, true, pantryByKey, nil, nil, func(string, string) {}, func(string) {}, func(string) {})
 	for _, r := range replsFocused {
 		if r.Label == "@DMEM 培养基" || r.Label == "@96孔板" || r.Label == "CCK8-实验" {
 			t.Fatalf("unexpected mention pill replacement on active cursor line: %+v", r)

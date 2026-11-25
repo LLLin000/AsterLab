@@ -183,6 +183,19 @@ type View struct {
 	gridStart           ui.Point
 	gridLast            ui.Point
 	gridBase            []string
+
+	ShowRightSidenotes    bool
+	SidenoteWidth         float32
+	docRootTopY           float32
+	footnoteAnchorY       map[string]float32
+	footnoteNoteH         map[string]float32
+	footnoteCollapsed     map[string]bool
+	pillHoveredFNID       string
+	railHoveredFNID       string
+	editingFootnoteID     string
+	openFootnotePopoverID string
+	footnoteDrafts        map[string]*string
+	footnoteFocusPending  string
 }
 
 var (
@@ -296,19 +309,44 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	// uses heading steps, so each STEP and Sub-step renders inside a TRUE continuous nested
 	// layout container with unbroken guide rails and strictly aligned indented components!
 	visualSegs := expandSegmentsForStepContainers(src, segs, stepTree, stepExcludeOff)
+	fnDoc := ParseFootnotes(src)
+	if v.footnoteAnchorY == nil {
+		v.footnoteAnchorY = map[string]float32{}
+	}
+	if v.footnoteNoteH == nil {
+		v.footnoteNoteH = map[string]float32{}
+	}
+	if v.footnoteCollapsed == nil {
+		v.footnoteCollapsed = map[string]bool{}
+	}
+	showSidenotes := !v.MobileCompact && v.ShowRightSidenotes && fnDoc != nil && len(fnDoc.Entries) > 0
+	sideW := v.SidenoteWidth
+	if sideW <= 0 {
+		sideW = float32(tok.Spacing48)*4 + float32(tok.Spacing32)
+	}
+	v.pillHoveredFNID = ""
 
 	// Tightened vertical rhythm: 8px base gap (heading->content = 8px, component<->prose/component = 12px)
 	docCol := ui.Column(c.Key("unified-doc-root")).FillWidth().Gap(float32(tok.Spacing8))
+	if showSidenotes {
+		docCol.Grow(1).MinWidth(0)
+	}
 	availW := docCol.Bounds().W
 	if availW <= 0 {
 		if winW, _ := c.Size(); winW > 0 {
 			availW = winW - float32(tok.Spacing48)*1.5
+			if showSidenotes {
+				availW -= sideW + float32(tok.Spacing24)
+			}
 			if availW > 860 {
 				availW = 860
 			}
 		}
 	}
-	docCol.Children(func() {
+	v.docRootTopY = docCol.Bounds().Y
+
+	buildDocCol := func() {
+		docCol.Children(func() {
 		renderedTrailingEditableProse := false
 		prevAnchorID := "__start__"
 		embedOrdinal := 0
@@ -434,6 +472,15 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 					editStart = seg.End
 					editEnd = seg.End
 				}
+				if isLastVisual && fnDoc != nil && fnDoc.TrailingDefStart >= 0 && editEnd > fnDoc.TrailingDefStart {
+					editEnd = fnDoc.TrailingDefStart
+					for editEnd > editStart && (src[editEnd-1] == '\n' || src[editEnd-1] == '\r') {
+						editEnd--
+					}
+					if editEnd < editStart {
+						editEnd = editStart
+					}
+				}
 				editText := src[editStart:editEnd]
 				trimmed := strings.TrimSpace(editText)
 				segKey := vs.stableKey
@@ -489,6 +536,9 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 					func(nextText string) string {
 						if v.Doc == nil || v.OnChange == nil {
 							return ""
+						}
+						if editEnd < len(v.Doc.Source) && strings.HasPrefix(v.Doc.Source[editEnd:], "[^") && nextText != "" && !strings.HasSuffix(nextText, "\n") {
+							nextText += "\n\n"
 						}
 						if nextSrc, err := ReplaceByteRange(v.Doc.Source, editStart, editEnd, nextText); err == nil {
 							v.OnChange(nextSrc)
@@ -698,12 +748,19 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 		// the user can immediately keep writing Markdown or type `/` right below it.
 		if editableDesign && !renderedTrailingEditableProse {
 			tailKey := "prose-after:" + prevAnchorID
+			tailOff := len(src)
+			if fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < tailOff {
+				tailOff = fnDoc.TrailingDefStart
+				for tailOff > 0 && (src[tailOff-1] == '\n' || src[tailOff-1] == '\r') {
+					tailOff--
+				}
+			}
 			v.renderLiveMarkdownSegmentFull(
 				c,
 				tailKey,
 				"科学笔记正文",
 				"",
-				len(src),
+				tailOff,
 				false,
 				!v.ReadOnly,
 				"继续输入文字，或敲 / 插入科研组件…",
@@ -712,6 +769,23 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				func(nextText string) string {
 					if v.Doc == nil || v.OnChange == nil || nextText == "" {
 						return ""
+					}
+					if fnDoc != nil && fnDoc.TrailingDefStart >= 0 {
+						insertAt := fnDoc.TrailingDefStart
+						for insertAt > 0 && (v.Doc.Source[insertAt-1] == '\n' || v.Doc.Source[insertAt-1] == '\r') {
+							insertAt--
+						}
+						prefix := "\n\n"
+						if insertAt == 0 {
+							prefix = ""
+						}
+						suffix := ""
+						if insertAt < len(v.Doc.Source) && !strings.HasSuffix(nextText, "\n") {
+							suffix = "\n\n"
+						}
+						nextSrc := v.Doc.Source[:insertAt] + prefix + nextText + suffix + strings.TrimLeft(v.Doc.Source[insertAt:], "\r\n")
+						v.OnChange(nextSrc)
+						return nextSrc
 					}
 					sep := "\n"
 					if strings.HasSuffix(v.Doc.Source, "\n\n") {
@@ -789,6 +863,283 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 					}
 				})
 			}
+		}
+		})
+	}
+
+	if showSidenotes {
+		ui.Row(c.Key("unified-doc-split")).FillWidth().AlignItems(ui.Start).Gap(float32(tok.Spacing24)).Children(func() {
+			buildDocCol()
+			v.renderSidenoteRail(c, tok, fnDoc, editableDesign || labWritable, sideW)
+		})
+	} else {
+		v.railHoveredFNID = ""
+		buildDocCol()
+	}
+}
+
+func (v *View) ensureFootnoteDraft(id, body string) *string {
+	if v.footnoteDrafts == nil {
+		v.footnoteDrafts = map[string]*string{}
+	}
+	p, ok := v.footnoteDrafts[id]
+	if !ok {
+		cp := body
+		p = &cp
+		v.footnoteDrafts[id] = p
+	}
+	return p
+}
+
+func (v *View) commitFootnoteBody(id, nextBody string) {
+	if v.Doc == nil || v.OnChange == nil {
+		return
+	}
+	nextSrc := UpsertFootnoteBody(v.Doc.Source, id, nextBody)
+	if nextSrc != v.Doc.Source {
+		v.OnChange(nextSrc)
+	}
+}
+
+func (v *View) deleteFootnoteByID(id string) {
+	if v.Doc == nil || v.OnChange == nil {
+		return
+	}
+	nextSrc := DeleteFootnote(v.Doc.Source, id)
+	if v.footnoteDrafts != nil {
+		delete(v.footnoteDrafts, id)
+	}
+	if v.footnoteCollapsed != nil {
+		delete(v.footnoteCollapsed, id)
+	}
+	if v.editingFootnoteID == id {
+		v.editingFootnoteID = ""
+	}
+	if v.openFootnotePopoverID == id {
+		v.openFootnotePopoverID = ""
+	}
+	if nextSrc != v.Doc.Source {
+		v.OnChange(nextSrc)
+	}
+}
+
+func singleLineFootnotePreview(body string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", " "), "\n", " "))
+	return s
+}
+
+func (v *View) renderSidenoteRail(c *ui.Context, tok theme.Tokens, fnDoc *FootnoteDoc, editable bool, width float32) {
+	if fnDoc == nil || len(fnDoc.Entries) == 0 {
+		v.railHoveredFNID = ""
+		return
+	}
+	v.railHoveredFNID = ""
+	rail := ui.Box(c.Key("sidenote-rail")).Width(width).Shrink(0)
+	cursorY := float32(0)
+
+	rail.Children(func() {
+		for _, fn := range fnDoc.Entries {
+			fn := fn
+			collapsed := v.footnoteCollapsed[fn.ID]
+			isEditing := editable && v.editingFootnoteID == fn.ID
+			noteBox := ui.Box(c.Key("sn:"+fn.ID)).FillWidth()
+			topY := v.footnoteAnchorY[fn.ID]
+			if topY < cursorY {
+				topY = cursorY
+			}
+			noteBox.Absolute().Top(topY).Left(0).Right(0)
+			hovered := noteBox.Hovered()
+			if hovered {
+				v.railHoveredFNID = fn.ID
+			}
+			isActive := isEditing || hovered || v.pillHoveredFNID == fn.ID || v.openFootnotePopoverID == fn.ID
+			hairCol := tok.Border.Alpha(0.75)
+			numCol := tok.TextMuted
+			txtCol := tok.TextMuted
+			if isActive {
+				hairCol = tok.Accent
+				numCol = tok.Accent
+				txtCol = tok.Text
+			}
+
+			noteBox.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Stretch).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Box(c).Width(2).Radius(1).Background(hairCol).Shrink(0)
+					ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
+						if collapsed && !isEditing {
+							cBtn := ui.ButtonBase(c.Key("sn-expand:"+fn.ID)).FillWidth().
+								Padding(float32(tok.Spacing4)*0.4, float32(tok.Spacing4)).
+								Radius(float32(tok.ControlRadius)).
+								Label(fmt.Sprintf("展开批注 %d", fn.Number))
+							if cBtn.Hovered() {
+								cBtn.Background(tok.Text.Alpha(0.04))
+							}
+							cBtn.Children(func() {
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+									ui.Text(c, strconv.Itoa(fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(numCol).FontFeatures("tnum").Shrink(0)
+									prev := firstNonEmpty(singleLineFootnotePreview(fn.Body), "待填写…")
+									ui.Text(c, prev).FontSize(float32(tok.TextMeta)).TextColor(txtCol).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+									ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.TextMuted).Shrink(0)
+								})
+							})
+							if cBtn.Clicked() {
+								v.footnoteCollapsed[fn.ID] = false
+							}
+							return
+						}
+
+						if isEditing {
+							draft := v.ensureFootnoteDraft(fn.ID, fn.Body)
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Text(c, strconv.Itoa(fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
+								ui.Spacer(c)
+								colBtn := components.IconButton(c.Key("sn-col-ed:"+fn.ID), lucide.ChevronUp(), "折叠批注", components.IconButtonCompact)
+								if colBtn.Clicked() {
+									v.commitFootnoteBody(fn.ID, *draft)
+									v.editingFootnoteID = ""
+									v.footnoteCollapsed[fn.ID] = true
+								}
+								delBtn := components.IconButton(c.Key("sn-del-ed:"+fn.ID), lucide.Trash(), "删除批注", components.IconButtonCompact)
+								if delBtn.Clicked() {
+									v.deleteFootnoteByID(fn.ID)
+								}
+							})
+							ti := ui.TextInputBase(c, draft).
+								FillWidth().Multiline(true).
+								FontSize(float32(tok.TextMeta)).
+								TextColor(tok.Text).
+								Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+								Radius(float32(tok.ControlRadius)).
+								Background(tok.Accent.Alpha(0.06)).
+								Placeholder("输入注意事项…")
+							if v.footnoteFocusPending == fn.ID {
+								ti.AutoFocus()
+								v.footnoteFocusPending = ""
+							}
+							if ti.Shortcut(0, ui.KeyEscape) {
+								if v.footnoteDrafts != nil {
+									delete(v.footnoteDrafts, fn.ID)
+								}
+								v.editingFootnoteID = ""
+							} else if ti.Shortcut(ui.Cmd, ui.KeyEnter) || ti.FocusLeft() {
+								v.commitFootnoteBody(fn.ID, *draft)
+								v.editingFootnoteID = ""
+							}
+							return
+						}
+
+						// Expanded quiet Tufte note (default state): number + soft-wrap body + hover-only fold/delete micro-icons
+						ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Text(c, strconv.Itoa(fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(numCol).FontFeatures("tnum").Shrink(0)
+							bodyTxt := firstNonEmpty(strings.TrimSpace(fn.Body), "点击补充注意事项…")
+							if editable {
+								edBtn := ui.ButtonBase(c.Key("sn-body:"+fn.ID)).Grow(1).MinWidth(0).
+									Padding(0, float32(tok.Spacing4)*0.5).
+									Radius(float32(tok.ControlRadius)).
+									Label(fmt.Sprintf("编辑批注 %d", fn.Number))
+								if edBtn.Hovered() {
+									edBtn.Background(tok.Text.Alpha(0.035))
+								}
+								edBtn.Children(func() {
+									ui.Text(c, bodyTxt).FontSize(float32(tok.TextMeta)).TextColor(txtCol)
+								})
+								if edBtn.Clicked() {
+									if v.footnoteDrafts != nil {
+										delete(v.footnoteDrafts, fn.ID)
+									}
+									v.ensureFootnoteDraft(fn.ID, fn.Body)
+									v.editingFootnoteID = fn.ID
+									v.footnoteFocusPending = fn.ID
+								}
+							} else {
+								ui.Text(c, bodyTxt).FontSize(float32(tok.TextMeta)).TextColor(txtCol).Grow(1).MinWidth(0)
+							}
+							if hovered {
+								ui.Row(c).AlignItems(ui.Center).Shrink(0).Children(func() {
+									colBtn := components.IconButton(c.Key("sn-col:"+fn.ID), lucide.ChevronUp(), "折叠", components.IconButtonCompact)
+									colBtn.KeepFocus()
+									if colBtn.Clicked() {
+										v.footnoteCollapsed[fn.ID] = true
+									}
+									if editable {
+										delBtn := components.IconButton(c.Key("sn-del:"+fn.ID), lucide.Trash(), "删除", components.IconButtonCompact)
+										delBtn.KeepFocus()
+										if delBtn.Clicked() {
+											v.deleteFootnoteByID(fn.ID)
+										}
+									}
+								})
+							}
+						})
+					})
+				})
+			})
+			h := noteBox.Bounds().H
+			if h <= 0 {
+				if collapsed && !isEditing {
+					h = float32(tok.Spacing24)
+				} else if isEditing {
+					h = float32(tok.Spacing48) + float32(tok.Spacing12)
+				} else {
+					h = float32(tok.Spacing32) + float32(tok.Spacing8)
+				}
+			}
+			v.footnoteNoteH[fn.ID] = h
+			cursorY = topY + h + float32(tok.Spacing12)
+		}
+	})
+	if cursorY > 0 {
+		rail.MinHeight(cursorY + float32(tok.Spacing8))
+	}
+}
+
+func (v *View) renderFootnotePopoverContent(c *ui.Context, tok theme.Tokens, fn FootnoteEntry, editable bool) {
+	ui.Column(c.Key("fn-pop:"+fn.ID)).Width(float32(tok.Spacing48)*6.2).
+		Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Text(c, fmt.Sprintf("批注 %d", fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+			ui.Spacer(c)
+			if editable {
+				delBtn := components.IconButton(c.Key("fnp-del:"+fn.ID), lucide.Trash(), "删除批注", components.IconButtonCompact)
+				if delBtn.Clicked() {
+					v.deleteFootnoteByID(fn.ID)
+				}
+			}
+			closeBtn := components.IconButton(c.Key("fnp-cls:"+fn.ID), lucide.X(), "收起气泡", components.IconButtonCompact)
+			if closeBtn.Clicked() {
+				if editable && v.footnoteDrafts != nil {
+					if d, ok := v.footnoteDrafts[fn.ID]; ok && d != nil {
+						v.commitFootnoteBody(fn.ID, *d)
+					}
+				}
+				v.openFootnotePopoverID = ""
+				v.editingFootnoteID = ""
+			}
+		})
+		if editable {
+			draft := v.ensureFootnoteDraft(fn.ID, fn.Body)
+			ti := ui.TextInputBase(c, draft).
+				FillWidth().Multiline(true).
+				FontSize(float32(tok.TextMeta)).
+				TextColor(tok.Text).
+				Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
+				Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).
+				Border(1, tok.Border).
+				Placeholder("记录操作注意事项或踩坑提醒…")
+			if v.footnoteFocusPending == fn.ID {
+				ti.AutoFocus()
+				v.footnoteFocusPending = ""
+			}
+			if ti.FocusLeft() || ti.Shortcut(ui.Cmd, ui.KeyEnter) {
+				v.commitFootnoteBody(fn.ID, *draft)
+				if ti.Shortcut(ui.Cmd, ui.KeyEnter) {
+					v.openFootnotePopoverID = ""
+					v.editingFootnoteID = ""
+				}
+			}
+		} else {
+			ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
 		}
 	})
 }

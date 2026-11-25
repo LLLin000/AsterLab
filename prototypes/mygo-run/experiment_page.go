@@ -1060,6 +1060,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			docScroll.Children(func() {
 				// Readable line length adapts smoothly to viewport width (widens gently on 27"+ monitors)
 				winW, _ := c.Size()
+				paneW := docScroll.Bounds().W
+				if paneW <= 0 {
+					paneW = winW - float32(tok.Spacing48)*5
+				}
 				maxColW := float32(780)
 				wideColW := float32(960)
 				if winW >= 1800 {
@@ -1087,8 +1091,20 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 						}
 					}
 				}
+				sidenoteW := float32(tok.Spacing48)*4 + float32(tok.Spacing32)
+				sidenoteGap := float32(tok.Spacing24)
+				showSidenotes := !mobileLayout && asterdoc.HasFootnotes(ld.Source) && paneW >= 920
+				v.ShowRightSidenotes = showSidenotes
+				v.SidenoteWidth = sidenoteW
+				outerMaxW := maxColW
+				if showSidenotes {
+					outerMaxW = maxColW + sidenoteW + sidenoteGap
+					if paneW > 0 && outerMaxW > paneW-padH {
+						outerMaxW = paneW - padH
+					}
+				}
 				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
-					ui.Column(c).FillWidth().MaxWidth(maxColW).
+					ui.Column(c).FillWidth().MaxWidth(outerMaxW).
 						Padding(padTop, padH, padBot, padH).
 						Gap(float32(tok.Spacing16)).Children(func() {
 						// Clean unframed `# Title` (Obsidian/Notion borderless display heading)
