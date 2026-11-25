@@ -326,26 +326,26 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	}
 	v.pillHoveredFNID = ""
 
-	// Tightened vertical rhythm: 8px base gap (heading->content = 8px, component<->prose/component = 12px)
-	docCol := ui.Column(c.Key("unified-doc-root")).FillWidth().Gap(float32(tok.Spacing8))
-	if showSidenotes {
-		docCol.Grow(1).MinWidth(0)
-	}
-	availW := docCol.Bounds().W
-	if availW <= 0 {
-		if winW, _ := c.Size(); winW > 0 {
-			availW = winW - float32(tok.Spacing48)*1.5
-			if showSidenotes {
-				availW -= sideW + float32(tok.Spacing24)
-			}
-			if availW > 860 {
-				availW = 860
+	buildDocCol := func() {
+		docCol := ui.Column(c.Key("unified-doc-root")).Gap(float32(tok.Spacing8))
+		if showSidenotes {
+			docCol.Grow(1).MinWidth(0)
+		} else {
+			docCol.FillWidth()
+		}
+		availW := docCol.Bounds().W
+		if availW <= 0 {
+			if winW, _ := c.Size(); winW > 0 {
+				availW = winW - float32(tok.Spacing48)*1.5
+				if showSidenotes {
+					availW -= sideW + float32(tok.Spacing24)
+				}
+				if availW > 860 {
+					availW = 860
+				}
 			}
 		}
-	}
-	v.docRootTopY = docCol.Bounds().Y
-
-	buildDocCol := func() {
+		v.docRootTopY = docCol.Bounds().Y
 		docCol.Children(func() {
 		renderedTrailingEditableProse := false
 		prevAnchorID := "__start__"
