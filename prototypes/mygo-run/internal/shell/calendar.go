@@ -3,10 +3,13 @@ package shell
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -320,101 +323,99 @@ func (s *Shell) calendarHomeBody(
 					FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
 			})
 		}
-		// 1. Balanced 3-Column Calendar Toolbar:
-		// UI-16: Left & Right tracks share equal Grow(1) so the center "月 | 周" segmented control
-		// stays mathematically fixed in position regardless of date title width.
-		// UI-17: Week date range renders as a smaller muted subtitle next to the bold year-month title.
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-			// Left track (Grow 1): Period heading + prev/today/next controls
-			ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-				ui.Row(c).AlignItems(ui.Baseline).Gap(float32(tok.Spacing8)).Children(func() {
-					components.Text(c, cursor.Format("2006 年 01 月")).FontSize(float32(tok.TextPage)).Bold().
-						TextColor(tok.Text).FontFeatures("tnum").SingleLine()
-					if s.CalendarMode == 1 {
-						wStart := cursor.AddDate(0, 0, -weekdayMondayIndex(cursor.Weekday()))
-						wEnd := wStart.AddDate(0, 0, 6)
-						rangeLbl := fmt.Sprintf("%s – %s", wStart.Format("01/02"), wEnd.Format("01/02"))
-						components.Text(c, rangeLbl).FontSize(float32(tok.TextData)).
-							TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
-					}
-				})
-
-				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Shrink(0).Children(func() {
-					if components.IconButton(c, lucide.ChevronLeft(), "上一时段", components.IconButtonCompact).Clicked() {
-						s.calAnimDir = -1
-						s.DayPopoverOpen = false
-						if s.CalendarMode == 0 {
-							cursor = cursor.AddDate(0, -1, 0)
-						} else {
-							cursor = cursor.AddDate(0, 0, -7)
-						}
-						s.CalendarCursor = cursor.Format("2006-01-02")
-					}
-					if components.Button(c, "今天", components.ButtonOutline).Clicked() {
-						s.calAnimDir = 0
-						s.SelectedDate = todayYMD
-						s.CalendarCursor = todayYMD
-						s.DayPopoverDate = todayYMD
-						s.DayPopoverOpen = true
-						selDateYMD = todayYMD
-						cursor = today
-					}
-					if components.IconButton(c, lucide.ChevronRight(), "下一时段", components.IconButtonCompact).Clicked() {
-						s.calAnimDir = 1
-						s.DayPopoverOpen = false
-						if s.CalendarMode == 0 {
-							cursor = cursor.AddDate(0, 1, 0)
-						} else {
-							cursor = cursor.AddDate(0, 0, 7)
-						}
-						s.CalendarCursor = cursor.Format("2006-01-02")
-					}
-				})
-			})
-
-			// Center pinned track (Shrink 0): Month / Week segmented switcher
-			ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
-				modeTab := s.CalendarMode
-				components.Tabs(c, &modeTab, components.TabsSegmented, "月", "周")
-				if modeTab != s.CalendarMode {
-					s.DayPopoverOpen = false
-					s.CalendarMode = modeTab
-				}
-			})
-
-			// Right track (Grow 1): Search + Primary CTA + More menu
-			ui.Row(c).Grow(1).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				if !mobileMode {
-					ui.TextInput(c, &s.Query).Placeholder("搜索实验…").Width(float32(tok.Spacing48) * 3)
-				}
-				if s.OnCreateForDate != nil || s.OnCreate != nil {
-					addLbl := "＋ 加入新实验"
-					if mobileMode {
-						addLbl = "＋ 新建"
-					}
-					if components.Button(c, addLbl, components.ButtonPrimary).Clicked() {
-						s.triggerCreateForDate(selDateYMD)
-					}
-				}
-				if s.OnOpenTemplatePicker != nil || s.OnImport != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
-					moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多创建方式", components.IconButtonCompact)
-					components.MenuButton(c, moreBtn, func(m *components.Menu) {
-						if s.OnOpenTemplatePicker != nil && m.Item("从模板创建实验…").Chosen() {
-							s.OnOpenTemplatePicker(selDateYMD)
-						}
-						if s.OnCreateReagentForDate != nil && m.Item("登记试剂购入…").Chosen() {
-							s.OnCreateReagentForDate(selDateYMD)
-						}
-						if s.OnCreateAnimalForDate != nil && m.Item("登记动物入栏 / 收样…").Chosen() {
-							s.OnCreateAnimalForDate(selDateYMD)
-						}
-						if s.OnImport != nil && m.Item("导入 .asterml 文件…").Chosen() {
-							s.OnImport()
+		if mobileMode {
+			s.renderMobileCalendarToolbar(c, tok, &cursor, today, todayYMD, &selDateYMD)
+		} else {
+			// 1. Balanced 3-Column Calendar Toolbar:
+			// UI-16: Left & Right tracks share equal Grow(1) so the center "月 | 周" segmented control
+			// stays mathematically fixed in position regardless of date title width.
+			// UI-17: Week date range renders as a smaller muted subtitle next to the bold year-month title.
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+				// Left track (Grow 1): Period heading + prev/today/next controls
+				ui.Row(c).Grow(1).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+					ui.Row(c).AlignItems(ui.Baseline).Gap(float32(tok.Spacing8)).Children(func() {
+						components.Text(c, cursor.Format("2006 年 01 月")).FontSize(float32(tok.TextPage)).Bold().
+							TextColor(tok.Text).FontFeatures("tnum").SingleLine()
+						if s.CalendarMode == 1 {
+							wStart := cursor.AddDate(0, 0, -weekdayMondayIndex(cursor.Weekday()))
+							wEnd := wStart.AddDate(0, 0, 6)
+							rangeLbl := fmt.Sprintf("%s – %s", wStart.Format("01/02"), wEnd.Format("01/02"))
+							components.Text(c, rangeLbl).FontSize(float32(tok.TextData)).
+								TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
 						}
 					})
-				}
+
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Shrink(0).Children(func() {
+						if components.IconButton(c, lucide.ChevronLeft(), "上一时段", components.IconButtonCompact).Clicked() {
+							s.calAnimDir = -1
+							s.DayPopoverOpen = false
+							if s.CalendarMode == 0 {
+								cursor = cursor.AddDate(0, -1, 0)
+							} else {
+								cursor = cursor.AddDate(0, 0, -7)
+							}
+							s.CalendarCursor = cursor.Format("2006-01-02")
+						}
+						if components.Button(c, "今天", components.ButtonOutline).Clicked() {
+							s.calAnimDir = 0
+							s.SelectedDate = todayYMD
+							s.CalendarCursor = todayYMD
+							s.DayPopoverDate = todayYMD
+							s.DayPopoverOpen = true
+							selDateYMD = todayYMD
+							cursor = today
+						}
+						if components.IconButton(c, lucide.ChevronRight(), "下一时段", components.IconButtonCompact).Clicked() {
+							s.calAnimDir = 1
+							s.DayPopoverOpen = false
+							if s.CalendarMode == 0 {
+								cursor = cursor.AddDate(0, 1, 0)
+							} else {
+								cursor = cursor.AddDate(0, 0, 7)
+							}
+							s.CalendarCursor = cursor.Format("2006-01-02")
+						}
+					})
+				})
+
+				// Center pinned track (Shrink 0): Month / Week segmented switcher
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
+					modeTab := s.CalendarMode
+					components.Tabs(c, &modeTab, components.TabsSegmented, "月", "周")
+					if modeTab != s.CalendarMode {
+						s.DayPopoverOpen = false
+						s.CalendarMode = modeTab
+					}
+				})
+
+				// Right track (Grow 1): Search + Primary CTA + More menu
+				ui.Row(c).Grow(1).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.TextInput(c, &s.Query).Placeholder("搜索实验…").Width(float32(tok.Spacing48) * 3)
+					if s.OnCreateForDate != nil || s.OnCreate != nil {
+						if components.Button(c, "＋ 加入新实验", components.ButtonPrimary).Clicked() {
+							s.triggerCreateForDate(selDateYMD)
+						}
+					}
+					if s.OnOpenTemplatePicker != nil || s.OnImport != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
+						moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多创建方式", components.IconButtonCompact)
+						components.MenuButton(c, moreBtn, func(m *components.Menu) {
+							if s.OnOpenTemplatePicker != nil && m.Item("从模板创建实验…").Chosen() {
+								s.OnOpenTemplatePicker(selDateYMD)
+							}
+							if s.OnCreateReagentForDate != nil && m.Item("登记试剂购入…").Chosen() {
+								s.OnCreateReagentForDate(selDateYMD)
+							}
+							if s.OnCreateAnimalForDate != nil && m.Item("登记动物入栏 / 收样…").Chosen() {
+								s.OnCreateAnimalForDate(selDateYMD)
+							}
+							if s.OnImport != nil && m.Item("导入 .asterml 文件…").Chosen() {
+								s.OnImport()
+							}
+						})
+					}
+				})
 			})
-		})
+		}
 
 		// 3-Domain Schedule Layer Bar: Experiment × Reagent × Vivarium
 		reagentEvCnt, animalEvCnt := 0, 0
@@ -461,19 +462,348 @@ func (s *Shell) calendarHomeBody(
 			})
 		}
 
-		// 2. Apple Seamless Surface Grid
+		// 2. Apple Seamless Surface Grid (or Mobile 3-Day / Day Agenda with swipeable date strip)
 		if s.CalendarMode == 0 {
 			s.renderAppleMonthGrid(c, tok, cursor, todayYMD, selDateYMD, compactV, byDate, evByDate)
 			if mobileMode {
-				s.renderMobileDayAgenda(c, tok, selDateYMD, byDate[selDateYMD])
+				s.renderMobileDayAgenda(c, tok, selDateYMD, byDate[selDateYMD], evByDate[selDateYMD])
 			}
+		} else if mobileMode {
+			s.renderMobileAgendaView(c, tok, cursor, today, todayYMD, selDateYMD, byDate, evByDate)
 		} else {
 			s.renderAppleWeekTimeGrid(c, tok, cursor, todayYMD, selDateYMD, byDate, evByDate)
 		}
 	})
 }
 
-func (s *Shell) renderMobileDayAgenda(c *ui.Context, tok theme.Tokens, ymd string, dayExps []ExperimentItem) {
+func (s *Shell) renderMobileCalendarToolbar(c *ui.Context, tok theme.Tokens, cursor *time.Time, today time.Time, todayYMD string, selDateYMD *string) {
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			components.Text(c, cursor.Format("2006 年 01 月")).FontSize(float32(tok.TextSection)).Bold().
+				TextColor(tok.Text).FontFeatures("tnum").SingleLine().Grow(1).MinWidth(0)
+
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Shrink(0).Children(func() {
+				if components.IconButton(c, lucide.ChevronLeft(), "上一时段", components.IconButtonCompact).Clicked() {
+					s.calAnimDir = -1
+					s.DayPopoverOpen = false
+					if s.CalendarMode == 0 {
+						*cursor = cursor.AddDate(0, -1, 0)
+					} else {
+						*cursor = cursor.AddDate(0, 0, -7)
+					}
+					s.CalendarCursor = cursor.Format("2006-01-02")
+				}
+				if components.Button(c, "今天", components.ButtonOutline).Clicked() {
+					s.calAnimDir = 0
+					s.SelectedDate = todayYMD
+					s.CalendarCursor = todayYMD
+					s.DayPopoverOpen = false
+					*selDateYMD = todayYMD
+					*cursor = today
+				}
+				if components.IconButton(c, lucide.ChevronRight(), "下一时段", components.IconButtonCompact).Clicked() {
+					s.calAnimDir = 1
+					s.DayPopoverOpen = false
+					if s.CalendarMode == 0 {
+						*cursor = cursor.AddDate(0, 1, 0)
+					} else {
+						*cursor = cursor.AddDate(0, 0, 7)
+					}
+					s.CalendarCursor = cursor.Format("2006-01-02")
+				}
+			})
+		})
+
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			modeTab := s.CalendarMode
+			components.Tabs(c, &modeTab, components.TabsSegmented, "月", "日程")
+			if modeTab != s.CalendarMode {
+				s.DayPopoverOpen = false
+				s.CalendarMode = modeTab
+			}
+			ui.Spacer(c)
+			if s.OnCreateForDate != nil || s.OnCreate != nil {
+				if components.Button(c, "＋ 新建", components.ButtonPrimary).Clicked() {
+					s.triggerCreateForDate(*selDateYMD)
+				}
+			}
+			if s.OnOpenTemplatePicker != nil || s.OnImport != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
+				moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多创建方式", components.IconButtonCompact)
+				components.MenuButton(c, moreBtn, func(m *components.Menu) {
+					if s.OnOpenTemplatePicker != nil && m.Item("从模板创建实验…").Chosen() {
+						s.OnOpenTemplatePicker(*selDateYMD)
+					}
+					if s.OnCreateReagentForDate != nil && m.Item("登记试剂购入…").Chosen() {
+						s.OnCreateReagentForDate(*selDateYMD)
+					}
+					if s.OnCreateAnimalForDate != nil && m.Item("登记动物入栏 / 收样…").Chosen() {
+						s.OnCreateAnimalForDate(*selDateYMD)
+					}
+					if s.OnImport != nil && m.Item("导入 .asterml 文件…").Chosen() {
+						s.OnImport()
+					}
+				})
+			}
+		})
+	})
+}
+
+func (s *Shell) renderMobileAgendaView(
+	c *ui.Context,
+	tok theme.Tokens,
+	cursor time.Time,
+	today time.Time,
+	todayYMD string,
+	selDateYMD string,
+	byDate map[string][]ExperimentItem,
+	evByDate map[string][]schedule.Event,
+) {
+	extra := s.mobileExtra()
+	if !extra.calAgendaInited {
+		extra.calAgendaInited = true
+		extra.calAgenda3Day = true
+	}
+	if !extra.calStripInited {
+		extra.calStripInited = true
+		extra.calStripPage = mobile.PageState{Page: 1}
+	}
+
+	selDate, err := time.Parse("2006-01-02", selDateYMD)
+	if err != nil {
+		selDate = cursor
+		selDateYMD = selDate.Format("2006-01-02")
+	}
+
+	// 1. Swipeable Horizontal 7-Day Date Strip (Page 0 = prev week, Page 1 = current week, Page 2 = next week)
+	stripH := float32(tok.Spacing48) + float32(tok.Spacing16)
+	ui.Box(c.Key("mb-cal-strip-wrap")).FillWidth().Height(stripH).
+		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+		mobile.PageView(c, &extra.calStripPage, 3, func(pageIdx int) {
+			weekShift := (pageIdx - 1) * 7
+			anchor := cursor.AddDate(0, 0, weekShift)
+			wStart := anchor.AddDate(0, 0, -weekdayMondayIndex(anchor.Weekday()))
+			ui.Row(c).Fill().AlignItems(ui.Center).Padding(float32(tok.Spacing4)).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+				for i := 0; i < 7; i++ {
+					day := wStart.AddDate(0, 0, i)
+					ymd := day.Format("2006-01-02")
+					isToday := ymd == todayYMD
+					isSel := ymd == selDateYMD
+					hasItems := len(byDate[ymd])+len(evByDate[ymd]) > 0
+
+					bg := ui.Transparent
+					borderW := float32(0)
+					borderCol := ui.Transparent
+					numCol := tok.Text
+					wdCol := tok.TextMuted
+					if isToday && isSel {
+						bg = tok.Accent
+						numCol = tok.AccentText
+						wdCol = tok.AccentText.Alpha(0.85)
+					} else if isSel {
+						bg = tok.AccentSoftBg
+						borderW = 1
+						borderCol = tok.Accent
+						numCol = tok.Accent
+						wdCol = tok.Accent
+					} else if isToday {
+						borderW = 1
+						borderCol = tok.Accent
+						numCol = tok.Accent
+					}
+
+					cell := ui.ButtonBase(c.Key("mb-strip-day-"+ymd)).Grow(1).MinWidth(0).FillHeight().
+						Radius(float32(tok.ControlRadius)).Background(bg).Border(borderW, borderCol).
+						Center().Label("日期 " + ymd)
+					theme.ApplyTactilePress(cell)
+					cell.Children(func() {
+						ui.Column(c).Center().Gap(float32(tok.Spacing4)*0.5).Children(func() {
+							components.Text(c, "周"+weekdayCNShort(day.Weekday())).
+								FontSize(float32(tok.TextMeta)*0.85).TextColor(wdCol).SingleLine()
+							components.Text(c, fmt.Sprintf("%d", day.Day())).
+								FontSize(float32(tok.TextBody)).Bold().TextColor(numCol).
+								FontFeatures("tnum").SingleLine()
+							dotCol := ui.Transparent
+							if hasItems {
+								dotCol = tok.Accent
+								if isToday && isSel {
+									dotCol = tok.AccentText
+								}
+							}
+							ui.Box(c).Size(float32(tok.Spacing4), float32(tok.Spacing4)).
+								Radius(float32(tok.ControlRadius)).Background(dotCol)
+						})
+					})
+					if cell.Clicked() {
+						mygo.Haptics.Selection()
+						s.SelectedDate = ymd
+						s.CalendarCursor = ymd
+					}
+				}
+			})
+		}).Fill()
+	})
+
+	if extra.calStripPage.Page != 1 {
+		delta := (extra.calStripPage.Page - 1) * 7
+		nextCursor := cursor.AddDate(0, 0, delta)
+		nextSel := selDate.AddDate(0, 0, delta)
+		s.CalendarCursor = nextCursor.Format("2006-01-02")
+		s.SelectedDate = nextSel.Format("2006-01-02")
+		extra.calStripPage.Page = 1
+		mygo.Haptics.Selection()
+		selDate = nextSel
+		selDateYMD = s.SelectedDate
+	}
+
+	// 2. 3-Day / Single-Day Mode Toggle & Range Header
+	spanDays := 1
+	rangeText := fmt.Sprintf("%d月%d日 · 周%s", selDate.Month(), selDate.Day(), weekdayCNShort(selDate.Weekday()))
+	if extra.calAgenda3Day {
+		spanDays = 3
+		endD := selDate.AddDate(0, 0, 2)
+		rangeText = fmt.Sprintf("%d月%d日 – %d月%d日 · 3日日程", selDate.Month(), selDate.Day(), endD.Month(), endD.Day())
+	}
+	agendaTab := 0
+	if !extra.calAgenda3Day {
+		agendaTab = 1
+	}
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		components.Text(c, rangeText).FontSize(float32(tok.TextData)).Bold().
+			TextColor(tok.Text).FontFeatures("tnum").SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+		components.Tabs(c, &agendaTab, components.TabsSegmented, "3日", "单日")
+		if (agendaTab == 0) != extra.calAgenda3Day {
+			extra.calAgenda3Day = (agendaTab == 0)
+			mygo.Haptics.Selection()
+		}
+	})
+
+	// 3. 3-Day / Day Agenda Flow Cards
+	ui.Column(c.Key("mb-agenda-cards")).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
+		for i := 0; i < spanDays; i++ {
+			day := selDate.AddDate(0, 0, i)
+			ymd := day.Format("2006-01-02")
+			isToday := ymd == todayYMD
+			dayExps := append([]ExperimentItem(nil), byDate[ymd]...)
+			sort.SliceStable(dayExps, func(a, b int) bool {
+				return dayExps[a].StartHour < dayExps[b].StartHour
+			})
+			dayEvs := evByDate[ymd]
+			totalCnt := len(dayExps) + len(dayEvs)
+
+			cardBorder := tok.Border
+			if isToday {
+				cardBorder = tok.Accent.Alpha(0.55)
+			}
+			ui.Column(c.Key("mb-ag-day-"+ymd)).FillWidth().
+				Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+				Background(tok.Surface).Border(1, cardBorder).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					dayLbl := fmt.Sprintf("%d月%d日 · 周%s", day.Month(), day.Day(), weekdayCNShort(day.Weekday()))
+					components.Text(c, dayLbl).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).FontFeatures("tnum")
+					if isToday {
+						kit.Badge(c, "今天", components.BadgeOptions{Tone: components.BadgeAccent})
+					}
+					if totalCnt > 0 {
+						kit.Badge(c, fmt.Sprintf("%d 项", totalCnt), components.BadgeOptions{Tone: components.BadgeNeutral})
+					}
+					ui.Spacer(c)
+					if components.Button(c, "+ 安排", components.ButtonGhost).Clicked() {
+						s.SelectedDate = ymd
+						s.triggerCreateForDate(ymd)
+					}
+				})
+
+				if totalCnt == 0 {
+					components.Text(c, "暂无排期事项").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					return
+				}
+
+				for _, exp := range dayExps {
+					s.renderMobileAgendaExperimentCard(c, tok, exp)
+				}
+				for _, dev := range dayEvs {
+					s.renderAgendaDomainEventRow(c, tok, dev)
+				}
+			})
+		}
+	})
+}
+
+func (s *Shell) renderMobileAgendaExperimentCard(c *ui.Context, tok theme.Tokens, exp ExperimentItem) {
+	_, accentCol, _ := stagePillColors(tok, exp.Stage)
+	timeText := "全天"
+	if exp.StartHour > 0 {
+		hr := int(exp.StartHour)
+		mn := int(math.Round(float64(exp.StartHour-float32(hr)) * 60))
+		if mn >= 60 {
+			hr++
+			mn -= 60
+		}
+		timeText = fmt.Sprintf("%02d:%02d", hr, mn)
+	}
+	rowH := float32(tok.Spacing48)
+	if rowH < 48 {
+		rowH = 48
+	}
+	row := ui.ButtonBase(c.Key("mb-ag-card-"+exp.ID)).FillWidth().MinHeight(rowH).
+		Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+		Justify(ui.Start).Label(exp.Title)
+	theme.ApplyTactilePress(row)
+	row.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing24)).
+				Radius(float32(tok.ControlRadius)).Background(accentCol).Shrink(0)
+			ui.Text(c, timeText).FontSize(float32(tok.TextMeta)).Bold().
+				TextColor(tok.TextMuted).FontFeatures("tnum").Shrink(0)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					components.Text(c, exp.Title).FontSize(float32(tok.TextBody)).Bold().
+						TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+					kit.Badge(c, StageLabel(exp.Stage), components.BadgeOptions{Tone: stageTone(exp.Stage)})
+				})
+				sub := exp.Folder
+				if sub == "" {
+					sub = exp.Summary
+				}
+				if exp.DurationMin > 0 {
+					dur := formatMinutesCompact(exp.DurationMin)
+					if sub != "" {
+						sub += " · " + dur
+					} else {
+						sub = dur
+					}
+				}
+				if sub != "" {
+					components.Text(c, sub).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+						SingleLine().Ellipsis("…")
+				}
+			})
+			ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
+		})
+	})
+	if row.Clicked() {
+		s.openExperiment(exp)
+	}
+	if exp.FilePath != "" {
+		kit.ContextMenu(c, row, func(m *kit.Menu) {
+			if m.Item("打开实验").Chosen() {
+				s.openExperiment(exp)
+			}
+			if s.OnVaultDuplicate != nil && m.Item("创建副本到今天").Chosen() {
+				s.OnVaultDuplicate(exp.FilePath, s.resolvedToday().Format("2006-01-02"))
+			}
+			if s.OnSetExperimentDate != nil && m.Item("清除排期日期").Chosen() {
+				s.OnSetExperimentDate(exp.FilePath, "")
+			}
+			if s.OnVaultDelete != nil && m.Item("移入回收站").Chosen() {
+				s.OnVaultDelete(exp.FilePath)
+			}
+		})
+	}
+}
+
+func (s *Shell) renderMobileDayAgenda(c *ui.Context, tok theme.Tokens, ymd string, dayExps []ExperimentItem, dayDomainEvs []schedule.Event) {
 	dayHeading := ymd
 	if parsed, err := time.Parse("2006-01-02", ymd); err == nil {
 		dayHeading = fmt.Sprintf("%d月%d日 · 周%s", parsed.Month(), parsed.Day(), weekdayCNShort(parsed.Weekday()))
@@ -485,33 +815,16 @@ func (s *Shell) renderMobileDayAgenda(c *ui.Context, tok theme.Tokens, ymd strin
 				s.triggerCreateForDate(ymd)
 			}
 		})
-		if len(dayExps) == 0 {
+		if len(dayExps) == 0 && len(dayDomainEvs) == 0 {
 			components.Text(c, "当天暂无排期实验，点击右上角「+ 新建」安排实验。").
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 			return
 		}
 		for _, exp := range dayExps {
-			exp := exp
-			row := ui.ButtonBase(c.Key("mb-ag-"+exp.ID)).FillWidth().
-				Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-				Radius(float32(tok.PanelRadius)).Background(tok.Elevated).
-				Justify(ui.Start).Label(exp.Title)
-			row.Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					_, accentCol, _ := stagePillColors(tok, exp.Stage)
-					ui.Box(c).Width(float32(tok.Spacing4)*0.75).Height(float32(tok.Spacing16)).Radius(float32(tok.ControlRadius)).Background(accentCol)
-					ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)*0.5).Children(func() {
-						components.Text(c, exp.Title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-						if exp.Folder != "" {
-							components.Text(c, exp.Folder+" · "+StageLabel(exp.Stage)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
-						}
-					})
-					ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
-				})
-			})
-			if row.Clicked() {
-				s.openExperiment(exp)
-			}
+			s.renderMobileAgendaExperimentCard(c, tok, exp)
+		}
+		for _, dev := range dayDomainEvs {
+			s.renderAgendaDomainEventRow(c, tok, dev)
 		}
 	})
 }
