@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -1019,7 +1021,14 @@ func renderPantryBoxInteriorView(c *ui.Context, w *Workspace, tok theme.Tokens, 
 		}
 	})
 
-	// 4. Two-Column Spatial Grid (Left) + Inspector & Sorted Manifest (Right)
+	// 4. Two-Column Spatial Grid (Left) + Inspector & Sorted Manifest (Right) — stacked vertically on narrow screens
+	if isMobileToolsLayout(c) {
+		ui.Column(c).FillWidth().Gap(t.Space(3)).Children(func() {
+			renderBoxSlotGrid(c, w, tok, box, spec, slotMap)
+			renderBoxInspectorPanel(c, w, tok, box, spec, slotMap)
+		})
+		return
+	}
 	ui.Row(c).FillWidth().Gap(t.Space(4)).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(2)).Children(func() {
 			renderBoxSlotGrid(c, w, tok, box, spec, slotMap)
@@ -1028,6 +1037,175 @@ func renderPantryBoxInteriorView(c *ui.Context, w *Workspace, tok theme.Tokens, 
 			renderBoxInspectorPanel(c, w, tok, box, spec, slotMap)
 		})
 	})
+}
+
+type mobileBoxSheetKey struct{ w *Workspace }
+type mobileBoxZoomKey struct{ w *Workspace }
+type mobileLastBoxKey struct{ w *Workspace }
+
+func renderMobilePantryBoxSheet(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	boxSheetOpen := ui.Local(c.Root(), mobileBoxSheetKey{w}, func() bool { return false })
+	boxZoom := ui.Local(c.Root(), mobileBoxZoomKey{w}, func() mobile.ZoomState { return mobile.ZoomState{Scale: 1} })
+	lastBoxID := ui.Local(c.Root(), mobileLastBoxKey{w}, func() string { return "" })
+
+	if w.activeBoxID != "" && *lastBoxID != w.activeBoxID {
+		*boxSheetOpen = true
+		boxZoom.Reset()
+		*lastBoxID = w.activeBoxID
+	} else if !*boxSheetOpen && w.activeBoxID != "" && *lastActiveOrEmpty(lastBoxID) == w.activeBoxID {
+		w.ClosePantryBox()
+		*lastBoxID = ""
+	} else if w.activeBoxID == "" {
+		*boxSheetOpen = false
+		*lastBoxID = ""
+	}
+
+	box, hasBox := w.FindPantryBox(w.activeBoxID)
+	label := "冻存盒孔位"
+	if hasBox {
+		label = box.Name
+	}
+
+	mobile.Sheet(c, boxSheetOpen, mobile.SheetOptions{
+		Detents: []float32{0.94},
+		Label:   label,
+	}, func() {
+		if !hasBox {
+			*boxSheetOpen = false
+			return
+		}
+		t := c.Theme()
+		_, winH := c.Size()
+		_, _, bottomSafe, _ := c.SafeArea()
+		sheetBodyH := winH*0.94 - float32(tok.Spacing24) - bottomSafe
+		if sheetBodyH < float32(tok.Spacing48)*6 {
+			sheetBodyH = float32(tok.Spacing48) * 6
+		}
+		spec := LookupPantryBoxSpec(box.Kind)
+		slotMap := w.BoxSlotMap(box)
+		occupied, uniqueCnt, alertCnt, _ := w.BoxStats(box, "")
+		totalSlots := box.Rows * box.Cols
+		if w.selectedBoxSlot == "" {
+			w.selectedBoxSlot = "A1"
+		} else if _, _, ok := ParseBoxSlot(w.selectedBoxSlot, box.Rows, box.Cols); !ok {
+			w.selectedBoxSlot = "A1"
+		}
+		if boxZoom.Scale == 0 {
+			boxZoom.Scale = 1
+		}
+
+		ui.Column(c).FillWidth().Height(sheetBodyH).Padding(t.Space(3)).Gap(t.Space(2)).Children(func() {
+			// Sheet Header
+			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(0)).Children(func() {
+					ui.Text(c, box.Name).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+					ui.Text(c, fmt.Sprintf("%s · %d×%d · 已放 %d 管 (%d/%d 孔)", ZoneDisplayPrefix(box.ZoneKey), box.Rows, box.Cols, uniqueCnt, occupied, totalSlots)).
+						FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+				})
+				if alertCnt > 0 {
+					components.Badge(c, fmt.Sprintf("含 %d 临期", alertCnt), components.BadgeOptions{Tone: components.BadgeWarning})
+				}
+				if components.IconButton(c, lucide.ZoomOut(), "缩小冻存盒", components.IconButtonCompact).Clicked() {
+					boxZoom.Scale = max(1, boxZoom.Scale-0.5)
+				}
+				ui.Text(c, fmt.Sprintf("%.0f%%", boxZoom.Scale*100)).
+					FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+				if components.IconButton(c, lucide.ZoomIn(), "放大冻存盒", components.IconButtonCompact).Clicked() {
+					boxZoom.Scale = min(4, boxZoom.Scale+0.5)
+				}
+				if components.Button(c, "重置", components.ButtonGhost).Clicked() {
+					boxZoom.Reset()
+				}
+				if components.Button(c, "关闭", components.ButtonPrimary).MinHeight(float32(tok.ButtonHeight)).Clicked() {
+					mygo.Haptics.Light()
+					*boxSheetOpen = false
+					w.ClosePantryBox()
+					*lastBoxID = ""
+				}
+			})
+
+			// Quick search + move mode status inside box
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					components.TextBox(c, &w.pantrySearch, components.TextBoxOptions{
+						LeadingIcon: lucide.Search(),
+					}).Placeholder("搜盒内试剂、货号或孔位…")
+				})
+				if w.boxMoveItemID != "" {
+					if components.Button(c, "取消移动", components.ButtonSecondary).Clicked() {
+						w.boxMoveItemID = ""
+						w.boxMoveFromSlot = ""
+					}
+				}
+			})
+
+			// Pinch-zoomable 9x9 (or custom) box slot grid
+			zoomFrame := ui.Box(c).FillWidth().Grow(1).Basis(0).MinHeight(0).
+				Radius(float32(tok.PanelRadius)).Background(tok.Canvas).Border(1, tok.Border).Clip()
+			zoomFrame.Children(func() {
+				mobile.Zoomable(c, boxZoom, mobile.ZoomOptions{
+					Min:       1,
+					Max:       4,
+					DoubleTap: 2.2,
+				}, func() {
+					ui.Box(c).Fill().Center().Padding(t.Space(2)).Children(func() {
+						renderBoxSlotGrid(c, w, tok, box, spec, slotMap)
+					})
+				}).Fill()
+			})
+
+			// Selected slot inspector card (thumb-friendly actions >= 48dp)
+			selSlot := w.selectedBoxSlot
+			item, isOcc := slotMap[selSlot]
+			ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+				Background(tok.Surface).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					components.Badge(c, "孔位 "+selSlot, components.BadgeOptions{Tone: components.BadgeAccent})
+					if isOcc {
+						components.Badge(c, pantryItemStatus(item), components.BadgeOptions{Tone: detailStatusTone(item.Status)})
+						ui.Text(c, item.Name).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+							Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					} else {
+						components.Badge(c, "空孔位", components.BadgeOptions{Tone: components.BadgeNeutral})
+						ui.Text(c, "点击任意孔位查看或放入试剂").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+							Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					}
+				})
+				ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).Children(func() {
+					if isOcc {
+						if components.Button(c, "查看档案", components.ButtonPrimary).MinHeight(float32(tok.Spacing48)).Clicked() {
+							w.OpenPantryDetail(item)
+						}
+						if components.Button(c, "移至其他孔位", components.ButtonSecondary).MinHeight(float32(tok.Spacing48)).Clicked() {
+							w.boxMoveItemID = item.ID
+							w.boxMoveFromSlot = selSlot
+						}
+						if components.Button(c, "移出本盒", components.ButtonGhost).MinHeight(float32(tok.Spacing48)).Clicked() {
+							_ = w.RemoveReagentFromBox(item.ID)
+						}
+					} else {
+						if components.Button(c, "+ 在 "+selSlot+" 新建试剂", components.ButtonPrimary).MinHeight(float32(tok.Spacing48)).Clicked() {
+							w.OpenNewPantryDialogInBox(box, selSlot)
+						}
+						if loose := w.looseReagentsForBox(box); len(loose) > 0 {
+							firstLoose := loose[0]
+							if components.Button(c, "放入 "+truncateRunes(firstLoose.Name, 8), components.ButtonSecondary).MinHeight(float32(tok.Spacing48)).Clicked() {
+								if err := w.PlaceReagentInBoxSlot(firstLoose.ID, box.ID, selSlot, false); err != nil {
+									w.Error = err.Error()
+								} else {
+									mygo.Haptics.Success()
+								}
+							}
+						}
+					}
+				})
+			})
+		})
+	})
+}
+
+func lastActiveOrEmpty(p *string) *string {
+	return p
 }
 
 func renderBoxSlotGrid(
@@ -1043,18 +1221,30 @@ func renderBoxSlotGrid(
 	matches := boxSlotSearchMatches(w.pantrySearch, box, slotMap, w)
 	hasQuery := strings.TrimSpace(w.pantrySearch) != ""
 
+	mobileLayout := isMobileToolsLayout(c)
 	var cellMinH float32
-	switch {
-	case box.Cols <= 4:
-		cellMinH = float32(tok.Spacing48) * 1.85
-	case box.Cols <= 5:
-		cellMinH = float32(tok.Spacing48) * 1.5
-	case box.Cols <= 9:
-		cellMinH = float32(tok.Spacing48) * 1.05
-	case box.Cols <= 10:
-		cellMinH = float32(tok.Spacing48) * 0.96
-	default:
-		cellMinH = float32(tok.Spacing48) * 0.84
+	if mobileLayout {
+		switch {
+		case box.Cols <= 5:
+			cellMinH = float32(tok.Spacing48)
+		case box.Cols <= 9:
+			cellMinH = float32(tok.Spacing32) + float32(tok.Spacing4)
+		default:
+			cellMinH = float32(tok.Spacing32)
+		}
+	} else {
+		switch {
+		case box.Cols <= 4:
+			cellMinH = float32(tok.Spacing48) * 1.85
+		case box.Cols <= 5:
+			cellMinH = float32(tok.Spacing48) * 1.5
+		case box.Cols <= 9:
+			cellMinH = float32(tok.Spacing48) * 1.05
+		case box.Cols <= 10:
+			cellMinH = float32(tok.Spacing48) * 0.96
+		default:
+			cellMinH = float32(tok.Spacing48) * 0.84
+		}
 	}
 
 	cellRadius := float32(tok.ControlRadius)
@@ -1063,8 +1253,13 @@ func renderBoxSlotGrid(
 	}
 
 	rowAxisW := float32(tok.Spacing24)
+	gridPad := t.Space(3)
+	if mobileLayout {
+		rowAxisW = float32(tok.Spacing16)
+		gridPad = t.Space(2)
+	}
 
-	ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+	ui.Column(c).FillWidth().Padding(gridPad).Radius(float32(tok.PanelRadius)).
 		Background(tok.Elevated).Border(1, tok.BorderStrong).
 		InsetShadow(0, 1, 3, 0, tok.Text.Alpha(0.05)).
 		Gap(t.Space(1)).Children(func() {
@@ -1249,6 +1444,16 @@ func renderBoxCellContent(
 	}
 
 	// Render adaptive content density so 4x4 racks show full names while 9x9/8x12 stay crisp
+	if isMobileToolsLayout(c) && box.Cols > 5 {
+		dotSz := float32(tok.Spacing12)
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).Gap(t.Space(0)).Children(func() {
+			ui.Text(c, coord).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().
+				TextColor(tok.TextMuted).SingleLine()
+			ui.Box(c).Size(dotSz, dotSz).Radius(dotSz * 0.5).
+				Background(capCol).Border(t.Space(0)+1, ringColor)
+		})
+		return
+	}
 	ui.Column(c).FillWidth().Padding(t.Space(0), t.Space(1)).AlignItems(ui.Center).Gap(t.Space(0)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Justify(ui.Center).Gap(t.Space(1)).Children(func() {
 			ui.Text(c, coord).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().TextColor(tok.TextMuted)
@@ -1510,7 +1715,11 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 		components.Dialog(c, &w.PantryBoxDialogOpen, components.DialogOptions{
 			Label: title,
 		}, func(panel ui.Element) {
-		panel.Width(float32(tok.Spacing48)*14).Padding(t.Space(4)).Radius(float32(tok.DialogRadius)).
+		boxDlgW := float32(tok.Spacing48) * 14
+		if vw, _ := c.Size(); vw > 0 && vw < mobileBreakpointWidth {
+			boxDlgW = vw - float32(tok.Spacing24)
+		}
+		panel.Width(boxDlgW).Padding(t.Space(4)).Radius(float32(tok.DialogRadius)).
 			Background(tok.Surface).Border(1, tok.BorderStrong)
 
 		ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {

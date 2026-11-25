@@ -3,11 +3,14 @@ package asterdoc
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"gopkg.in/yaml.v3"
@@ -659,29 +662,43 @@ func (v *View) renderPlateFloatingBar(
 		if canEdit && len(groups) > 0 {
 			idxMap := plateGroupPaletteMap(v.Doc, plate)
 			dark := c.Theme() != nil && c.Theme().Dark
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-				ui.Text(c, "已有分组快选：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			mobileLayout := isMobilePlateLayout(v, c)
+			renderGroupChips := func() {
+				if !mobileLayout {
+					ui.Text(c, "已有分组快选：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				}
 				for _, gid := range groups {
 					gid := gid
 					lbl := firstNonEmpty(groupLabels[gid], gid)
 					chip := ui.ButtonBase(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 						Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border).
 						Label("归入分组 " + lbl)
+					if mobileLayout {
+						chip.MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing12))
+					}
 					chip.Children(func() {
 						ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
 							ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 								Background(plateui.GroupColorIndexed(gid, idxMap, dark))
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine()
 						})
 					})
 					if chip.Clicked() {
 						v.SelectedGroup = gid
 						if len(selected) > 0 {
+							mygo.Haptics.Success()
 							assignQuickGroup(gid)
 						}
 					}
 				}
-			})
+			}
+			if mobileLayout {
+				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderGroupChips)
+				})
+			} else {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(renderGroupChips)
+			}
 		}
 
 		if v.PlateSampleError != "" {
@@ -1045,14 +1062,20 @@ func (v *View) renderUnifiedPlateFloatingBar(
 			idxMap := plateGroupPaletteMap(v.Doc, plate)
 			lblMap := PlateGroupLabelMap(v.Doc)
 			dark := c.Theme() != nil && c.Theme().Dark
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			mobileLayout := isMobilePlateLayout(v, c)
+			renderUnifiedGroupChips := func() {
 				if len(groups) > 0 {
-					ui.Text(c, "分组：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					if !mobileLayout {
+						ui.Text(c, "分组：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					}
 					for _, gid := range groups {
 						gid := gid
 						lbl := firstNonEmpty(lblMap[gid], gid)
 						chip := ui.ButtonBase(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 							Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border)
+						if mobileLayout {
+							chip.MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing12))
+						}
 						chip.Children(func() {
 							ui.Row(c).Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
 								ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
@@ -1061,6 +1084,9 @@ func (v *View) renderUnifiedPlateFloatingBar(
 							})
 						})
 						if chip.Clicked() {
+							if mobileLayout {
+								mygo.Haptics.Success()
+							}
 							_ = v.applyUnifiedPlateInput(plate, ownerStepID, selected, gid)
 							setSelected(nil)
 						}
@@ -1075,7 +1101,14 @@ func (v *View) renderUnifiedPlateFloatingBar(
 					v.togglePlateExcludedWells(plate, selected)
 					setSelected(nil)
 				}
-			})
+			}
+			if mobileLayout {
+				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderUnifiedGroupChips)
+				})
+			} else {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(renderUnifiedGroupChips)
+			}
 		}
 
 		if v.PlateSampleError != "" {
@@ -1691,4 +1724,305 @@ func insertModuleInDocBeforeSteps(doc *Document, mod map[string]any) error {
 	doc.Source = nextSrc
 	doc.Modules = nextDoc.Modules
 	return nil
+}
+
+func isMobilePlateLayout(v *View, c *ui.Context) bool {
+	if v != nil && v.MobileCompact {
+		return true
+	}
+	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+		return true
+	}
+	if c != nil {
+		w, _ := c.Size()
+		return w > 0 && w < 680
+	}
+	return false
+}
+
+// RenderMobilePlateStudio renders a mobile-compact inline summary card for plate
+// (geometry + group color bar + well counts + 「全屏排板 / 读数」) paired with a
+// fullscreen Zoomable bottom Sheet with 3-mode touch selection and thumb-friendly
+// group assignment bar that commits changes via ApplyUnifiedPlateAnnotation.
+func (v *View) RenderMobilePlateStudio(c *ui.Context, plate *Plate, ownerStepID string, open *bool) {
+	if v == nil || plate == nil || open == nil {
+		return
+	}
+	t := c.Theme()
+	tok := theme.GetTokens(t)
+	dark := t != nil && t.Dark
+	geometry, _ := geometryForPlate(plate.Format, plate.Topology, plate.Rows, plate.Columns)
+
+	if v.plateColorBy == nil {
+		v.plateColorBy = map[string]string{}
+	}
+	if v.plateFactorKey == nil {
+		v.plateFactorKey = map[string]string{}
+	}
+	if v.plateStates == nil {
+		v.plateStates = map[string]*plateui.InteractionState{}
+	}
+	if v.plateSelections == nil {
+		v.plateSelections = map[string][]string{}
+	}
+	if v.plateInputDrafts == nil {
+		v.plateInputDrafts = map[string]*string{}
+	}
+
+	st := v.plateStates[plate.ID]
+	if st == nil {
+		st = &plateui.InteractionState{}
+		v.plateStates[plate.ID] = st
+	}
+	colorBy := v.plateColorBy[plate.ID]
+	if colorBy == "" {
+		colorBy = "group"
+	}
+	factorKey := v.plateFactorKey[plate.ID]
+
+	excludedSet := map[string]bool{}
+	for _, ew := range plate.ExcludedWells {
+		excludedSet[strings.ToUpper(strings.TrimSpace(ew))] = true
+	}
+	wells := map[string]plateui.WellState{}
+	for well, group := range plate.WellGroups() {
+		fMap := copyStringMap(plate.WellFactors(well))
+		for lName, lVals := range plate.Layers {
+			if lv := strings.TrimSpace(lVals[well]); lv != "" {
+				fMap[lName] = lv
+			}
+		}
+		roleVal := plate.Roles[well]
+		if excludedSet[strings.ToUpper(well)] && roleVal == "" {
+			roleVal = "blank"
+		}
+		wells[well] = plateui.WellState{
+			Group:     group,
+			SampleID:  plate.Samples[well],
+			Replicate: plate.Replicates[well],
+			Role:      roleVal,
+			Factors:   fMap,
+		}
+	}
+	for lName, lVals := range plate.Layers {
+		for well, lv := range lVals {
+			if strings.TrimSpace(lv) == "" {
+				continue
+			}
+			ws := wells[well]
+			if ws.Factors == nil {
+				ws.Factors = map[string]string{}
+			}
+			ws.Factors[lName] = lv
+			wells[well] = ws
+		}
+	}
+
+	selected := v.plateSelections[plate.ID]
+	idxMap := plateGroupPaletteMap(v.Doc, plate)
+	lblMap := PlateGroupLabelMap(v.Doc)
+	canEdit := v.Can(PermDocumentEdit) && !v.ReadOnly
+
+	baseProps := plateui.Props{
+		Wells:       wells,
+		Rows:        geometry.Rows,
+		Cols:        geometry.Columns,
+		Topology:    plate.Topology,
+		Roles:       plate.Roles,
+		Interactive: canEdit || (v.LabMode && !v.ReadOnly),
+		SelectedIDs: selected,
+		OnSelect: func(ids []string) {
+			v.plateSelections[plate.ID] = ids
+		},
+		ColorBy:     colorBy,
+		FactorKey:   factorKey,
+		GroupIndex:  idxMap,
+		GroupLabels: lblMap,
+		ExcludedIDs: excludedSet,
+		State:       st,
+	}
+
+	inlineProps := baseProps
+	inlineProps.MobileCompact = true
+	inlineProps.OnOpenFullscreen = func() {
+		st.ZoomState.Reset()
+		*open = true
+	}
+	plateui.View(c, inlineProps)
+
+	title := strings.TrimSpace(plate.Title)
+	if title == "" {
+		title = fmt.Sprintf("%d 孔板", plate.Format)
+	}
+
+	mobile.Sheet(c, open, mobile.SheetOptions{
+		Detents: []float32{0.94},
+		Label:   title,
+	}, func() {
+		vw, winH := c.Size()
+		_, _, bottomSafe, _ := c.SafeArea()
+		sheetBodyH := winH*0.94 - float32(tok.Spacing24) - bottomSafe
+		if sheetBodyH < float32(tok.Spacing48)*6 {
+			sheetBodyH = float32(tok.Spacing48) * 6
+		}
+		fitZoom := plateui.ComputeFullscreenFitZoom(vw, geometry.Rows, geometry.Columns, plate.Topology, tok)
+		maxZoom := float32(4)
+		if geometry.Rows*geometry.Columns > 96 {
+			maxZoom = 6
+		}
+		if st.ZoomState.Scale == 0 {
+			st.ZoomState.Scale = 1
+		}
+
+		draft := v.plateInputDrafts[plate.ID]
+		if draft == nil {
+			empty := ""
+			draft = &empty
+			v.plateInputDrafts[plate.ID] = draft
+		}
+
+		ui.Column(c).FillWidth().Height(sheetBodyH).Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+			// Header
+			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+					sub := fmt.Sprintf("已排 %d / %d 孔 · 已选 %d 孔", len(wells), geometry.Rows*geometry.Columns, len(selected))
+					ui.Text(c, sub).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+				})
+				if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() {
+					st.ZoomState.Scale = max(1, st.ZoomState.Scale-0.5)
+				}
+				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
+					FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+				if components.IconButton(c, lucide.ZoomIn(), "放大孔板", components.IconButtonCompact).Clicked() {
+					st.ZoomState.Scale = min(maxZoom, st.ZoomState.Scale+0.5)
+				}
+				if components.Button(c, "重置", components.ButtonGhost).Clicked() {
+					st.ZoomState.Reset()
+				}
+				if components.Button(c, "完成", components.ButtonPrimary).MinHeight(float32(tok.ButtonHeight)).Clicked() {
+					mygo.Haptics.Light()
+					*open = false
+				}
+			})
+
+			// Pinch-zoomable grid
+			zoomBox := ui.Box(c).FillWidth().Grow(1).Basis(0).MinHeight(0).
+				Radius(float32(tok.PanelRadius)).Background(tok.Canvas).Border(1, tok.Border).Clip()
+			zoomBox.Children(func() {
+				mobile.Zoomable(c, &st.ZoomState, mobile.ZoomOptions{
+					Min:       1,
+					Max:       maxZoom,
+					DoubleTap: 2.2,
+				}, func() {
+					ui.Box(c).Fill().Center().Padding(float32(tok.Spacing8)).Children(func() {
+						sheetProps := baseProps
+						sheetProps.FullscreenSheet = true
+						sheetProps.MobileCompact = false
+						sheetProps.Zoom = fitZoom
+						sheetProps.TouchMode = &st.TouchMode
+						plateui.View(c, sheetProps)
+					})
+				}).Fill()
+			})
+
+			// Bottom 3-mode touch selector
+			plateui.RenderTouchModeSelector(c, st, func() {
+				v.plateSelections[plate.ID] = nil
+			})
+
+			// Thumb-friendly group assignment & quick annotation bar
+			if canEdit {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+						components.TextBox(c, draft, components.TextBoxOptions{}).
+							Placeholder("输入分组/样本（如 WT、Vehicle、100/2 uM）")
+					})
+					applyBtn := components.Button(c, "标注", components.ButtonPrimary).MinHeight(float32(tok.Spacing48))
+					applyBtn.Disabled(len(selected) == 0 || strings.TrimSpace(*draft) == "")
+					if applyBtn.Clicked() {
+						if err := v.applyUnifiedPlateInput(plate, ownerStepID, selected, *draft); err != nil {
+							v.PlateSampleError = err.Error()
+						} else {
+							mygo.Haptics.Success()
+							v.PlateSampleError = ""
+							*draft = ""
+							v.plateSelections[plate.ID] = nil
+						}
+					}
+				})
+
+				var groups []string
+				seenGrp := map[string]bool{}
+				if v.Doc != nil {
+					for _, g := range v.Doc.GroupList() {
+						if g.ID != "" && !seenGrp[g.ID] {
+							seenGrp[g.ID] = true
+							groups = append(groups, g.ID)
+						}
+					}
+				}
+				for _, gid := range plate.GroupNames() {
+					if gid != "" && !seenGrp[gid] {
+						seenGrp[gid] = true
+						groups = append(groups, gid)
+					}
+				}
+				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						for _, gid := range groups {
+							gid := gid
+							lbl := firstNonEmpty(lblMap[gid], gid)
+							chip := ui.ButtonBase(c.Key("studio-sheet-grp-"+gid)).Label("归入分组 "+lbl).
+								MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+								Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border).
+								OnClick(func() {
+									if len(selected) == 0 {
+										v.PlateSampleError = "请先点选或涂抹要标注的孔位"
+										return
+									}
+									if err := v.applyUnifiedPlateInput(plate, ownerStepID, selected, gid); err != nil {
+										v.PlateSampleError = err.Error()
+										return
+									}
+									mygo.Haptics.Success()
+									v.PlateSampleError = ""
+									v.plateSelections[plate.ID] = nil
+								})
+							chip.Children(func() {
+								ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Box(c).Size(float32(tok.Spacing12), float32(tok.Spacing12)).
+										Radius(float32(tok.ControlRadius)).
+										Background(plateui.GroupColorIndexed(gid, idxMap, dark))
+									ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
+								})
+							})
+						}
+						blankBtn := components.Button(c, "空白(PBS)", components.ButtonSecondary).MinHeight(float32(tok.Spacing48))
+						if blankBtn.Clicked() && len(selected) > 0 {
+							mygo.Haptics.Success()
+							_ = v.applyUnifiedPlateInput(plate, ownerStepID, selected, "空白")
+							v.plateSelections[plate.ID] = nil
+						}
+						if len(selected) > 0 {
+							clrBtn := components.Button(c, "清空所选", components.ButtonGhost).MinHeight(float32(tok.Spacing48))
+							if clrBtn.Clicked() {
+								mygo.Haptics.Light()
+								if v.OnClearWells != nil && ownerStepID == "" {
+									v.OnClearWells(plate.ID, append([]string(nil), selected...))
+								} else {
+									_ = v.assign(selected, "")
+								}
+								v.plateSelections[plate.ID] = nil
+							}
+						}
+					})
+				})
+			}
+
+			if v.PlateSampleError != "" {
+				ui.Text(c, v.PlateSampleError).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
+			}
+		})
+	})
 }

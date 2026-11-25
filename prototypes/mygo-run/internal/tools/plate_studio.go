@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -9,11 +10,27 @@ import (
 	"asterlab-mygo-prototype/internal/asterdoc"
 	"asterlab-mygo-prototype/internal/theme"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"gopkg.in/yaml.v3"
 )
+
+const mobileBreakpointWidth = float32(680)
+
+func isMobileToolsLayout(c *ui.Context) bool {
+	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	w, _ := c.Size()
+	return w > 0 && w < mobileBreakpointWidth
+}
+
+type mobilePlateSheetKey struct{ w *Workspace }
 
 // PlatePreset describes a standard container geometry selectable before designing.
 type PlatePreset struct {
@@ -630,15 +647,22 @@ func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		w.initPlateStudio()
 	}
 	dark := c.Theme() != nil && c.Theme().Dark
+	mobileLayout := isMobileToolsLayout(c)
+	if w.plateView != nil {
+		w.plateView.MobileCompact = mobileLayout
+	}
+	studioSheetOpen := ui.Local(c.Root(), mobilePlateSheetKey{w}, func() bool { return false })
 
 	// Header row: title + quick actions (Save to History, Export SVG, Export PNG, Apply to Design)
 	ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		ui.Column(c).Gap(2).Children(func() {
+		ui.Column(c).Gap(float32(tok.Spacing4) * 0.5).Children(func() {
 			ui.Text(c, "孔板速排").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 			ui.Text(c, "先选择容器规格，再在画布框选孔位标注分组、样本与复孔；支持直接导出矢量 SVG 或高清 PNG。").
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		})
-		ui.Spacer(c)
+		if !mobileLayout {
+			ui.Spacer(c)
+		}
 		ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			saveHistBtn := components.Button(c, "保存至历史", components.ButtonGhost)
 			saveHistBtn.Disabled(w.activePlateAssignedCount() == 0)
@@ -669,7 +693,7 @@ func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 				w.ResetBlankPlate()
 			}
 		})
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+		renderPresetChips := func() {
 			for _, preset := range StandardPlatePresets {
 				preset := preset
 				active := w.ActivePlatePreset == preset.Key
@@ -677,20 +701,40 @@ func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 				if active {
 					variant = components.ButtonSecondary
 				}
-				if components.Button(c, preset.Label, variant).Clicked() {
+				btn := components.Button(c, preset.Label, variant)
+				if mobileLayout {
+					btn.MinHeight(float32(tok.Spacing48))
+				}
+				if btn.Clicked() {
+					if mobileLayout {
+						mygo.Haptics.Selection()
+					}
 					w.SelectPlatePreset(preset.Key)
 				}
 			}
-		})
+		}
+		if mobileLayout {
+			ui.ScrollHorizontal(c).FillWidth().Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderPresetChips)
+			})
+		} else {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(renderPresetChips)
+		}
 	})
 
-	// Step ②: Active shared asterdoc Plate Designer (preserves marquee selection, floating bar, rename, zoom)
+	// Step ②: Active shared asterdoc Plate Designer (or mobile compact card + fullscreen Zoomable Sheet)
 	plateMod := primaryPlateModule(w.plateDoc)
 	if plateMod != nil {
-		w.plateView.RenderModule(c, "plate", 1, plateMod.Data)
+		if mobileLayout {
+			if plate := findPrimaryPlate(w.plateDoc); plate != nil {
+				w.plateView.RenderMobilePlateStudio(c, plate, "", studioSheetOpen)
+			}
+		} else {
+			w.plateView.RenderModule(c, "plate", 1, plateMod.Data)
+		}
 	}
 
-	// Lower Section: 2-Column 孔板历史 Component Wall
+	// Lower Section: 2-Column (or 1-Column on mobile) 孔板历史 Component Wall
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing4), 0).Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "孔板历史").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
@@ -708,22 +752,30 @@ func plateView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			return
 		}
 
-		// Two-column visual grid of reusable plate history cards
-		for i := 0; i < len(w.PlateHistory); i += 2 {
-			left := w.PlateHistory[i]
-			hasRight := i+1 < len(w.PlateHistory)
-			var right PlateHistoryEntry
-			if hasRight {
-				right = w.PlateHistory[i+1]
-			}
-			ui.Row(c.Key(fmt.Sprintf("plate-hist-row-%d", i/2))).FillWidth().Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
-				renderPlateHistoryCard(c, w, tok, dark, left)
-				if hasRight {
-					renderPlateHistoryCard(c, w, tok, dark, right)
-				} else {
-					ui.Box(c).Grow(1).Basis(0)
+		if mobileLayout {
+			ui.Column(c).FillWidth().Gap(float32(tok.Spacing12)).Children(func() {
+				for _, entry := range w.PlateHistory {
+					renderPlateHistoryCard(c, w, tok, dark, entry, true)
 				}
 			})
+		} else {
+			// Two-column visual grid of reusable plate history cards
+			for i := 0; i < len(w.PlateHistory); i += 2 {
+				left := w.PlateHistory[i]
+				hasRight := i+1 < len(w.PlateHistory)
+				var right PlateHistoryEntry
+				if hasRight {
+					right = w.PlateHistory[i+1]
+				}
+				ui.Row(c.Key(fmt.Sprintf("plate-hist-row-%d", i/2))).FillWidth().Gap(float32(tok.Spacing12)).AlignItems(ui.Stretch).Children(func() {
+					renderPlateHistoryCard(c, w, tok, dark, left, false)
+					if hasRight {
+						renderPlateHistoryCard(c, w, tok, dark, right, false)
+					} else {
+						ui.Box(c).Grow(1).Basis(0)
+					}
+				})
+			}
 		}
 	})
 }
@@ -740,14 +792,19 @@ func primaryPlateModule(doc *asterdoc.Document) *asterdoc.Module {
 	return nil
 }
 
-func renderPlateHistoryCard(c *ui.Context, w *Workspace, tok theme.Tokens, dark bool, entry PlateHistoryEntry) {
+func renderPlateHistoryCard(c *ui.Context, w *Workspace, tok theme.Tokens, dark bool, entry PlateHistoryEntry, mobileLayout bool) {
 	isEditing := w.currentHistoryID == entry.ID
 	borderCol := tok.Border
 	if isEditing {
 		borderCol = tok.Accent
 	}
-	card := ui.Column(c.Key("plate-hist:"+entry.ID)).Grow(1).Basis(0).MinWidth(0).Padding(float32(tok.Spacing12)).
+	card := ui.Column(c.Key("plate-hist:"+entry.ID)).MinWidth(0).Padding(float32(tok.Spacing12)).
 		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, borderCol).Gap(float32(tok.Spacing8))
+	if mobileLayout {
+		card.FillWidth()
+	} else {
+		card.Grow(1).Basis(0)
+	}
 	card.Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			title := strings.TrimSpace(entry.Title)
@@ -767,20 +824,42 @@ func renderPlateHistoryCard(c *ui.Context, w *Workspace, tok theme.Tokens, dark 
 		}
 		ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 
-		// Clickable miniature plate component preview (reusing plateui.View)
-		preview := ui.Box(c).FillWidth().Grow(1).MinHeight(148).Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-			Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Label("载入历史孔板 " + entry.Title)
-		preview.Children(func() {
+		if mobileLayout {
 			if doc, err := asterdoc.Parse(entry.Source); err == nil {
 				if props, _, ok := docToPlateProps(doc, "group", ""); ok {
-					props.Interactive = false
-					props.Zoom = miniZoomForGrid(entry.Rows, entry.Cols, entry.Topology)
-					plateui.View(c, props)
+					legend := plateui.ComputeLegend(props, dark)
+					totalW := max(1, props.Rows*props.Cols)
+					ui.Row(c).FillWidth().Height(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+						Clip().Background(tok.Surface).Border(1, tok.Border).Gap(0).Children(func() {
+						sum := 0
+						for _, item := range legend {
+							if item.Count > 0 {
+								sum += item.Count
+								ui.Box(c).FillHeight().Grow(float32(item.Count)).Basis(0).Background(item.Color)
+							}
+						}
+						if rem := totalW - sum; rem > 0 {
+							ui.Box(c).FillHeight().Grow(float32(rem)).Basis(0).Background(tok.Canvas)
+						}
+					})
 				}
 			}
-		})
-		if preview.Clicked() {
-			w.LoadHistoryEntry(entry.ID)
+		} else {
+			// Clickable miniature plate component preview (reusing plateui.View)
+			preview := ui.Box(c).FillWidth().Grow(1).MinHeight(float32(tok.Spacing48)*3).Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Justify(ui.Center).Cursor(ui.CursorPointer).Label("载入历史孔板 " + entry.Title)
+			preview.Children(func() {
+				if doc, err := asterdoc.Parse(entry.Source); err == nil {
+					if props, _, ok := docToPlateProps(doc, "group", ""); ok {
+						props.Interactive = false
+						props.Zoom = miniZoomForGrid(entry.Rows, entry.Cols, entry.Topology)
+						plateui.View(c, props)
+					}
+				}
+			})
+			if preview.Clicked() {
+				w.LoadHistoryEntry(entry.ID)
+			}
 		}
 
 		// Card footer: Load to Top / Export SVG / Export PNG / Delete
@@ -789,7 +868,11 @@ func renderPlateHistoryCard(c *ui.Context, w *Workspace, tok theme.Tokens, dark 
 			if isEditing {
 				loadLabel = "重新载入"
 			}
-			if components.Button(c, loadLabel, components.ButtonSecondary).Clicked() {
+			loadBtn := components.Button(c, loadLabel, components.ButtonSecondary)
+			if mobileLayout {
+				loadBtn.MinHeight(float32(tok.Spacing48))
+			}
+			if loadBtn.Clicked() {
 				w.LoadHistoryEntry(entry.ID)
 			}
 			if components.Button(c, "导出 SVG", components.ButtonGhost).Clicked() {
