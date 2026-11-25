@@ -4839,7 +4839,38 @@ func main() {
 			if a.vaultIndex == nil {
 				return nil
 			}
-			return a.vaultIndex.SearchFullText(query, 50)
+			return a.vaultIndex.HybridSearch(query, 50)
+		},
+		OnApplyDocSuggestion: func(item shell.DocSuggestionItem) {
+			if a.shell == nil || a.docStore == nil || a.shell.CurrentDocRelPath == "" {
+				return
+			}
+			rel := a.shell.CurrentDocRelPath
+			ld, err := a.docStore.Open(rel)
+			if err != nil {
+				return
+			}
+			next, ok := applyDocSuggestionYAML(ld.Source, item.ByteOffset, item.OriginalLine, item.YAML)
+			if !ok {
+				return
+			}
+			if a.vault != nil {
+				_ = a.vault.RecordSnapshot(rel, ld.Source, false)
+			}
+			if err := ld.ApplyEdit(next); err != nil {
+				a.syncErr = fmt.Sprintf("插入组件失败：%v", err)
+				return
+			}
+			if a.vault != nil {
+				ld.NotifySaved(a.vault, false)
+			}
+			if a.vaultIndex != nil {
+				a.vaultIndex.UpsertSource(rel, ld.Source)
+			}
+			a.lastCompanionKey = ""
+			a.refreshVaultTreeAndCalendar()
+			a.syncActiveDocCompanionState(rel, ld.Source, ld.Parsed)
+			a.shell.PushToast(kit.Toast{Tone: kit.ToastSuccess, Message: "已插入：" + item.KindLabel})
 		},
 		OnOpenSearchHit: func(relPath, query string) {
 			if strings.TrimSpace(query) != "" {

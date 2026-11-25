@@ -53,6 +53,7 @@ type liveEditorEntry struct {
 	sparkBufVer          uint64
 	sparkLineIdx         int
 	sparkHasSug          bool
+	sparkSug             *NLSuggestion
 }
 
 var (
@@ -1384,6 +1385,9 @@ func (v *View) renderLiveMarkdownSegmentFull(
 					if lnStart, _, ok := lineBoundsForIndex(curBuf, hitLine); ok {
 						activateNLHoverForLine(curBuf, lnStart, false)
 					}
+				} else if focused {
+					// Fallback: when user holds Alt while typing/cursoring without moving mouse onto the line
+					activateNLHoverForLine(curBuf, st.Cursor(), false)
 				} else if activeHere {
 					v.nlHover.hideAt = time.Time{}
 				}
@@ -1405,7 +1409,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			}
 		}
 
-		// Quiet, text-free ✦ micro-icon at right margin of the focused actionable line (L1 progressive disclosure).
+		// Quiet, single focused-line inline pill at right margin (L1 progressive disclosure: zero noise on unfocused lines).
 		// UI-21: Strictly memoized per (docSource, bufferVersion, activeLine) — zero per-frame SciGraph/ONNX churn!
 		if !readOnly && focused && (v.nlHover == nil || v.nlHover.editorKey != key) {
 			if lnStart, lnEnd, ok := lineBoundsForIndex(curBuf, activeLine); ok {
@@ -1416,32 +1420,43 @@ func (v *View) renderLiveMarkdownSegmentFull(
 					lnTxt := strings.TrimSpace(curBuf[lnStart:lnEnd])
 					if len([]rune(lnTxt)) >= 6 {
 						sugs := lookupLineSuggestionsCached(lnTxt, entry.docOffset+lnStart, nil)
-						entry.sparkHasSug = len(sugs) > 0 && sugs[0] != nil
+						if len(sugs) > 0 && sugs[0] != nil {
+							entry.sparkHasSug = true
+							entry.sparkSug = sugs[0]
+						} else {
+							entry.sparkHasSug = false
+							entry.sparkSug = nil
+						}
 					} else {
 						entry.sparkHasSug = false
+						entry.sparkSug = nil
 					}
 				}
-				if entry.sparkHasSug {
+				if entry.sparkHasSug && entry.sparkSug != nil {
 					lineTop := float32(st.LineTop(activeLine) - st.ScrollY())
 					lineBot := float32(st.LineTop(activeLine+1) - st.ScrollY())
 					lineH := lineBot - lineTop
 					if lineH < float32(tok.TextBody)*1.3 {
 						lineH = float32(tok.TextBody) * 1.56
 					}
-					btnSz := float32(tok.Spacing24) - 2
+					chipIcon, chipLbl := shortNLChipLabel(entry.sparkSug)
+					btnH := float32(tok.Spacing24) - 2
 					sparkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("nl-spark:%s:%d", key, activeLine))).
-						Absolute().Top(lineTop + (lineH-btnSz)/2).Right(2).
-						Size(btnSz, btnSz).Center().
+						Absolute().Top(lineTop + (lineH-btnH)/2).Right(2).
+						Height(btnH).Padding(0, float32(tok.Spacing8)).Center().
 						Radius(float32(tok.ControlRadius)).
-						Label("智能转为交互组件")
+						Background(tok.AccentSoftBg.Alpha(0.72)).Border(1, tok.Accent.Alpha(0.28)).
+						Label("转为" + chipLbl + "组件")
 					if sparkBtn.Hovered() {
-						sparkBtn.Background(tok.AccentSoftBg)
+						sparkBtn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
 					}
 					sparkBtn.Children(func() {
-						ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12)+1, float32(tok.Spacing12)+1).
-							TextColor(tok.Accent.Alpha(0.75))
+						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Icon(c, chipIcon).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+							ui.Text(c, chipLbl).FontSize(float32(tok.TextMeta)-1).Bold().TextColor(tok.Accent).SingleLine()
+						})
 					})
-					components.Tooltip(c, sparkBtn, "转为交互组件（快捷键 Alt+悬停 或 Alt+Enter）")
+					components.Tooltip(c, sparkBtn, "转为交互组件（点击或 Alt+Enter）")
 					if sparkBtn.Clicked() {
 						activateNLHoverForLine(curBuf, lnStart, true)
 					}

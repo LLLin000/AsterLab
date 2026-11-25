@@ -175,3 +175,42 @@ func TestNormalizeFolderPathAndNestedCreation(t *testing.T) {
 		t.Fatalf("expected nested file on disk: %v", err)
 	}
 }
+
+func TestVaultRelatedDocsAndHybridSearch(t *testing.T) {
+	root := t.TempDir()
+	v, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc1 := "---\ntitle: 万古霉素抑菌圈第2轮\nscheduled_date: 2026-11-20\ntags: [抗菌, 水凝胶]\n---\n\n#@ 贴片抑菌\n- 用 GelMA 水凝胶装载万古霉素并测量抑菌圈直径\n"
+	doc2 := "---\ntitle: 万古霉素液体共培养抑菌测试\nscheduled_date: 2026-11-22\ntags: [抗菌, 水凝胶]\n---\n\n#@ 共培养计数\n- 使用 GelMA 水凝胶对比革兰氏阳性菌抑制率\n"
+	doc3 := "---\ntitle: 小鼠免疫组化染色切片\nscheduled_date: 2026-11-23\n---\n\n#@ DAPI 封片\n- 荧光显微镜拍摄血管切片\n"
+	_, err = v.CreateExperiment("抗菌", "万古霉素抑菌圈第2轮", "2026-11-20", doc1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = v.CreateExperiment("抗菌", "万古霉素液体共培养抑菌测试", "2026-11-22", doc2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = v.CreateExperiment("免疫组化", "小鼠免疫组化染色切片", "2026-11-23", doc3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewVaultIndex(v)
+	if err := idx.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+
+	related := idx.RelatedDocs("抗菌/万古霉素抑菌圈第2轮.asterml", 3)
+	if len(related) == 0 || related[0].RelPath != "抗菌/万古霉素液体共培养抑菌测试.asterml" {
+		t.Fatalf("expected 万古霉素液体共培养抑菌测试 as top related doc, got %+v", related)
+	}
+
+	// Query phrasing doesn't exist verbatim as substring, yet HybridSearch recalls via semantic similarity
+	hits := idx.HybridSearch("水凝胶抑菌测试", 10)
+	if len(hits) == 0 {
+		t.Fatalf("expected HybridSearch to recall related hydrogel antibacterial docs")
+	}
+}

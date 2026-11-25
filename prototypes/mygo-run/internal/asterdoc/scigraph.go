@@ -153,7 +153,7 @@ func (ctx ScientificLineContext) AllowedForNL() bool {
 func (ctx ScientificLineContext) AllowsKind(kind string) bool {
 	switch ctx.Zone {
 	case ZoneStepBody:
-		return kind == "timer" || kind == "calculator" || kind == "plate_group" || kind == "attachment"
+		return kind == "timer" || kind == "calculator" || kind == "plate_group" || kind == "attachment" || kind == "param_table"
 	case ZoneDesignPlan:
 		return kind == "plate_group" || kind == "calculator"
 	default:

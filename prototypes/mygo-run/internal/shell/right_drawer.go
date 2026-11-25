@@ -95,7 +95,7 @@ func (s *Shell) drawerTabsForContext(ctx drawerContextKind) (shortLabels, fullTi
 	case drawerCtxPantry:
 		return []string{"库存概览", "速算计时"}, []string{"试剂库存概览", "速算与计时"}
 	default:
-		return []string{"大纲", "速算计时", "关联诊断"}, []string{"步骤大纲", "速算与计时", "关联与诊断"}
+		return []string{"大纲", "速算计时", "关联体检"}, []string{"步骤大纲", "速算与计时", "关联与诊断"}
 	}
 }
 
@@ -774,15 +774,187 @@ func formatVaultTimerClock(vt vault.VaultTimerEntry, now time.Time) string {
 
 func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens) {
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+		// 1. 方案体检（始终紧凑：无异常仅一行绿标，不堆砌废话）
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-			components.Text(c, "反向链接与复现谱系").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+			components.Text(c, "方案体检").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 			ui.Spacer(c)
-			components.Badge(c, fmt.Sprintf("%d", len(s.CurrentBacklinks)))
+			if len(s.CurrentDiagnostics) > 0 {
+				components.Badge(c, fmt.Sprintf("%d", len(s.CurrentDiagnostics)))
+			}
 		})
-		if len(s.CurrentBacklinks) == 0 {
-			components.Text(c, "暂无其他实验通过 [[双链]] 或 repeat_of 引用本文档。").
-				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		if len(s.CurrentDiagnostics) == 0 {
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Icon(c, lucide.CircleCheck()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Success)
+				components.Text(c, "结构与试剂状态正常").FontSize(float32(tok.TextMeta)).TextColor(tok.Success)
+			})
 		} else {
+			for i, diag := range s.CurrentDiagnostics {
+				diag := diag
+				sevLbl := "建议"
+				sevCol := tok.Accent
+				switch diag.Severity {
+				case "blocking":
+					sevLbl = "阻断"
+					sevCol = tok.Danger
+				case "needs_confirmation":
+					sevLbl = "待确认"
+					sevCol = tok.Warning
+				}
+				ui.Column(c.Key(fmt.Sprintf("rd-diag-%d-%s", i, diag.Code))).FillWidth().
+					Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).Border(1, sevCol.Alpha(0.32)).Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Box(c).Size(6, 6).Radius(3).Background(sevCol)
+						ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(sevCol)
+						ui.Spacer(c)
+						if diag.PantryItemID != "" && s.OnLocatePantry != nil {
+							if components.Button(c, "查看储藏室", components.ButtonGhost).Clicked() {
+								s.OnLocatePantry(diag.PantryItemID)
+							}
+						}
+					})
+					components.Text(c, diag.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+				})
+			}
+		}
+
+		// 2. 关联试剂（仅在正文识别到储藏室试剂时轻盈展示）
+		if len(s.CurrentMatchedReagents) > 0 {
+			ui.Divider(c)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				components.Text(c, "关联试剂").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				components.Badge(c, fmt.Sprintf("%d", len(s.CurrentMatchedReagents)))
+			})
+			ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing4)).Children(func() {
+				for i, rg := range s.CurrentMatchedReagents {
+					rg := rg
+					bg := tok.Elevated
+					bd := tok.Border
+					fg := tok.Text
+					tag := rg.Location
+					switch rg.Status {
+					case "expired":
+						bg = tok.Danger.Alpha(0.08)
+						bd = tok.Danger.Alpha(0.38)
+						fg = tok.Danger
+						tag = "已过期"
+					case "exhausted":
+						bg = tok.Warning.Alpha(0.10)
+						bd = tok.Warning.Alpha(0.38)
+						fg = tok.WarningText
+						tag = "已用尽"
+					case "near_expiry":
+						bg = tok.Warning.Alpha(0.10)
+						bd = tok.Warning.Alpha(0.38)
+						fg = tok.WarningText
+						tag = "临期"
+					}
+					label := rg.Name
+					if tag != "" {
+						label += " · " + tag
+					}
+					chip := ui.ButtonBase(c.Key(fmt.Sprintf("rd-reag-%d-%s", i, rg.ID))).
+						Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bd).
+						Label(rg.Name)
+					if chip.Hovered() {
+						chip.Background(tok.AccentSoftBg)
+					}
+					chip.Children(func() {
+						ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+					})
+					if chip.Clicked() && s.OnLocatePantry != nil {
+						s.OnLocatePantry(rg.ID)
+					}
+				}
+			})
+		}
+
+		// 3. 可转交互组件（仅在当前文档仍有未结构化动作句时显示）
+		if len(s.CurrentDocSuggestions) > 0 {
+			ui.Divider(c)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				components.Text(c, "可转交互组件").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				components.Badge(c, fmt.Sprintf("%d", len(s.CurrentDocSuggestions)))
+			})
+			limit := len(s.CurrentDocSuggestions)
+			if !s.drawerExpandAllSugs && limit > 6 {
+				limit = 6
+			}
+			for i := 0; i < limit; i++ {
+				sug := s.CurrentDocSuggestions[i]
+				ui.Row(c.Key(fmt.Sprintf("rd-sug-%d-%d", i, sug.ByteOffset))).FillWidth().
+					Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).Border(1, tok.Border).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+						ui.Text(c, sug.KindLabel).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine().Ellipsis("…")
+						ui.Text(c, firstNonEmptyStr(sug.Summary, sug.OriginalLine)).
+							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+					})
+					if s.OnApplyDocSuggestion != nil && components.Button(c, "插入", components.ButtonSecondary).Shrink(0).Clicked() {
+						s.OnApplyDocSuggestion(sug)
+					}
+				})
+			}
+			if len(s.CurrentDocSuggestions) > 6 {
+				lbl := fmt.Sprintf("展开其余 %d 项", len(s.CurrentDocSuggestions)-6)
+				if s.drawerExpandAllSugs {
+					lbl = "收起"
+				}
+				if components.Button(c, lbl, components.ButtonGhost).Clicked() {
+					s.drawerExpandAllSugs = !s.drawerExpandAllSugs
+				}
+			}
+		}
+
+		// 4. 相关历史实验（语义/关键词召回）
+		if len(s.CurrentRelatedDocs) > 0 {
+			ui.Divider(c)
+			components.Text(c, "相关历史实验").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+			for i, rd := range s.CurrentRelatedDocs {
+				rd := rd
+				row := ui.ButtonBase(c.Key(fmt.Sprintf("rd-rel-%d-%s", i, rd.RelPath))).
+					FillWidth().Justify(ui.Start).
+					Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+					Label(firstNonEmptyStr(rd.Title, rd.RelPath))
+				if row.Hovered() {
+					row.Background(tok.AccentSoftBg)
+				}
+				row.Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Icon(c, lucide.FileText()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+						ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+							ui.Text(c, firstNonEmptyStr(rd.Title, rd.RelPath)).
+								FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+							meta := firstNonEmptyStr(rd.Date, rd.Folder)
+							if rd.Date != "" && rd.Folder != "" {
+								meta = rd.Date + " · " + rd.Folder
+							}
+							if meta != "" {
+								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+							}
+						})
+					})
+				})
+				if row.Clicked() && s.OnOpenSearchHit != nil {
+					s.OnOpenSearchHit(rd.RelPath, "")
+				}
+			}
+		}
+
+		// 5. 反向链接（仅存在引用时显示，零空状态占屏）
+		if len(s.CurrentBacklinks) > 0 {
+			ui.Divider(c)
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				components.Text(c, "反向链接").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+				ui.Spacer(c)
+				components.Badge(c, fmt.Sprintf("%d", len(s.CurrentBacklinks)))
+			})
 			for i, ref := range s.CurrentBacklinks {
 				ref := ref
 				kindLbl := "双链引用"
@@ -809,46 +981,6 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 					s.OnOpenSearchHit(ref.SourceRel, "")
 				}
 			}
-		}
-
-		ui.Divider(c)
-
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-			components.Text(c, "实验质检与对照检查").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
-			ui.Spacer(c)
-			components.Badge(c, fmt.Sprintf("%d", len(s.CurrentDiagnostics)))
-		})
-		if len(s.CurrentDiagnostics) == 0 {
-			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-				Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				ui.Icon(c, lucide.CircleCheck()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Success)
-				components.Text(c, "结构完整，对照与样本量均已就绪。").FontSize(float32(tok.TextMeta)).TextColor(tok.Success)
-			})
-			return
-		}
-		for i, diag := range s.CurrentDiagnostics {
-			diag := diag
-			sevLbl := "建议"
-			sevCol := tok.Accent
-			switch diag.Severity {
-			case "blocking":
-				sevLbl = "阻断"
-				sevCol = tok.Danger
-			case "needs_confirmation":
-				sevLbl = "待确认"
-				sevCol = tok.Warning
-			}
-			ui.Column(c.Key(fmt.Sprintf("rd-diag-%d-%s", i, diag.Code))).FillWidth().
-				Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-				Background(tok.Elevated).Border(1, sevCol.Alpha(0.32)).Gap(float32(tok.Spacing4)).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(sevCol)
-				})
-				components.Text(c, diag.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text)
-				if diag.NextAction != "" {
-					components.Text(c, "建议："+diag.NextAction).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-				}
-			})
 		}
 	})
 }

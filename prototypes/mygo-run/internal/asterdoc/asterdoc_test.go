@@ -659,3 +659,26 @@ func TestSubflowStarterEmptyAndInteractiveAddDelete(t *testing.T) {
 		t.Fatalf("expected last subflow item to be deletable, got %+v", rawItems)
 	}
 }
+
+func TestParamTableExtractionFromWetLabConditions(t *testing.T) {
+	src := "---\ntitle: PCR 与离心条件提取\n---\n\n#@ 操作步骤\n- 待识别操作句\n"
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stepOff := len(src) - 2
+	cases := []string{
+		"12000 rpm 4°C 离心 10 min 收集沉淀",
+		"37°C 5% CO₂ 培养箱孵育 24 h",
+		"PCR 程序：95°C 变性 30 s，60°C 退火 30 s，共 35 个循环",
+	}
+	for _, sent := range cases {
+		sugs := AnalyzeLabSentenceWithContext(doc, sent, stepOff, nil)
+		if len(sugs) == 0 || sugs[0].Kind != "param_table" {
+			t.Fatalf("expected param_table suggestion for %q, got %+v", sent, sugs)
+		}
+		if err := specValidator("param_table")(sugs[0].Modules[0]); err != nil {
+			t.Fatalf("param_table module for %q failed spec validation: %v", sent, err)
+		}
+	}
+}
