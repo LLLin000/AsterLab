@@ -1604,11 +1604,13 @@ type photoRouteOption struct {
 }
 
 type photoRouteRequest struct {
-	open     bool
-	asset    string
-	tabPath  string
-	options  []photoRouteOption
-	applyDoc func(string)
+	open       bool
+	asset      string
+	rawAbs     string
+	labPhotoID string
+	tabPath    string
+	options    []photoRouteOption
+	applyDoc   func(string)
 }
 
 func sanitizeWikiAssetPath(relAsset string) string {
@@ -1777,6 +1779,10 @@ func executePhotoRouteChoice(source string, mode astercmd.ExecMode, platFmt, exc
 }
 
 func (a *app) importCameraPhotoIntoDoc(c *ui.Context, curTab shell.WorkspaceTab, curLD *vault.LiveDocument, applyDoc func(string)) {
+	if isMobileRuntime() && a.capturePhotoFn == nil {
+		a.openSciCamera(c, curTab, curLD, applyDoc)
+		return
+	}
 	photoPath, err := a.CaptureLabPhoto(context.Background())
 	if errors.Is(err, errors.ErrUnsupported) {
 		paths, dErr := mygo.Dialog.Open(mygo.OpenDialogOptions{
@@ -1848,6 +1854,21 @@ func (a *app) renderPhotoRouteSheet(c *ui.Context) {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				kit.IconBox(c, tok, lucide.Camera(), tok.Accent)
 				ui.Text(c, "选择照片归档位置").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				if req.rawAbs != "" {
+					kit.Badge(c, "无损 DNG", components.BadgeOptions{Tone: components.BadgeAccent})
+					expBtn := ui.ButtonBase(c.Key("photo-route-export-raw")).
+						Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)).
+						Background(tok.AccentSoftBg).
+						Label("导出原片").
+						OnClick(func() {
+							a.shareLabFiles(c, []string{req.rawAbs}, req.labPhotoID)
+						})
+					theme.ApplyTactilePress(expBtn)
+					expBtn.Children(func() {
+						ui.Text(c, "导出原片").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent)
+					})
+				}
 			})
 			ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Clip().Children(func() {
 				for i, opt := range req.options {

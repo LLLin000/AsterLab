@@ -1,0 +1,25 @@
+{
+  "mobile": {
+    "id": "scicamera",
+    "ios": {
+      "sources": ["ios/*.swift"],
+      "class": "SciCameraPlugin",
+      "frameworks": ["AVFoundation", "CoreMotion", "ImageIO", "Photos"],
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture scientific lab photos in linear Bayer RAW DNG with locked exposure, white balance, and pose metadata.",
+        "NSPhotoLibraryAddUsageDescription": "Save captured scientific Bayer RAW DNG and preview photos to your system Photos library for Lightroom, Photoshop, and AirDrop.",
+        "NSPhotoLibraryUsageDescription": "Organize captured scientific RAW photos inside the AsterLab album."
+      }
+    },
+    "android": {
+      "sources": ["android/*.kt"],
+      "class": "SciCameraPlugin",
+      "permissions": ["CAMERA"],
+      "dependencies": [
+        "androidx.camera:camera-camera2:1.6.2",
+        "androidx.camera:camera-lifecycle:1.6.2",
+        "androidx.camera:camera-view:1.6.2"
+      ]
+    }
+  }
+}

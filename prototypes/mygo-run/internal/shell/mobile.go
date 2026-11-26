@@ -1064,6 +1064,14 @@ func (s *Shell) renderMobileRibbonMenuSheet(c *ui.Context, tok theme.Tokens) {
 				run: func() { s.OpenPantryTab() },
 			},
 			{
+				key: "lab-gallery", icon: lucide.Images(), label: "科研图库 (DNG 原片)",
+				run: func() {
+					if s.OnOpenLabGallery != nil {
+						s.OnOpenLabGallery()
+					}
+				},
+			},
+			{
 				key: "outline-calc", icon: lucide.Calculator(), label: "步骤大纲与速算计时",
 				run: func() { s.RightTab = 1; s.MobileDrawer = "outline" },
 			},

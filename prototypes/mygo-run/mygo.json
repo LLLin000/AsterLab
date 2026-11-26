@@ -46,6 +46,7 @@
     },
     "infoPlist": {
       "NSCameraUsageDescription": "Capture experiment plates, gels, microscopy views, and benchtop observations directly into your lab notebook.",
+      "NSPhotoLibraryAddUsageDescription": "Save captured scientific Bayer RAW DNG and preview photos to your system Photos library for Lightroom, Photoshop, and AirDrop.",
       "NSPhotoLibraryUsageDescription": "Import existing microscopy images, gel photos, and benchtop attachments into your lab notebook.",
       "UIFileSharingEnabled": true,
       "LSSupportsOpeningDocumentsInPlace": true,

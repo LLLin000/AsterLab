@@ -259,6 +259,8 @@ type app struct {
 	newExpTitle        string
 	newExpDate         string
 	pendingPhotoRoute  *photoRouteRequest
+	sciCam             *sciCameraSession
+	labGallery         *labGalleryState
 	newExpStartTime  string
 	newExpTemplate   string
 	newExpTplQuery   string
@@ -5049,6 +5051,13 @@ func main() {
 			}
 			a.tools.OpenNewVivariumDialogOnDate(dateYMD)
 		},
+		OnOpenLabGallery: func() {
+			var curTab *shell.WorkspaceTab
+			if a.shell != nil {
+				curTab = a.shell.ActiveTab()
+			}
+			a.openLabGallery(curTab, nil)
+		},
 		RenderTabContent: func(c *ui.Context, pane *shell.PaneNode, tab shell.WorkspaceTab) {
 			a.renderVaultTabContent(c, pane, tab)
 		},
@@ -5062,11 +5071,14 @@ func main() {
 			a.renderVaultNewExperimentDialog(c)
 			a.renderImportDialog(c)
 			a.renderPhotoRouteSheet(c)
+			a.renderLabGalleryOverlay(c)
+			a.renderSciCameraOverlay(c)
 			a.renderDevInspectorOverlay(c)
 		},
 		IsExternalModalOpen: func() bool {
 			return a.newExpOpen || a.importOpen || a.linkDialogOpen || a.confirmDesignSwitch ||
 				(a.pendingPhotoRoute != nil && a.pendingPhotoRoute.open) ||
+				a.isExternalModalOrGalleryOpen() ||
 				(a.tools != nil && (a.tools.PantryDialogOpen || a.tools.PantryBoxDialogOpen || a.tools.VivariumDialogOpen || a.tools.VivariumPeekOpen))
 		},
 		PaletteCommands: append([]shell.PaletteCommand{

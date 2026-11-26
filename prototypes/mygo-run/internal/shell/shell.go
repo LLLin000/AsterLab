@@ -222,6 +222,7 @@ type Shell struct {
 	OnToggleScheduleEventDone func(ev schedule.Event)
 	OnCreateReagentForDate    func(dateYMD string)
 	OnCreateAnimalForDate     func(dateYMD string)
+	OnOpenLabGallery          func()
 	DayPopoverOpen            bool
 	DayPopoverDate  string
 	calAnimDir      int
