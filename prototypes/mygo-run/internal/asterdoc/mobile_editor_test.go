@@ -251,29 +251,24 @@ func TestMobileFootnoteBottomSheetLifecycle(t *testing.T) {
 		t.Fatalf("expected [^1] inserted into document, got:\n%s", *cur)
 	}
 
-	// Render mobile footnote Sheet and verify controls (edit, fold, delete, save)
+	// Render keyboard-docked footnote composer card above soft keyboard inset (336dp)
 	tester := ui.NewTester(func(c *ui.Context) {
 		v.Render(c)
 	}, 390, 844)
+	tester.SetInsets(59, 0, 336, 0)
 	settleMobileTester(tester)
-	if !tester.HasText("批注 1") || !tester.HasText("保存批注") || !tester.HasText("折叠") || !tester.HasText("删除") {
-		t.Fatalf("expected footnote bottom sheet controls, texts=%v", tester.Texts())
+	if !tester.HasText("批注 1") || !tester.HasText("保存") || !tester.HasText("取消") {
+		t.Fatalf("expected minimalist keyboard-docked footnote composer controls, texts=%v", tester.Texts())
+	}
+	saveRect, ok := tester.Find("保存批注")
+	if !ok {
+		t.Fatalf("expected 保存批注 button in composer header, texts=%v", tester.Texts())
+	}
+	if saveRect.Y < 59 || saveRect.Y+saveRect.H > 844-336 {
+		t.Fatalf("expected composer strictly between SafeArea top=59 and keyboard bottom=508, got %+v", saveRect)
 	}
 
-	// Fold inside bottom sheet hides editor and shows collapsed preview card
-	if err := tester.Click("折叠批注"); err != nil {
-		t.Fatalf("click fold failed: %v", err)
-	}
-	settleMobileTester(tester)
-	if !v.footnoteCollapsed["1"] || !tester.HasText("展开") {
-		t.Fatalf("expected footnote collapsed state")
-	}
-
-	// Unfold, edit draft, and save
-	if err := tester.Click("展开批注"); err != nil {
-		t.Fatalf("click unfold failed: %v", err)
-	}
-	settleMobileTester(tester)
+	// Edit draft and save
 	draft := v.ensureFootnoteDraft("1", "")
 	*draft = "避光分装防止降解"
 	if err := tester.Click("保存批注"); err != nil {
@@ -281,13 +276,39 @@ func TestMobileFootnoteBottomSheetLifecycle(t *testing.T) {
 	}
 	settleMobileTester(tester)
 	if v.MobileFootnoteSheetOpen() {
-		t.Fatalf("expected footnote sheet closed after save")
+		t.Fatalf("expected footnote composer closed after save")
 	}
 	if !strings.Contains(*cur, "[^1]: 避光分装防止降解") {
 		t.Fatalf("expected saved footnote body in source, got:\n%s", *cur)
 	}
 
-	// 2. Cursor sitting inside existing [^1] re-opens footnote 1 instead of inserting [^2]
+	// 1b. Inline Tufte accordion (Scheme A): toggle without popping keyboard or opening overlay sheet
+	tester.SetInsets(59, 0, 34, 0)
+	v.ToggleMobileInlineFootnote("1")
+	settleMobileTester(tester)
+	for range 20 {
+		tester.Advance(16 * time.Millisecond)
+		tester.Frame()
+	}
+	if !v.MobileInlineFootnoteExpanded("1") || !tester.HasText("避光分装防止降解") || !tester.HasText("收起") {
+		t.Fatalf("expected inline Tufte footnote accordion expanded, expanded=%v texts=%v",
+			v.MobileInlineFootnoteExpanded("1"), tester.Texts())
+	}
+	if v.MobileFootnoteSheetOpen() {
+		t.Fatalf("inline Tufte footnote accordion should not open keyboard composer")
+	}
+	if err := tester.Click("收起批注"); err != nil {
+		t.Fatalf("click collapse inline footnote failed: %v", err)
+	}
+	for range 20 {
+		tester.Advance(16 * time.Millisecond)
+		tester.Frame()
+	}
+	if v.MobileInlineFootnoteExpanded("1") {
+		t.Fatalf("expected inline Tufte footnote collapsed after clicking 收起")
+	}
+
+	// 2. Cursor sitting inside existing [^1] re-opens footnote 1 composer instead of inserting [^2]
 	refPos := strings.Index(st.Buffer.String(), "[^1]")
 	if refPos < 0 {
 		t.Fatalf("expected [^1] in editor buffer, got %q", st.Buffer.String())

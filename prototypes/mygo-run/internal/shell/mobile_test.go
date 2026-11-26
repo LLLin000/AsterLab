@@ -434,3 +434,30 @@ func TestMobileContextMenuLongPressActionSheet(t *testing.T) {
 		t.Fatalf("expected chosen='copy' on sheet tap, got %q", chosen)
 	}
 }
+
+func TestMobileDefaultFileOpenModeLab(t *testing.T) {
+	s := &Shell{}
+	s.ForceMobilePreview = true
+	if got := s.DefaultFileOpenMode(); got != ModeLab {
+		t.Fatalf("expected mobile default file open mode ModeLab, got %q", got)
+	}
+	s.DefaultOpenMode = "edit"
+	if got := s.DefaultFileOpenMode(); got != ModeEdit {
+		t.Fatalf("expected explicit edit override to return ModeEdit, got %q", got)
+	}
+	s.ForceMobilePreview = false
+	s.DefaultOpenMode = ""
+	if got := s.DefaultFileOpenMode(); got != ModeEdit {
+		t.Fatalf("expected desktop default file open mode ModeEdit, got %q", got)
+	}
+
+	s.ForceMobilePreview = true
+	s.MobileMenuSheetOpen = true
+	if !s.HandleMobileBack() {
+		t.Fatal("expected HandleMobileBack to dismiss MobileMenuSheetOpen")
+	}
+	if s.MobileMenuSheetOpen {
+		t.Fatal("expected MobileMenuSheetOpen to be false after HandleMobileBack")
+	}
+}
+

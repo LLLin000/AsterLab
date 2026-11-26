@@ -60,6 +60,7 @@ type Callbacks struct {
 	CreateDraft         func(Draft)
 	OnToast             func(kit.Toast)
 	OnScheduleChanged   func()
+	OnMobilePullRefresh func(c *ui.Context, el ui.Element)
 }
 
 // Workspace holds editable tool drafts until an explicit handoff action.
@@ -399,6 +400,9 @@ func ViewPantry(c *ui.Context, w *Workspace) {
 	sc := ui.Scroll(c).Fill().Background(tok.Canvas)
 	if mobileLayout {
 		sc.ScrollbarInsets(scrollTopInset, 0, scrollBottomInset, 0)
+		if w.Callbacks.OnMobilePullRefresh != nil {
+			w.Callbacks.OnMobilePullRefresh(c, sc)
+		}
 	}
 	sc.Children(func() {
 		ui.Column(c).FillWidth().Padding(padTop, padH, padBottom, padH).Gap(float32(tok.Spacing12)).Children(func() {

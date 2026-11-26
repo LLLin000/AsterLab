@@ -192,7 +192,9 @@ func (s *Shell) renderMobileGlobalSearchPage(c *ui.Context, tok theme.Tokens, hi
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	ui.Column(c.Key("mb-gsearch-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	s.renderMobileSwipeBackContainer(c, "mb-gsearch-root", tok, func() {
+		s.GlobalSearchOpen = false
+	}, func() {
 		// Top Obsidian Search Nav Bar: Search Field + Cancel
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).

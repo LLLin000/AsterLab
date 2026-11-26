@@ -188,6 +188,7 @@ type Tokens struct {
 	Dark                                                                                         bool
 	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
 	Border, BorderStrong, BorderSubtle, TopHighlight, ShadowAmbient                              ui.Color
+	Scrim, ShadowColor                                                                           ui.Color
 	BorderFocused, BorderSelected, BorderDisabled                                                ui.Color
 	ElementBg, ElementHover, ElementActive, ElementSelected, ElementDisabled                     ui.Color
 	GhostHover, GhostActive, GhostSelected                                                       ui.Color
@@ -354,6 +355,8 @@ func aliases(t Tokens) Tokens {
 		t.BorderSubtle = ui.RGBA(255, 255, 255, 0.08)
 		t.TopHighlight = ui.RGBA(255, 255, 255, 0.07)
 		t.ShadowAmbient = ui.RGBA(0, 0, 0, 0.36)
+		t.Scrim = ui.RGBA(0, 0, 0, 0.56)
+		t.ShadowColor = ui.RGBA(0, 0, 0, 0.50)
 		t.ElementBg = t.Elevated
 		t.ElementHover = t.SelectedRow
 		t.ElementActive = t.BorderStrong.Alpha(0.55)
@@ -370,6 +373,8 @@ func aliases(t Tokens) Tokens {
 		t.BorderSubtle = t.Border.Alpha(0.65)
 		t.TopHighlight = ui.Transparent
 		t.ShadowAmbient = ui.RGBA(15, 23, 42, 0.08)
+		t.Scrim = ui.RGBA(0, 0, 0, 0.28)
+		t.ShadowColor = ui.RGBA(0, 0, 0, 0.18)
 		t.ElementBg = t.Elevated
 		t.ElementHover = t.SelectedRow
 		t.ElementActive = t.BorderStrong.Alpha(0.42)

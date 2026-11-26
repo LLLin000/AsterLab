@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -280,9 +281,19 @@ func (s *Shell) EnsureTabs() {
 }
 
 // DefaultFileOpenMode returns the user's configured default mode for newly opened `.asterml` tabs.
+// On mobile viewports/OSes without an explicit override, documents default to ModeLab
+// (anti-accidental-touch browsing & execution mode).
 func (s *Shell) DefaultFileOpenMode() ViewMode {
-	if s != nil && s.DefaultOpenMode == "read" {
-		return ModeRead
+	if s != nil {
+		switch s.DefaultOpenMode {
+		case "read":
+			return ModeRead
+		case "edit":
+			return ModeEdit
+		}
+		if s.ForceMobilePreview || runtime.GOOS == "ios" || runtime.GOOS == "android" {
+			return ModeLab
+		}
 	}
 	return ModeEdit
 }
@@ -835,7 +846,7 @@ func (s *Shell) OpenExperimentTab(exp ExperimentItem, stage Page) {
 	if path == "" {
 		path = exp.DesignID
 	}
-	s.OpenFileInPane(s.ActivePaneID, path, firstNonEmptyStr(exp.Title, "未命名实验"), ModeEdit, false)
+	s.OpenFileInPane(s.ActivePaneID, path, firstNonEmptyStr(exp.Title, "未命名实验"), s.DefaultFileOpenMode(), false)
 	if stage != Project {
 		s.Page = stage
 	}

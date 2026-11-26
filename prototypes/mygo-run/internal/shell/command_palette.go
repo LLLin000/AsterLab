@@ -245,7 +245,9 @@ func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, 
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	ui.Column(c.Key("mb-pal-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	s.renderMobileSwipeBackContainer(c, "mb-pal-root", tok, func() {
+		s.PaletteOpen = false
+	}, func() {
 		// Sticky Full-Screen Header: Search box + Cancel + Scope selector row
 		ui.Column(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).

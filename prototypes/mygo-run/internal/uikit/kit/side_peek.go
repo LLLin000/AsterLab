@@ -44,7 +44,7 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 	root.Children(func() {
 		scrim := ui.ButtonBase(c.Key("sidepeek-scrim")).Grow(1).FillHeight().
 			Label("关闭侧滑详情").
-			Background(tok.Text.Alpha(0.14))
+			Background(tok.Scrim)
 		if scrim.Clicked() {
 			*open = false
 		}

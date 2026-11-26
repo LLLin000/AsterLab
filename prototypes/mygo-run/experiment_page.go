@@ -969,6 +969,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			if mobileLayout && a.shell != nil {
 				docScroll.TrackScroll(a.shell.MobileContentScrollState()).
 					ScrollbarInsets(a.shell.MobileTopReserve(c), 0, a.shell.MobileBottomReserve(c), 0)
+				a.shell.HandleMobilePullRefresh(c, docScroll)
 			}
 			padTop := float32(tok.Spacing16)
 			if !mobileLayout {

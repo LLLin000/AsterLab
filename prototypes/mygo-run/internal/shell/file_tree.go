@@ -563,7 +563,9 @@ func (s *Shell) renderVaultDialogs(c *ui.Context) {
 			ui.Overlay(c, func() {
 				t := c.Theme()
 				topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-				ui.Column(c.Key("mb-newfolder-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+				s.renderMobileSwipeBackContainer(c, "mb-newfolder-root", tok, func() {
+					s.newFolderDialogOpen = false
+				}, func() {
 					ui.Row(c).FillWidth().
 						Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 						MinHeight(t.Space(12)+topSafe).

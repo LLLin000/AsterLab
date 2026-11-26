@@ -211,7 +211,23 @@ func (s *Shell) renderMobileSettingsPage(c *ui.Context, tok theme.Tokens, extra 
 		pageTitle = cats[selected].Title
 	}
 
-	ui.Column(c.Key("mb-settings-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	onBack := func() {
+		if extra.mobileSettingsDetail || searching {
+			extra.mobileSettingsDetail = false
+			s.SettingsView.Category = ""
+			s.SettingsView.Query = ""
+			return
+		}
+		s.VaultSettingsOpen = false
+		extra.mobileSettingsLastOpen = false
+		extra.mobileSettingsDetail = false
+	}
+
+	swipeKey := "mb-settings-root"
+	if extra.mobileSettingsDetail || searching {
+		swipeKey = "mb-settings-detail"
+	}
+	s.renderMobileSwipeBackContainer(c, swipeKey, tok, onBack, func() {
 		// Obsidian Mobile Top Navigation Bar (edge-to-edge full-screen page)
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).

@@ -484,9 +484,28 @@ func TestObsidianMobileV2FloatingDockTabSwitcherAndEditToolbar(t *testing.T) {
 	tt.Advance(220 * time.Millisecond)
 	tt.Frame()
 
-	// 6. Open File Tree Drawer via ≡ button and verify Obsidian 3-tier bottom control island
-	if err := tt.Click("实验库与工具"); err != nil {
-		t.Fatalf("click tree drawer button: %v", err)
+	// 6. Click rightmost ≡ ("功能菜单") button -> opens Obsidian-style Ribbon Options Bottom Sheet (NOT Left Drawer!)
+	if err := tt.Click("功能菜单"); err != nil {
+		t.Fatalf("click ribbon options menu button: %v", err)
+	}
+	tt.Frame()
+	tt.Advance(240 * time.Millisecond)
+	tt.Frame()
+	if !s.MobileMenuSheetOpen || !tt.HasText("打开快速切换") || !tt.HasText("储藏室与动物房") || !tt.HasText("云同步与设置") {
+		t.Fatalf("expected Obsidian Ribbon Quick Options Sheet, open=%v texts=%q", s.MobileMenuSheetOpen, tt.Texts())
+	}
+	s.MobileMenuSheetOpen = false
+	for range 120 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if !tt.HasText("打开快速切换") {
+			break
+		}
+	}
+
+	// 6b. Open File Tree Drawer via top-left orb ("打开实验库抽屉") and verify Obsidian 3-tier bottom control island
+	if err := tt.Click("打开实验库抽屉"); err != nil {
+		t.Fatalf("click left orb drawer button: %v", err)
 	}
 	tt.Frame()
 	tt.Advance(240 * time.Millisecond)

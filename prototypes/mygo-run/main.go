@@ -4693,6 +4693,11 @@ func (a *app) newToolsWorkspace() *tools.Workspace {
 		OnScheduleChanged: func() {
 			a.syncCalendarEventsToShell()
 		},
+		OnMobilePullRefresh: func(c *ui.Context, el ui.Element) {
+			if a.shell != nil {
+				a.shell.HandleMobilePullRefresh(c, el)
+			}
+		},
 	})
 }
 

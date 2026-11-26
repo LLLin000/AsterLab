@@ -1664,7 +1664,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			},
 			onClickFN: func(id string) {
 				if v.MobileCompact {
-					v.OpenMobileFootnoteSheet(id)
+					v.ToggleMobileInlineFootnote(id)
 					mygo.Haptics.Light()
 					return
 				}
@@ -2038,6 +2038,127 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.pendingInjectSlash = false
 		}
 	})
+
+	// Mobile Scheme A: Silky animated inline Tufte accordion note directly beneath the paragraph (zero heavy chrome).
+	if v.MobileCompact && strings.Contains(curBuf, "[^") && v.Doc != nil && HasFootnotes(v.Doc.Source) {
+		if mbDocFN := ParseFootnotes(v.Doc.Source); mbDocFN != nil {
+			v.renderMobileInlineFootnotes(c, tok, key, curBuf, mbDocFN)
+		}
+	}
+}
+
+func (v *View) renderMobileInlineFootnotes(c *ui.Context, tok theme.Tokens, key, curBuf string, docFN *FootnoteDoc) {
+	if v == nil || docFN == nil {
+		return
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for pos := 0; pos <= len(curBuf); {
+		nl := strings.IndexByte(curBuf[pos:], '\n')
+		lnEnd := len(curBuf)
+		nextPos := len(curBuf) + 1
+		if nl >= 0 {
+			lnEnd = pos + nl
+			nextPos = lnEnd + 1
+		}
+		lnTxt := curBuf[pos:lnEnd]
+		if strings.Contains(lnTxt, "[^") && reFootnoteDefLine.FindStringIndex(lnTxt) == nil {
+			for _, fm := range reMDFootnoteRef.FindAllStringSubmatchIndex(lnTxt, -1) {
+				if fm[1] < len(lnTxt) && lnTxt[fm[1]] == ':' {
+					continue
+				}
+				fid := strings.TrimSpace(lnTxt[fm[2]:fm[3]])
+				if fid != "" && !seen[fid] {
+					seen[fid] = true
+					ids = append(ids, fid)
+				}
+			}
+		}
+		pos = nextPos
+	}
+	if len(ids) == 0 {
+		return
+	}
+	if v.footnoteNoteH == nil {
+		v.footnoteNoteH = map[string]float32{}
+	}
+	for _, fid := range ids {
+		fn := docFN.ByID[fid]
+		if fn == nil {
+			continue
+		}
+		expanded := v.MobileInlineFootnoteExpanded(fn.ID)
+		animHost := ui.Box(c.Key("mb-fn-anim:" + key + ":" + fn.ID)).FillWidth()
+		target := float32(0)
+		if expanded {
+			target = 1
+		}
+		tAnim := animHost.AnimateTo("open", target, theme.MotionFluid)
+		if tAnim <= 0.01 && !expanded {
+			continue
+		}
+		clipBox := ui.Box(c.Key("mb-fn-clip:" + key + ":" + fn.ID)).FillWidth().Clip()
+		cachedH := v.footnoteNoteH[fn.ID]
+		if cachedH <= 0 {
+			cachedH = float32(tok.Spacing48) + float32(tok.Spacing16)
+		}
+		if tAnim < 0.995 {
+			clipBox.Height(max(1, cachedH*tAnim))
+		}
+		var innerEl ui.Element
+		hasInner := false
+		clipBox.Children(func() {
+			inner := ui.Row(c.Key("mb-fn-card:" + key + ":" + fn.ID)).FillWidth().
+				Margin(float32(tok.Spacing4), 0, float32(tok.Spacing4), 0).
+				Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).
+				Opacity(tAnim).
+				Translate(0, (1-tAnim)*-6).
+				Clip()
+			innerEl = inner
+			hasInner = true
+			inner.Children(func() {
+				ui.Box(c).Width(2).FillHeight().Background(tok.Accent.Alpha(0.75))
+				ui.Column(c).Grow(1).MinWidth(0).
+					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Gap(float32(tok.Spacing4)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, fmt.Sprintf("%d", fn.Number)).
+							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
+						ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
+							FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
+					})
+					ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+						if !v.ReadOnly && v.Can(PermDocumentEdit) {
+							editBtn := ui.ButtonBase(c.Key("mb-fn-edit:" + key + ":" + fn.ID)).
+								Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+								Center().Label("编辑批注")
+							editBtn.Children(func() {
+								ui.Text(c, "编辑").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+							})
+							if editBtn.Clicked() {
+								v.OpenMobileFootnoteSheet(fn.ID)
+								mygo.Haptics.Selection()
+							}
+						}
+						foldBtn := ui.ButtonBase(c.Key("mb-fn-fold:" + key + ":" + fn.ID)).
+							Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+							Center().Label("收起批注")
+						foldBtn.Children(func() {
+							ui.Text(c, "收起").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+						})
+						if foldBtn.Clicked() {
+							v.mobileExpandedFootnotes[fn.ID] = false
+							mygo.Haptics.Light()
+						}
+					})
+				})
+			})
+		})
+		if hasInner && tAnim >= 0.995 && innerEl.Bounds().H > 0 {
+			v.footnoteNoteH[fn.ID] = innerEl.Bounds().H + float32(tok.Spacing8)
+		}
+	}
 }
 
 func slashCompletionKind(si SlashCommandItem) editor.CompletionKind {

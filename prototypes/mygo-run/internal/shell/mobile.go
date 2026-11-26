@@ -68,8 +68,10 @@ type mobileExtraState struct {
 	calModeInited          bool
 	calStripPage           mobile.PageState
 	calStripInited         bool
+	canvasSwipeOffset      ui.Point
 	drawerDragOffset       ui.Point
 	drawerDragOpened       string
+	pullRefresh            ui.RefreshState
 	mobileSettingsDetail   bool
 	mobileSettingsLastOpen bool
 }
@@ -422,6 +424,9 @@ func (s *Shell) HandleMobileBack() bool {
 	case s.GlobalSearchOpen:
 		s.GlobalSearchOpen = false
 		return true
+	case s.MobileMenuSheetOpen:
+		s.MobileMenuSheetOpen = false
+		return true
 	case s.VaultSettingsOpen:
 		extra := s.mobileExtra()
 		if extra.mobileSettingsDetail {
@@ -603,9 +608,62 @@ func (s *Shell) executeMobilePullAction() {
 	default:
 		s.MobileDrawer = ""
 		s.MobileTabSwitcherOpen = false
+		s.MobileMenuSheetOpen = false
 		s.PaletteOpen = true
 		s.PaletteCursor = 0
 	}
+}
+
+// HandleMobilePullRefresh wires native OS pull-to-refresh (iOS rubber band / Android overscroll)
+// on top-level mobile scroll views to trigger the configured Quick Action.
+func (s *Shell) HandleMobilePullRefresh(c *ui.Context, el ui.Element) {
+	if s == nil || c == nil || !s.IsMobileLayout(c) {
+		return
+	}
+	extra := s.mobileExtra()
+	if el.PullToRefresh(&extra.pullRefresh) {
+		extra.pullRefresh.Refreshing = false
+		mygo.Haptics.Success()
+		s.executeMobilePullAction()
+	}
+}
+
+type mobileSwipeBackKey struct{ id string }
+
+// renderMobileSwipeBackContainer wraps a full-screen mobile page in ui.Overlay with
+// native horizontal right-swipe-to-go-back physics.
+func (s *Shell) renderMobileSwipeBackContainer(
+	c *ui.Context,
+	key string,
+	tok theme.Tokens,
+	onBack func(),
+	content func(),
+) {
+	vw, _ := c.Size()
+	if vw <= 0 {
+		vw = 402
+	}
+	offset := ui.Local(c.Root(), mobileSwipeBackKey{key}, func() ui.Point { return ui.Point{} })
+	panel := ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).
+		Shadow(0, 8, 32, 0, tok.ShadowColor)
+	if onBack != nil {
+		panel.Draggable(offset, ui.DraggableOptions{
+			Axis:   ui.Horizontal,
+			Bounds: &ui.Rect{X: 0, W: vw},
+			Rigid:  true,
+			Snap:   ui.Nearest(ui.Point{}, ui.Point{X: vw}),
+		})
+		if !panel.Dragging() && offset.X > vw*0.45 {
+			*offset = ui.Point{}
+			mygo.Haptics.Light()
+			onBack()
+			return
+		}
+		if !panel.Dragging() && !panel.Transitioning() && offset.X != 0 {
+			*offset = ui.Point{}
+		}
+	}
+	panel.Children(content)
 }
 
 func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
@@ -639,6 +697,12 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 		sheetMaxW = 240
 	}
 
+	if s.MobilePullOffset >= mobilePullActionThresh {
+		s.MobilePullOffset = 0
+		s.executeMobilePullAction()
+	}
+	extra := s.mobileExtra()
+
 	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, 0, 0, 0)
 	theme.PaintCanvasBackground(rootBox, tok)
 	rootBox.Children(func() {
@@ -648,6 +712,50 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 			}
 
 			bodyRoot := ui.Box(c.Key("mobile-body-stage")).FillWidth().Grow(1).MinHeight(0).Clip()
+			canSwipeCanvas := s.MobileDrawer == "" && !s.MobileTabSwitcherOpen && !s.MobileMenuSheetOpen && !s.AnyModalOpen()
+			if !canSwipeCanvas {
+				extra.canvasSwipeOffset = ui.Point{}
+			} else {
+				bodyRoot.Draggable(&extra.canvasSwipeOffset, ui.DraggableOptions{
+					Axis:   ui.Horizontal,
+					Bounds: &ui.Rect{X: -sheetMaxW, W: 2 * sheetMaxW},
+					Rigid:  true,
+					Snap:   ui.Nearest(ui.Point{X: -sheetMaxW}, ui.Point{}, ui.Point{X: sheetMaxW}),
+				})
+				shownX := bodyRoot.DragOffset().X
+				if bodyRoot.Dragging() {
+					switch {
+					case shownX > 6:
+						s.MobileSwipeKind = "tree"
+						s.MobileDrawerProgress = min(1, shownX/sheetMaxW)
+					case shownX < -6:
+						s.MobileSwipeKind = "outline"
+						s.MobileDrawerProgress = min(1, (-shownX)/sheetMaxW)
+					default:
+						s.MobileSwipeKind = ""
+						s.MobileDrawerProgress = 0
+					}
+				} else if s.MobileSwipeKind != "" || extra.canvasSwipeOffset.X != 0 {
+					switch {
+					case extra.canvasSwipeOffset.X > sheetMaxW*0.5 || shownX > sheetMaxW*0.32:
+						s.MobileDrawer = "tree"
+						s.MobileDrawerProgress = 1
+						extra.canvasSwipeOffset = ui.Point{}
+						s.MobileSwipeKind = ""
+						mygo.Haptics.Light()
+					case extra.canvasSwipeOffset.X < -sheetMaxW*0.5 || shownX < -sheetMaxW*0.32:
+						s.MobileDrawer = "outline"
+						s.MobileDrawerProgress = 1
+						extra.canvasSwipeOffset = ui.Point{}
+						s.MobileSwipeKind = ""
+						mygo.Haptics.Light()
+					case !bodyRoot.Transitioning():
+						s.MobileSwipeKind = ""
+						s.MobileDrawerProgress = 0
+						extra.canvasSwipeOffset = ui.Point{}
+					}
+				}
+			}
 			bodyRoot.Children(func() {
 				// 1A. Primary Tab Content
 				if activeTab != nil {
@@ -669,31 +777,26 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 					}
 				}
 
-				// 1B. Obsidian Pull-Down Quick Action Zone
-				s.renderMobilePullDownQuickAction(c, tok)
-
-				// 1C. Left & Right Screen-Edge Swipe Physics Sensors
-				if s.MobileDrawer == "" && !s.MobileTabSwitcherOpen {
-					s.renderMobileEdgeSwipeSensors(c, sheetMaxW)
-				}
-
-				// 1D. Floating Obsidian iOS 26 Top Bar (Open center, left circular orb + right twin-icon pill)
+				// 1B. Floating Obsidian iOS 26 Top Bar (Open center, left circular orb + right twin-icon pill)
 				if tok.LiquidGlass {
 					s.renderMobileGlassTopBar(c, tok, activeTab)
 				}
 
-				// 1E. Centered Compact Icon-Only Liquid Glass Bottom Capsule
+				// 1C. Centered Compact Icon-Only Liquid Glass Bottom Capsule
 				s.renderMobileFloatingBottomBar(c, tok, bodyRoot, activePane, activeTab)
 			})
 		})
 
-		// 2. Interactive Edge-Swiped Obsidian Drawer ("tree" or "outline")
+		// 2. Interactive Symmetric Full-Canvas / Swipe-Close Drawers ("tree" or "outline")
 		s.renderMobileSwipeDrawers(c, tok, sheetMaxW)
 
 		// 3. Obsidian-style Tab Switcher Card Overview
 		if s.MobileTabSwitcherOpen {
 			s.renderMobileTabSwitcherOverlay(c, tok, activePane, activeTab)
 		}
+
+		// 4. Obsidian iOS Ribbon Quick Options Bottom Sheet (≡ button)
+		s.renderMobileRibbonMenuSheet(c, tok)
 	})
 
 	s.renderCommandPalette(c)
@@ -887,113 +990,92 @@ func (s *Shell) renderMobileDockedTopChrome(c *ui.Context, tok theme.Tokens, act
 	ui.Box(c).FillWidth().Height(1).Background(tok.Border)
 }
 
-func (s *Shell) renderMobilePullDownQuickAction(c *ui.Context, tok theme.Tokens) {
-	st := s.MobileContentScrollState()
-	extra := s.mobileExtra()
-	if st.Y > 2 {
-		s.MobilePullOffset = 0
-		extra.pullWasReady = false
-		return
-	}
-	// Place the pull-down trigger inside the empty center gap of the floating top bar
-	// (strictly within MobileTopReserve=48dp) so it never steals taps from Pantry/Calendar buttons.
-	pullZone := ui.Box(c.Key("mb-pull-zone")).Absolute().Left(64).Right(104).Top(0).Height(48)
-	dx, dy, dragging := pullZone.Dragged()
-	if dragging && dy > 0 && dy >= dx && dy >= -dx {
-		damped := dy * 0.72
-		if damped > 92 {
-			damped = 92 + (damped-92)*0.25
+func (s *Shell) renderMobileRibbonMenuSheet(c *ui.Context, tok theme.Tokens) {
+	mobile.Sheet(c, &s.MobileMenuSheetOpen, mobile.SheetOptions{
+		Detents:    []float32{0.68, 0.90},
+		Background: &tok.Surface,
+		Label:      "功能菜单",
+	}, func() {
+		type ribbonAction struct {
+			key   string
+			icon  *ui.SVG
+			label string
+			run   func()
 		}
-		s.MobilePullOffset = damped
-	} else if s.MobilePullOffset > 0 {
-		triggered := s.MobilePullOffset >= mobilePullActionThresh
-		s.MobilePullOffset = 0
-		extra.pullWasReady = false
-		if triggered {
-			mygo.Haptics.Success()
-			s.executeMobilePullAction()
-			return
+		items := []ribbonAction{
+			{
+				key: "quick-switcher", icon: lucide.FileSearch(), label: "打开快速切换",
+				run: func() { s.PaletteMode = "files"; s.PaletteOpen = true; s.PaletteCursor = 0 },
+			},
+			{
+				key: "global-search", icon: lucide.Search(), label: "全局全文检索",
+				run: func() { s.GlobalSearchOpen = true },
+			},
+			{
+				key: "calendar", icon: lucide.Calendar(), label: "实验日程与日历",
+				run: func() { s.OpenCalendarTab() },
+			},
+			{
+				key: "new-exp", icon: lucide.FilePlus(), label: "新建今日实验",
+				run: func() { s.triggerVaultNewFile("") },
+			},
+			{
+				key: "pantry", icon: lucide.Package(), label: "储藏室与动物房",
+				run: func() { s.OpenPantryTab() },
+			},
+			{
+				key: "outline-calc", icon: lucide.Calculator(), label: "步骤大纲与速算计时",
+				run: func() { s.RightTab = 1; s.MobileDrawer = "outline" },
+			},
+			{
+				key: "palette", icon: lucide.Terminal(), label: "打开命令面板",
+				run: func() { s.PaletteMode = "commands"; s.PaletteOpen = true; s.PaletteCursor = 0 },
+			},
+			{
+				key: "vault-switcher", icon: lucide.FolderKanban(), label: "切换实验库",
+				run: func() { s.VaultLauncherOpen = true },
+			},
+			{
+				key: "settings", icon: lucide.Settings(), label: "云同步与设置",
+				run: func() { s.VaultSettingsOpen = true },
+			},
+			{
+				key: "feedback", icon: lucide.LifeBuoy(), label: "反馈与问题诊断",
+				run: func() { s.FeedbackOpen = true },
+			},
 		}
-	}
 
-	if s.MobilePullOffset <= 4 {
-		extra.pullWasReady = false
-		return
-	}
-	ready := s.MobilePullOffset >= mobilePullActionThresh
-	if ready && !extra.pullWasReady {
-		mygo.Haptics.Medium()
-		extra.pullWasReady = true
-	} else if !ready {
-		extra.pullWasReady = false
-	}
-	pillFg := tok.TextMuted
-	lbl := "继续下拉：" + s.mobilePullActionLabel()
-	if ready {
-		pillFg = tok.AccentText
-		lbl = "松手打开：" + s.mobilePullActionLabel()
-	}
-	dropY := s.MobilePullOffset * 0.65
-	if dropY > 44 {
-		dropY = 44
-	}
-	topZone := s.MobileTopReserve(c)
-	ui.Row(c.Key("mb-pull-pill")).Absolute().Left(48).Right(48).Top(topZone+6).Center().PassThrough().Children(func() {
-		pill := ui.Row(c).Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing12)).
-			Radius(float32(tok.PillRadius)).Translate(0, dropY).
-			AlignItems(ui.Center).Gap(float32(tok.Spacing8))
-		if ready {
-			theme.ApplyAccentGlass(pill, tok, false)
-		} else {
-			theme.ApplyCapsuleGlass(pill, tok, false)
-		}
-		pill.Children(func() {
-			ui.Icon(c, lucide.Zap()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(pillFg)
-			components.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(pillFg).SingleLine()
+		ui.Scroll(c.Key("mb-ribbon-sheet-scroll")).FillWidth().Grow(1).MinHeight(0).Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing24), float32(tok.Spacing16)).
+				Children(func() {
+				ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Clip().Children(func() {
+					for i, item := range items {
+						item := item
+						if i > 0 {
+							ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+						}
+						row := ui.ButtonBase(c.Key("mb-ribbon-"+item.key)).FillWidth().
+							MinHeight(float32(tok.Spacing48)).
+							Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Justify(ui.Start).Label(item.label).
+							OnClick(func() {
+								mygo.Haptics.Selection()
+								s.MobileMenuSheetOpen = false
+								item.run()
+							})
+						theme.ApplyTactilePress(row)
+						row.Children(func() {
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+								kit.IconBox(c, tok, item.icon, tok.TextMuted)
+								ui.Text(c, item.label).FontSize(float32(tok.TextBody)).TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+							})
+						})
+					}
+				})
+			})
 		})
 	})
-}
-
-func (s *Shell) renderMobileEdgeSwipeSensors(c *ui.Context, sheetMaxW float32) {
-	leftEdge := ui.Box(c.Key("mb-edge-left")).Absolute().Left(0).Top(0).Bottom(0).Width(mobileEdgeSwipeZoneWidth)
-	if dx, _, dragging := leftEdge.Dragged(); dragging && dx > 4 {
-		s.MobileSwipeKind = "tree"
-		p := dx / sheetMaxW
-		if p > 1 {
-			p = 1
-		}
-		s.MobileDrawerProgress = p
-	} else if s.MobileSwipeKind == "tree" && s.MobileDrawer == "" {
-		vx, _ := leftEdge.DragVelocity()
-		if s.MobileDrawerProgress > 0.32 || vx > 320 {
-			s.MobileDrawer = "tree"
-			s.MobileDrawerProgress = 1
-			mygo.Haptics.Light()
-		} else {
-			s.MobileDrawerProgress = 0
-		}
-		s.MobileSwipeKind = ""
-	}
-
-	rightEdge := ui.Box(c.Key("mb-edge-right")).Absolute().Right(0).Top(0).Bottom(0).Width(mobileEdgeSwipeZoneWidth)
-	if dx, _, dragging := rightEdge.Dragged(); dragging && dx < -4 {
-		s.MobileSwipeKind = "outline"
-		p := (-dx) / sheetMaxW
-		if p > 1 {
-			p = 1
-		}
-		s.MobileDrawerProgress = p
-	} else if s.MobileSwipeKind == "outline" && s.MobileDrawer == "" {
-		vx, _ := rightEdge.DragVelocity()
-		if s.MobileDrawerProgress > 0.32 || vx < -320 {
-			s.MobileDrawer = "outline"
-			s.MobileDrawerProgress = 1
-			mygo.Haptics.Light()
-		} else {
-			s.MobileDrawerProgress = 0
-		}
-		s.MobileSwipeKind = ""
-	}
 }
 
 func (s *Shell) renderMobileFloatingBottomBar(
@@ -1029,7 +1111,6 @@ func (s *Shell) renderMobileFloatingBottomBar(
 		if pill.Clicked() {
 			s.MobileDockHidden = false
 		}
-		return
 	}
 
 	tabCount := 1
@@ -1038,6 +1119,7 @@ func (s *Shell) renderMobileFloatingBottomBar(
 	}
 
 	// Centered compact floating capsule positioned by platform HIG/M3 spacing above root SafeArea.
+	// Keep mounted while translated offscreen so glass pipelines are not torn down mid-scroll.
 	vw, _ := c.Size()
 	maxCapsuleW := float32(360)
 	if vw > 48 {
@@ -1048,6 +1130,9 @@ func (s *Shell) renderMobileFloatingBottomBar(
 			Padding(0, float32(tok.Spacing12)).AlignItems(ui.Center).Gap(4).Clip().
 			Translate(0, hideT*78).
 			Opacity(1 - hideT*0.92)
+		if hideT > 0.85 {
+			capsule.PassThrough()
+		}
 		theme.ApplyCapsuleGlass(capsule, tok, false)
 		capsule.Children(func() {
 			if editingBar {
@@ -1128,16 +1213,13 @@ func (s *Shell) renderMobileNavDockItems(c *ui.Context, tok theme.Tokens, active
 		s.MobileTabSwitcherOpen = !s.MobileTabSwitcherOpen
 	})
 
-	// 6. Drawer / Menu (≡)
-	navBtn("menu", "实验库与工具", true, s.MobileDrawer != "", func(fg ui.Color) {
+	// 6. Ribbon Quick Options Sheet (≡) - matches Obsidian iOS bottom quick actions menu
+	navBtn("menu", "功能菜单", true, s.MobileMenuSheetOpen, func(fg ui.Color) {
 		ui.Icon(c, lucide.Menu()).Size(20, 20).TextColor(fg)
 	}, func() {
+		s.MobileDrawer = ""
 		s.MobileTabSwitcherOpen = false
-		if s.MobileDrawer != "" {
-			s.MobileDrawer = ""
-		} else {
-			s.MobileDrawer = "tree"
-		}
+		s.MobileMenuSheetOpen = !s.MobileMenuSheetOpen
 	})
 }
 
@@ -1282,22 +1364,27 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	ui.Overlay(c, func() {
 		root := ui.Box(c.Key("mb-drawer-overlay")).Absolute().Fill().PassThrough()
 		root.Children(func() {
-		maxScrim := float32(0.18)
-		if tok.Dark {
-			maxScrim = 0.48
-		}
-		scrimAlpha := maxScrim * pAnim
-		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill().Background(tok.Text.Alpha(scrimAlpha))
-		if s.MobileDrawer != "" && backdrop.Clicked() {
-			s.MobileDrawer = ""
-			s.MobileDrawerProgress = 0
-			extra.drawerDragOffset = ui.Point{}
-			extra.drawerDragOpened = ""
+		isLeft := activeKind == "tree"
+		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill().Background(tok.Scrim.Alpha(pAnim))
+		if s.MobileDrawer != "" {
+			if dx, _, dragging := backdrop.Dragged(); dragging && ((isLeft && dx < -sheetMaxW*0.24) || (!isLeft && dx > sheetMaxW*0.24)) {
+				s.MobileDrawer = ""
+				s.MobileDrawerProgress = 0
+				extra.drawerDragOffset = ui.Point{}
+				extra.drawerDragOpened = ""
+				mygo.Haptics.Light()
+				return
+			}
+			if backdrop.Clicked() {
+				s.MobileDrawer = ""
+				s.MobileDrawerProgress = 0
+				extra.drawerDragOffset = ui.Point{}
+				extra.drawerDragOpened = ""
+			}
 		}
 
-		isLeft := activeKind == "tree"
 		sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
-			Shadow(0, 8, 32, 0, tok.Text.Alpha(0.16)).Clip()
+			Shadow(0, 8, 32, 0, tok.ShadowColor).Clip()
 		theme.ApplyPanelGlass(sheet, tok, 0.45)
 		if isLeft {
 			sheet.Left(0)

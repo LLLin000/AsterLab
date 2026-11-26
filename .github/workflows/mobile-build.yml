@@ -81,10 +81,19 @@ jobs:
           key: android-gradle-${{ hashFiles('prototypes/mygo-run/mygo.json', 'prototypes/mygo-run/go.sum') }}
           restore-keys: android-gradle-
 
-      - name: Install MyGo CLI (v0.10.0)
+      - name: Patch MyGo mobile touch UX & build patched CLI (v0.10.0)
+        working-directory: prototypes/mygo-run
         run: |
-          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-patched"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED"
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-patched-bin" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
 
       - name: Verify MyGo mobile environment & build Android (.apk + .aab)
         working-directory: prototypes/mygo-run
@@ -92,9 +101,9 @@ jobs:
           MYGO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MYGO_ANDROID_KEYSTORE_PASSWORD }}
           MYGO_ANDROID_KEY_PASSWORD: ${{ secrets.MYGO_ANDROID_KEY_PASSWORD }}
         run: |
-          mygo doctor || true
+          "$RUNNER_TEMP/mygo-patched-bin" doctor || true
           TARGET="${{ inputs.android_target || 'android' }}"
-          mygo build -platform "${TARGET}"
+          "$RUNNER_TEMP/mygo-patched-bin" build -platform "${TARGET}"
           ls -lh dist/android/
 
       - name: Upload Android APK & AAB artifacts
@@ -120,17 +129,26 @@ jobs:
           go-version-file: prototypes/mygo-run/go.mod
           cache-dependency-path: prototypes/mygo-run/go.sum
 
-      - name: Install MyGo CLI (v0.10.0)
+      - name: Patch MyGo mobile touch UX & build patched CLI (v0.10.0)
+        working-directory: prototypes/mygo-run
         run: |
-          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-patched"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED"
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-patched-bin" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
 
       - name: Verify Xcode & build iOS Simulator (.app)
         working-directory: prototypes/mygo-run
         run: |
           xcodebuild -version
-          mygo doctor || true
-          mygo build -platform ios/simulator
+          "$RUNNER_TEMP/mygo-patched-bin" doctor || true
+          "$RUNNER_TEMP/mygo-patched-bin" build -platform ios/simulator
           ls -lh dist/ios-simulator/
 
       - name: Upload iOS Simulator .app artifact
@@ -165,31 +183,9 @@ jobs:
           cp -R "$MYGO_SRC" "$PATCHED"
           chmod -R u+w "$PATCHED"
 
-          python3 - <<'PY' "$PATCHED/cmd/mygo/ios.go"
-          import pathlib, sys
-          p = pathlib.Path(sys.argv[1])
-          src = p.read_text(encoding="utf-8")
-          repls = [
-              (
-                  "\tvar prof *profile\n\tif !simulator {",
-                  "\tunsigned := !simulator && os.Getenv(\"MYGO_IOS_UNSIGNED\") == \"1\"\n\tvar prof *profile\n\tif !simulator && !unsigned {",
-              ),
-              (
-                  "\t\tif simulator {\n\t\t\terr = signForSimulator(bundle)",
-                  "\t\tif simulator || unsigned {\n\t\t\terr = signForSimulator(bundle)",
-              ),
-              (
-                  "\t\tartifact = filepath.Join(stage, c.slug()+\"-\"+c.Version+\".ipa\")",
-                  "\t\tsuffix := \"\"\n\t\tif unsigned {\n\t\t\tsuffix = \"-unsigned\"\n\t\t}\n\t\tartifact = filepath.Join(stage, c.slug()+\"-\"+c.Version+suffix+\".ipa\")",
-              ),
-          ]
-          for old, new in repls:
-              assert old in src, f"Missing target snippet: {old!r}"
-              src = src.replace(old, new, 1)
-          p.write_text(src, encoding="utf-8")
-          PY
-
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED" --unsigned-ipa
           (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-unsigned" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
           MYGO_IOS_UNSIGNED=1 "$RUNNER_TEMP/mygo-unsigned" build -platform ios
           ls -lh dist/ios-arm64/*-unsigned.ipa
 
@@ -221,10 +217,19 @@ jobs:
           go-version-file: prototypes/mygo-run/go.mod
           cache-dependency-path: prototypes/mygo-run/go.sum
 
-      - name: Install MyGo CLI (v0.10.0)
+      - name: Patch MyGo mobile touch UX & build patched CLI (v0.10.0)
+        working-directory: prototypes/mygo-run
         run: |
-          go install github.com/egoist/mygo/cmd/mygo@v0.10.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-patched"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED"
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-patched-bin" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
 
       - name: Import Apple distribution certificate & provisioning profile
         env:
@@ -254,7 +259,7 @@ jobs:
       - name: Build signed iOS (.ipa)
         working-directory: prototypes/mygo-run
         run: |
-          mygo build -platform ios
+          "$RUNNER_TEMP/mygo-patched-bin" build -platform ios
           ls -lh dist/ios-arm64/
 
       - name: Upload signed iOS .ipa artifact

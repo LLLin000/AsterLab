@@ -513,10 +513,159 @@ func TestMultiDeviceSafeAreaMatrix(t *testing.T) {
 				if rectsOverlap(titleR, orbR) {
 					t.Fatalf("[%s] top overlap 储藏室 %+v vs orb %+v", dc.name, titleR, orbR)
 				}
-				assertBoundsWithinWidth(t, tt, dc.name+"_Pantry", float32(dc.w)-dc.right)
+			assertBoundsWithinWidth(t, tt, dc.name+"_Pantry", float32(dc.w)-dc.right)
 			} else if dc.snapshot != "" {
 				saveAuditSnapshot(t, tt, dc.snapshot)
 			}
 		})
 	}
+}
+
+func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
+	vaultRoot := filepath.Join(t.TempDir(), "NativeUXVault")
+	a, sh := newWiredFSMTestApp(t, vaultRoot)
+	_ = a
+	sh.ForceMobilePreview = true
+	sh.OpenCalendarTab()
+
+	darkMode := false
+	tt := ui.NewTester(func(c *ui.Context) {
+		if darkMode {
+			c.SetTheme(theme.DarkTheme())
+		} else {
+			c.SetTheme(theme.LightTheme())
+		}
+		sh.RenderSplitView(c)
+	}, 402, 874)
+	tt.SetInsets(59, 0, 34, 0)
+	settleIPhoneFrames(tt, 300)
+
+	// 1. Full-canvas symmetric gestures from center of screen (not restricted to 18dp edges!)
+	swipeHorizontal(tt, 100, 320, 460)
+	settleIPhoneFrames(tt, 260)
+	if sh.MobileDrawer != "tree" {
+		t.Fatalf("expected full-canvas right swipe from x=100->320 to open Left Drawer, got %q", sh.MobileDrawer)
+	}
+
+	// Verify Dark-mode drawer scrim is pure black translucent (NOT white tok.Text haze!)
+	darkMode = true
+	settleIPhoneFrames(tt, 180)
+	saveAuditSnapshot(t, tt, "mobile_dark_drawer_scrim.png")
+	if img := tt.Image(); img != nil {
+		b := img.Bounds()
+		sx := b.Min.X + (b.Dx()*370)/402
+		sy := b.Min.Y + (b.Dy()*420)/874
+		r, g, bl, _ := img.At(sx, sy).RGBA()
+		r8, g8, b8 := r>>8, g>>8, bl>>8
+		if r8 > 45 || g8 > 45 || b8 > 45 {
+			t.Fatalf("expected dark black scrim at (370,420), got RGB=(%d,%d,%d)", r8, g8, b8)
+		}
+	}
+
+	// Swipe left on the backdrop scrim closes Left Drawer cleanly
+	swipeHorizontal(tt, 370, 120, 460)
+	settleIPhoneFrames(tt, 260)
+	if sh.MobileDrawer != "" {
+		t.Fatalf("expected scrim left swipe to close Left Drawer, got %q", sh.MobileDrawer)
+	}
+
+	// Full-canvas left swipe from middle opens Right Drawer, scrim/drawer right swipe closes it
+	swipeHorizontal(tt, 290, 70, 460)
+	settleIPhoneFrames(tt, 260)
+	if sh.MobileDrawer != "outline" {
+		t.Fatalf("expected full-canvas left swipe from x=290->70 to open Right Drawer, got %q", sh.MobileDrawer)
+	}
+	swipeHorizontal(tt, 40, 280, 460)
+	settleIPhoneFrames(tt, 260)
+	if sh.MobileDrawer != "" {
+		t.Fatalf("expected right swipe to close Right Drawer, got %q", sh.MobileDrawer)
+	}
+
+	// 2. Rightmost ≡ button opens Obsidian-style Ribbon Quick Options Bottom Sheet (not Left Drawer)
+	if err := tt.Click("功能菜单"); err != nil {
+		t.Fatalf("click 功能菜单: %v", err)
+	}
+	settleIPhoneFrames(tt, 320)
+	saveAuditSnapshot(t, tt, "mobile_ribbon_menu_sheet_dark.png")
+	if !sh.MobileMenuSheetOpen || !tt.HasText("打开快速切换") || !tt.HasText("储藏室与动物房") {
+		t.Fatalf("expected Ribbon Menu Bottom Sheet open, open=%v texts=%v", sh.MobileMenuSheetOpen, tt.Texts())
+	}
+	assertBoundsWithinWidth(t, tt, "RibbonMenuSheetDark", 402)
+	sh.MobileMenuSheetOpen = false
+	settleIPhoneFrames(tt, 240)
+
+	// 3. Full-screen Settings two-level swipe-back closure
+	darkMode = false
+	sh.VaultSettingsOpen = true
+	settleIPhoneFrames(tt, 200)
+	if err := tt.Click("文件与库"); err != nil {
+		t.Fatalf("enter Settings Level 2 文件与库: %v", err)
+	}
+	settleIPhoneFrames(tt, 200)
+	if !tt.HasText("当前库路径") {
+		t.Fatalf("expected Level 2 文件与库 detail")
+	}
+	swipeHorizontal(tt, 40, 320, 420)
+	settleIPhoneFrames(tt, 260)
+	if tt.HasText("当前库路径") || !tt.HasText("工作区") || !tt.HasText("多端同步") {
+		t.Fatalf("expected right swipe-back on Settings Level 2 to pop to Level 1, texts=%v", tt.Texts())
+	}
+	swipeHorizontal(tt, 40, 320, 420)
+	settleIPhoneFrames(tt, 260)
+	if sh.VaultSettingsOpen {
+		t.Fatalf("expected second right swipe-back to close Settings")
+	}
+
+	// 4. Mobile inline Tufte footnote accordion + keyboard-docked composer check
+	fnSrc := "---\ntitle: 批注测试实验\ndate: 2026-11-26\n---\n\n#@ step-1 细胞润洗\n按 1:10 比例配制 PBS 缓冲液，沿孔壁缓慢加液[^1]，避免直接冲击细胞层。\n\n[^1]: 建议先 37°C 预热 15 min，冷液直冲容易造成贴壁细胞整片起皱。\n"
+	fnDoc, err := asterdoc.Parse(fnSrc)
+	if err != nil {
+		t.Fatalf("parse footnote sample: %v", err)
+	}
+	var fnView *asterdoc.View
+	fnView = &asterdoc.View{
+		Doc:           fnDoc,
+		Mode:          asterdoc.ModeDesign,
+		Allowed:       map[string]bool{asterdoc.PermDocumentEdit: true},
+		UnifiedLive:   true,
+		MobileCompact: true,
+		OnChange: func(next string) {
+			if p, pErr := asterdoc.Parse(next); pErr == nil {
+				fnView.Doc = p
+			}
+		},
+	}
+	fnTester := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		ui.Scroll(c.Key("fn-ux-scroll")).Fill().Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(theme.LightTokens().Spacing16)).Children(func() {
+				fnView.Render(c)
+			})
+		})
+	}, 402, 874)
+	fnTester.SetInsets(59, 0, 34, 0)
+	settleIPhoneFrames(fnTester, 160)
+
+	fnView.ToggleMobileInlineFootnote("1")
+	settleIPhoneFrames(fnTester, 320)
+	saveAuditSnapshot(t, fnTester, "mobile_footnote_inline_expanded.png")
+	if !fnTester.HasText("建议先 37°C 预热 15 min") || !fnTester.HasText("编辑") || !fnTester.HasText("收起") {
+		t.Fatalf("expected inline Tufte footnote expanded, texts=%v", fnTester.Texts())
+	}
+	assertBoundsWithinWidth(t, fnTester, "InlineFootnoteExpanded", 402)
+
+	if err := fnTester.Click("编辑批注"); err != nil {
+		t.Fatalf("click 编辑批注: %v", err)
+	}
+	fnTester.SetInsets(59, 0, 336, 0)
+	settleIPhoneFrames(fnTester, 240)
+	saveAuditSnapshot(t, fnTester, "mobile_footnote_composer_keyboard_336.png")
+	saveR, ok := fnTester.Find("保存批注")
+	if !ok {
+		t.Fatalf("expected 保存批注 in composer, texts=%v", fnTester.Texts())
+	}
+	if saveR.Y < 59 || saveR.Y+saveR.H > 874-336 {
+		t.Fatalf("composer header overlaps SafeArea or 336dp keyboard: %+v", saveR)
+	}
+	assertBoundsWithinWidth(t, fnTester, "FootnoteComposerKeyboard", 402)
 }

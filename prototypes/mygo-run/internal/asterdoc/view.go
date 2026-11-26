@@ -203,6 +203,7 @@ type View struct {
 	// Mobile-native bottom sheets, touch swipe ergonomics, and active-context tracking.
 	mobileFootnoteSheetOpen  bool
 	mobileFootnoteSheetID    string
+	mobileExpandedFootnotes  map[string]bool
 	mobilePickerOpen         bool
 	mobilePickerMode         string // "slash" | "mention"
 	mobilePickerQuery        string
@@ -3278,7 +3279,26 @@ func expandSegmentsForStepContainers(source string, segs []DocSegment, stepTree 
 	return out
 }
 
-// OpenMobileFootnoteSheet opens the keyboard-safe half-height bottom Sheet footnote editor.
+// ToggleMobileInlineFootnote smoothly expands/collapses an inline Tufte note card directly below the prose block.
+func (v *View) ToggleMobileInlineFootnote(id string) {
+	if v == nil || id == "" {
+		return
+	}
+	if v.mobileExpandedFootnotes == nil {
+		v.mobileExpandedFootnotes = map[string]bool{}
+	}
+	v.mobileExpandedFootnotes[id] = !v.mobileExpandedFootnotes[id]
+}
+
+// MobileInlineFootnoteExpanded reports whether the inline mobile Tufte note is expanded.
+func (v *View) MobileInlineFootnoteExpanded(id string) bool {
+	if v == nil || id == "" || v.mobileExpandedFootnotes == nil {
+		return false
+	}
+	return v.mobileExpandedFootnotes[id]
+}
+
+// OpenMobileFootnoteSheet opens the keyboard-docked minimalist footnote composer.
 func (v *View) OpenMobileFootnoteSheet(id string) {
 	if v == nil || id == "" {
 		return
@@ -3383,7 +3403,7 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 		v.mobileFootnoteSheetOpen = false
 		return
 	}
-	// Promote any footnote popover trigger (e.g. from InsertFootnoteAtActiveCursor) into the bottom Sheet.
+	// Promote any footnote popover trigger (e.g. from InsertFootnoteAtActiveCursor) into the composer card.
 	if !v.ShowRightSidenotes && v.openFootnotePopoverID != "" {
 		v.mobileFootnoteSheetID = v.openFootnotePopoverID
 		v.mobileFootnoteSheetOpen = true
@@ -3402,60 +3422,70 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 			v.mobileFootnoteSheetID = ""
 		}
 	}
+	if !v.mobileFootnoteSheetOpen || fnEntry == nil {
+		return
+	}
 
-	wasOpen := v.mobileFootnoteSheetOpen
-	mobile.Sheet(c, &v.mobileFootnoteSheetOpen, mobile.SheetOptions{
-		Detents:    []float32{0.52, 0.85},
-		Background: &tok.Surface,
-		Label:      "批注编辑器",
-	}, func() {
-		if fnEntry == nil {
+	fn := *fnEntry
+	editable := !v.ReadOnly && v.Can(PermDocumentEdit)
+	if v.footnoteCollapsed == nil {
+		v.footnoteCollapsed = map[string]bool{}
+	}
+
+	ui.Overlay(c, func() {
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+		_, winH := c.Size()
+		if winH <= 0 {
+			winH = 844
+		}
+		maxCardH := max(float32(tok.Spacing48)*3.8, winH-topSafe-bottomSafe-float32(tok.Spacing32))
+
+		scrim := ui.Box(c.Key("mb-fn-composer-scrim")).Absolute().Fill().Background(tok.Scrim)
+		if scrim.Clicked() || scrim.OverlayShortcut(0, ui.KeyEscape) {
+			v.CloseMobileFootnoteSheet(true)
 			return
 		}
-		fn := *fnEntry
-		editable := !v.ReadOnly && v.Can(PermDocumentEdit)
-		if v.footnoteCollapsed == nil {
-			v.footnoteCollapsed = map[string]bool{}
-		}
-		collapsed := v.footnoteCollapsed[fn.ID]
 
-		ui.Column(c.Key("fn-mobile-sheet:"+fn.ID)).FillWidth().FillHeight().
-			Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing16), float32(tok.Spacing16)).
-			Gap(float32(tok.Spacing12)).Children(func() {
-			ui.Row(c).FillWidth().MinHeight(float32(tok.Spacing48)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				ui.Row(c).Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).Center().
-					Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Children(func() {
-					ui.Text(c, fmt.Sprintf("批注 %d", fn.Number)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+		// Minimalist Linear/Apple-Notes keyboard-docked floating composer card strictly above safeBottom (IME).
+		card := ui.Column(c.Key("fn-mobile-sheet:"+fn.ID)).Absolute().
+			Left(leftSafe + float32(tok.Spacing12)).
+			Right(rightSafe + float32(tok.Spacing12)).
+			Bottom(bottomSafe + float32(tok.Spacing8)).
+			MaxHeight(maxCardH).
+			Radius(float32(tok.DialogRadius)).
+			Background(tok.Surface).
+			Border(1, tok.Border).
+			Shadow(0, 8, 28, 0, tok.ShadowColor).
+			Clip()
+		card.Clicked()
+		card.Children(func() {
+			// Single ultra-clean top bar: Cancel | Title | Delete + Save (zero boxed buttons)
+			ui.Row(c).FillWidth().
+				Padding(float32(tok.Spacing8), float32(tok.Spacing16)).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				cancelBtn := ui.ButtonBase(c.Key("fn-ms-done:"+fn.ID)).
+					MinHeight(float32(tok.Spacing32)+float32(tok.Spacing4)).
+					Padding(0, float32(tok.Spacing4)).Center().Label("关闭批注编辑器")
+				cancelBtn.Children(func() {
+					ui.Text(c, "取消").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted).SingleLine()
 				})
+				if cancelBtn.Clicked() {
+					v.CloseMobileFootnoteSheet(true)
+					mygo.Haptics.Light()
+					return
+				}
+
 				ui.Spacer(c)
-				foldLbl := "折叠"
-				foldIcon := lucide.ChevronUp()
-				if collapsed {
-					foldLbl = "展开"
-					foldIcon = lucide.ChevronDown()
-				}
-				foldBtn := ui.ButtonBase(c.Key("fn-ms-fold:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
-					Padding(0, float32(tok.Spacing12)).Center().
-					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Label(foldLbl + "批注")
-				foldBtn.Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						ui.Icon(c, foldIcon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
-						ui.Text(c, foldLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
-					})
-				})
-				if foldBtn.Clicked() {
-					v.footnoteCollapsed[fn.ID] = !collapsed
-					mygo.Haptics.Selection()
-				}
+				ui.Text(c, fmt.Sprintf("批注 %d", fn.Number)).
+					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).FontFeatures("tnum").SingleLine()
+				ui.Spacer(c)
+
 				if editable {
-					delBtn := ui.ButtonBase(c.Key("fn-ms-del:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
-						Padding(0, float32(tok.Spacing12)).Center().
-						Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger.Alpha(0.35)).Label("删除批注")
+					delBtn := ui.ButtonBase(c.Key("fn-ms-del:"+fn.ID)).
+						Size(float32(tok.Spacing32)+float32(tok.Spacing4), float32(tok.Spacing32)+float32(tok.Spacing4)).
+						Radius(float32(tok.ControlRadius)).Center().Label("删除批注")
 					delBtn.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Icon(c, lucide.Trash()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.DangerText)
-							ui.Text(c, "删除").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.DangerText).SingleLine()
-						})
+						ui.Icon(c, lucide.Trash()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.DangerText)
 					})
 					if delBtn.Clicked() {
 						v.deleteFootnoteByID(fn.ID)
@@ -3463,52 +3493,35 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 						mygo.Haptics.Warning()
 						return
 					}
-				}
-				clsBtn := ui.ButtonBase(c.Key("fn-ms-done:"+fn.ID)).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
-					Padding(0, float32(tok.Spacing12)).Center().
-					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Label("关闭批注编辑器")
-				clsBtn.Children(func() {
-					ui.Text(c, "完成").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
-				})
-				if clsBtn.Clicked() {
-					v.CloseMobileFootnoteSheet(true)
-					mygo.Haptics.Light()
-					return
+
+					draft := v.ensureFootnoteDraft(fn.ID, fn.Body)
+					saveBtn := ui.ButtonBase(c.Key("fn-ms-save:"+fn.ID)).
+						MinHeight(float32(tok.Spacing32)+float32(tok.Spacing4)).
+						Padding(0, float32(tok.Spacing4)).Center().Label("保存批注")
+					saveBtn.Children(func() {
+						ui.Text(c, "保存").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Accent).SingleLine()
+					})
+					if saveBtn.Clicked() {
+						v.commitFootnoteBody(fn.ID, *draft)
+						v.CloseMobileFootnoteSheet(false)
+						mygo.Haptics.Success()
+						return
+					}
 				}
 			})
 
-			if collapsed {
-				expandCard := ui.ButtonBase(c.Key("fn-ms-collapsed-card:"+fn.ID)).FillWidth().
-					MinHeight(float32(tok.Spacing48)).
-					Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-					Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).Border(1, tok.Border).
-					Label("展开批注内容")
-				expandCard.Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						prev := firstNonEmpty(singleLineFootnotePreview(fn.Body), "批注已折叠，点击展开编辑…")
-						ui.Text(c, prev).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
-						ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent).Shrink(0)
-					})
-				})
-				if expandCard.Clicked() {
-					v.footnoteCollapsed[fn.ID] = false
-					mygo.Haptics.Selection()
-				}
-				return
-			}
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 
 			if editable {
 				draft := v.ensureFootnoteDraft(fn.ID, fn.Body)
-				ti := ui.TextInputBase(c, draft).
-					FillWidth().Multiline(true).
+				ti := ui.TextAreaBase(c, draft).
+					FillWidth().
 					MinHeight(float32(tok.Spacing48)*2).
+					MaxHeight(max(float32(tok.Spacing48)*2.5, maxCardH-float32(tok.Spacing48)-float32(tok.Spacing16))).
 					FontSize(float32(tok.TextBody)).
 					TextColor(tok.Text).
-					Padding(float32(tok.Spacing12), float32(tok.Spacing12)).
-					Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).
-					Border(1, tok.Border).
+					Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+					Background(tok.Surface).
 					Placeholder("输入操作注意事项、试剂配制提示或踩坑提醒…")
 				if v.footnoteFocusPending == fn.ID {
 					ti.AutoFocus()
@@ -3520,28 +3533,16 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 					mygo.Haptics.Success()
 					return
 				}
-				saveBtn := ui.ButtonBase(c.Key("fn-ms-save:"+fn.ID)).FillWidth().
-					Height(float32(tok.Spacing48)).Center().
-					Radius(float32(tok.ControlRadius)).Background(tok.Accent).Label("保存批注")
-				saveBtn.Children(func() {
-					ui.Text(c, "保存批注").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.AccentText).SingleLine()
-				})
-				if saveBtn.Clicked() {
-					v.commitFootnoteBody(fn.ID, *draft)
-					v.CloseMobileFootnoteSheet(false)
-					mygo.Haptics.Success()
-				}
 			} else {
 				ui.Scroll(c.Key("fn-ms-ro:"+fn.ID)).FillWidth().Grow(1).MinHeight(0).Children(func() {
-					ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
-						FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+					ui.Column(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).Children(func() {
+						ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
+							FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+					})
 				})
 			}
 		})
 	})
-	if wasOpen && !v.mobileFootnoteSheetOpen {
-		v.CloseMobileFootnoteSheet(true)
-	}
 }
 
 func (v *View) targetWritableLiveEntry() (string, *liveEditorEntry) {

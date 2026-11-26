@@ -349,7 +349,9 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	ui.Column(c.Key("mb-vl-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	s.renderMobileSwipeBackContainer(c, "mb-vl-root", tok, func() {
+		s.VaultLauncherOpen = false
+	}, func() {
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 			MinHeight(t.Space(12)+topSafe).

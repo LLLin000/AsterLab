@@ -272,11 +272,12 @@ func (s *Shell) calendarHomeView(c *ui.Context) {
 	}
 
 	if mobileMode {
-		ui.Scroll(c.Key("cal-mobile-scroll")).Fill().
+		sc := ui.Scroll(c.Key("cal-mobile-scroll")).Fill().
 			TrackScroll(s.MobileContentScrollState()).
 			ScrollbarInsets(s.MobileTopReserve(c), 0, s.MobileBottomReserve(c), 0).Children(func() {
 			s.calendarHomeBody(c, tok, cursor, today, todayYMD, selDateYMD, compactV, mobileMode, allExps, byDate, evByDate)
 		})
+		s.HandleMobilePullRefresh(c, sc)
 		return
 	}
 	s.calendarHomeBody(c, tok, cursor, today, todayYMD, selDateYMD, compactV, mobileMode, allExps, byDate, evByDate)

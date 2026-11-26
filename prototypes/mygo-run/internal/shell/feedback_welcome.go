@@ -273,7 +273,9 @@ func (s *Shell) renderMobileFeedbackPage(c *ui.Context, tok theme.Tokens) {
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	ui.Column(c.Key("mb-feedback-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	s.renderMobileSwipeBackContainer(c, "mb-feedback-root", tok, func() {
+		s.FeedbackOpen = false
+	}, func() {
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 			MinHeight(t.Space(12)+topSafe).
@@ -354,7 +356,9 @@ func (s *Shell) renderMobileWelcomePage(c *ui.Context, tok theme.Tokens) {
 			s.OnOnboardingChoice(choice)
 		}
 	}
-	ui.Column(c.Key("mb-welcome-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	s.renderMobileSwipeBackContainer(c, "mb-welcome-root", tok, func() {
+		choose("skip")
+	}, func() {
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 			MinHeight(t.Space(12)+topSafe).

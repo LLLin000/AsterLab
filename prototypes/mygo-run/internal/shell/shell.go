@@ -307,6 +307,7 @@ type Shell struct {
 	MobileAutoHideDock  bool
 	MobileEditToolbar   bool
 	MobileTabSwitcherOpen bool
+	MobileMenuSheetOpen   bool
 	MobileDockForceNav    bool
 	MobileDockHidden      bool
 	MobileDrawerProgress  float32
@@ -440,7 +441,7 @@ func (s *Shell) AnyModalOpen() bool {
 	if s.ExternalModalOpen || (s.IsExternalModalOpen != nil && s.IsExternalModalOpen()) {
 		return true
 	}
-	return s.VaultSettingsOpen || s.PaletteOpen ||
+	return s.VaultSettingsOpen || s.PaletteOpen || s.MobileMenuSheetOpen ||
 		s.DayPopoverOpen || s.VaultLauncherOpen ||
 		s.newFolderDialogOpen || s.FeedbackOpen || s.WelcomeOpen || s.GlobalSearchOpen
 }
