@@ -552,19 +552,57 @@ func (s *Shell) startNewFolderPrompt(parentRel string) {
 func (s *Shell) renderVaultDialogs(c *ui.Context) {
 	tok := theme.GetTokens(c.Theme())
 	if s.newFolderDialogOpen {
+		submit := func() {
+			name := strings.TrimSpace(s.newFolderName)
+			if name != "" && s.OnVaultCreateFolder != nil {
+				s.OnVaultCreateFolder(s.newFolderParent, name)
+				s.newFolderDialogOpen = false
+			}
+		}
+		if s.IsMobileLayout(c) {
+			ui.Overlay(c, func() {
+				t := c.Theme()
+				topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+				ui.Column(c.Key("mb-newfolder-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+					ui.Row(c).FillWidth().
+						Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+						MinHeight(t.Space(12)+topSafe).
+						AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+						if components.Button(c.Key("mb-nf-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+							s.newFolderDialogOpen = false
+						}
+						ui.Text(c, "新建项目文件夹").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+							Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+						if components.Button(c.Key("mb-nf-create"), "创建", components.ButtonPrimary).Shrink(0).Clicked() {
+							submit()
+						}
+					})
+					ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+					ui.Column(c).FillWidth().
+						Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+						Gap(t.Space(2)).Children(func() {
+						ui.Text(c, "项目或课题名称").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+						tb := components.TextBox(c.Key("mb-nf-input"), &s.newFolderName, components.TextBoxOptions{}).
+							Placeholder("输入项目或课题名称").FillWidth()
+						tb.AutoFocus()
+						tb.OnTextKey(func(k ui.TextKey) bool {
+							if k.Key == ui.KeyEnter && k.Mods == 0 {
+								submit()
+								return true
+							}
+							return false
+						})
+					})
+				})
+			})
+			return
+		}
 		open := s.newFolderDialogOpen
 		components.Dialog(c, &open, components.DialogOptions{Label: "新建项目文件夹"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*7.5).Gap(float32(tok.Spacing12)).Children(func() {
 				components.Text(c, "新建项目文件夹").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
 				tb := components.TextBox(c, &s.newFolderName, components.TextBoxOptions{}).Placeholder("输入项目或课题名称").FillWidth()
 				tb.AutoFocus()
-				submit := func() {
-					name := strings.TrimSpace(s.newFolderName)
-					if name != "" && s.OnVaultCreateFolder != nil {
-						s.OnVaultCreateFolder(s.newFolderParent, name)
-						s.newFolderDialogOpen = false
-					}
-				}
 				tb.OnTextKey(func(k ui.TextKey) bool {
 					if k.Key == ui.KeyEnter && k.Mods == 0 {
 						submit()

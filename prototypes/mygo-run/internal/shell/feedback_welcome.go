@@ -50,6 +50,10 @@ func (s *Shell) renderFeedbackDialog(c *ui.Context) {
 	if strings.TrimSpace(s.FeedbackCategory) == "" {
 		s.FeedbackCategory = "程序异常"
 	}
+	if s.IsMobileLayout(c) {
+		s.renderMobileFeedbackPage(c, tok)
+		return
+	}
 	open := s.FeedbackOpen
 	ui.Box(c.Key("feedback-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "反馈与诊断中心"}, func(panel ui.Element) {
@@ -166,6 +170,10 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 		return
 	}
 	tok := theme.GetTokens(c.Theme())
+	if s.IsMobileLayout(c) {
+		s.renderMobileWelcomePage(c, tok)
+		return
+	}
 	open := s.WelcomeOpen
 	choiceHandled := false
 	ui.Box(c.Key("welcome-dlg")).Children(func() {
@@ -259,4 +267,166 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 		s.OnOnboardingChoice("skip")
 	}
 	s.WelcomeOpen = open
+}
+
+func (s *Shell) renderMobileFeedbackPage(c *ui.Context, tok theme.Tokens) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-feedback-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("mb-fb-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+				s.FeedbackOpen = false
+			}
+			ui.Text(c, "反馈与诊断").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if components.Button(c.Key("mb-fb-submit"), "提交", components.ButtonPrimary).Shrink(0).Clicked() && s.OnSubmitFeedback != nil {
+				s.OnSubmitFeedback()
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		ui.Scroll(c.Key("mb-fb-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(4)).Children(func() {
+				ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "反馈类别").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).Children(func() {
+						for _, cat := range []string{"程序异常", "安装与更新", "界面排版与显示", "功能建议"} {
+							cat := cat
+							variant := components.ButtonOutline
+							if s.FeedbackCategory == cat {
+								variant = components.ButtonPrimary
+							}
+							if components.Button(c, cat, variant).Clicked() {
+								s.FeedbackCategory = cat
+							}
+						}
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "现象描述与复现步骤").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					components.TextBox(c, &s.FeedbackText, components.TextBoxOptions{Multiline: true}).
+						Placeholder("请简述操作路径、报错信息或建议…").
+						FillWidth().Height(float32(tok.Spacing48) * 2.4)
+				})
+
+				ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+					Background(tok.Surface).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+					components.Switch(c, &s.FeedbackIncludeLogs, "附加脱敏运行日志与环境摘要", components.SwitchOptions{})
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						kit.IconBox(c, tok, lucide.ShieldCheck(), tok.Success)
+						ui.Text(c, "目录与令牌已脱敏，不含实验内容与附件。").
+							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+					})
+				})
+
+				if s.FeedbackStatus != "" {
+					ui.Text(c, s.FeedbackStatus).FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+				}
+
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					if components.Button(c, "导出诊断包 (.zip)", components.ButtonSecondary).Clicked() && s.OnExportDiagBundle != nil {
+						s.OnExportDiagBundle()
+					}
+					if components.Button(c, "复制报告摘要", components.ButtonGhost).Clicked() && s.OnCopyFeedbackReport != nil {
+						s.OnCopyFeedbackReport()
+					}
+				})
+			})
+		})
+	})
+	})
+}
+
+func (s *Shell) renderMobileWelcomePage(c *ui.Context, tok theme.Tokens) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	choose := func(choice string) {
+		s.WelcomeOpen = false
+		if s.OnOnboardingChoice != nil {
+			s.OnOnboardingChoice(choice)
+		}
+	}
+	ui.Column(c.Key("mb-welcome-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			ui.Text(c, "欢迎使用 AsterLab").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if components.Button(c.Key("mb-welcome-skip"), "稍后探索", components.ButtonGhost).Shrink(0).Clicked() {
+				choose("skip")
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		ui.Scroll(c.Key("mb-welcome-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(4)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+					ui.Image(c, theme.LogoParsedTriStream(tok.Dark)).Width(float32(tok.Spacing48)).Height(float32(tok.Spacing48) * 0.85)
+					ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "本地科研实验工作台").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+						ui.Text(c, "所有实验档案与照片保存在本地目录").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					})
+				})
+
+				ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+					Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+					choices := []struct {
+						key, title, desc string
+						ico              *ui.SVG
+						primary          bool
+						choice           string
+					}{
+						{"guide", "新手入门指南（推荐）", "内含可交互 12 孔板、配液计算器与计时器", lucide.BookOpen(), true, "guide"},
+						{"new", "新建空白实验文档", "直接开始记录步骤、试剂与数据", lucide.FilePlus(), false, "new"},
+						{"demo", "体验「CCK-8」完整示范", "生成分组、96 孔板与 OD450 汇总实例", lucide.FlaskConical(), false, "demo"},
+						{"existing", "打开已有实验库目录", firstNonEmptyStr(s.VaultPathInput, "默认实验库目录"), lucide.FolderOpen(), false, "existing"},
+					}
+					for i, ch := range choices {
+						ch := ch
+						if i > 0 {
+							ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+						}
+						bg := tok.Surface
+						if ch.primary {
+							bg = tok.AccentSoftBg.Alpha(0.35)
+						}
+						row := ui.ButtonBase(c.Key("mb-welcome-opt-"+ch.key)).Label(ch.title).
+							FillWidth().MinHeight(float32(tok.Spacing48)+t.Space(2)).
+							Padding(t.Space(3), t.Space(4)).
+							Background(bg).Justify(ui.Start).
+							OnClick(func() { choose(ch.choice) })
+						theme.ApplyTactilePress(row)
+						row.Children(func() {
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+								kit.IconBox(c, tok, ch.ico, tok.Accent)
+								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, ch.title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+									ui.Text(c, ch.desc).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+								})
+								ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+							})
+						})
+					}
+				})
+
+				ui.Row(c).FillWidth().Justify(ui.Center).Children(func() {
+					if components.Button(c, "1 分钟界面区域导览", components.ButtonOutline).Clicked() {
+						choose("tour")
+					}
+				})
+			})
+		})
+	})
+	})
 }

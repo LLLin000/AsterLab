@@ -2621,8 +2621,16 @@ func workspaceDataDir() string {
 			return filepath.Join(local, "AsterLab", "data")
 		}
 	}
-	if dir, err := os.UserConfigDir(); err == nil {
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
 		return filepath.Join(dir, "AsterLab", "data")
+	}
+	if runtime.GOOS == "ios" {
+		if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+			return filepath.Join(home, "Documents", ".asterlab-data")
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".asterlab-data")
 	}
 	return ""
 }
@@ -5051,7 +5059,7 @@ func main() {
 		},
 		IsExternalModalOpen: func() bool {
 			return a.newExpOpen || a.importOpen || a.linkDialogOpen || a.confirmDesignSwitch ||
-				(a.tools != nil && (a.tools.PantryDialogOpen || a.tools.PantryBoxDialogOpen || a.tools.VivariumDialogOpen))
+				(a.tools != nil && (a.tools.PantryDialogOpen || a.tools.PantryBoxDialogOpen || a.tools.VivariumDialogOpen || a.tools.VivariumPeekOpen))
 		},
 		PaletteCommands: append([]shell.PaletteCommand{
 			{
@@ -5115,7 +5123,6 @@ func main() {
 		}, a.devInspectorPaletteCommands()...),
 		OnImport:             func() { a.importOpen = true },
 		OnPage:               func(p shell.Page) { a.shell.Page = p; a.saveVaultWorkspace() },
-		GalleryExtraSections: a.buildStorybookExtraSections(),
 		RenderPantryInspector: func(c *ui.Context, tok theme.Tokens) {
 			if a.tools != nil {
 				a.tools.RenderVivariumInspector(c, tok)

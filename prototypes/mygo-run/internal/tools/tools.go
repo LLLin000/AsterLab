@@ -379,8 +379,29 @@ func ViewPantry(c *ui.Context, w *Workspace) {
 	}
 	t := c.Theme()
 	tok := theme.GetTokens(t)
-	ui.Scroll(c).Fill().Background(tok.Canvas).Children(func() {
-		ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+	padTop := float32(tok.Spacing16)
+	padBottom := float32(tok.Spacing16)
+	padH := float32(tok.Spacing16)
+	mobileLayout := isMobileToolsLayout(c)
+	var scrollTopInset, scrollBottomInset float32
+	if mobileLayout {
+		if tok.LiquidGlass {
+			// Clear floating 48dp Liquid Glass top bar (MyGo root already pads OS SafeArea insets).
+			scrollTopInset = float32(tok.Spacing48) + float32(tok.Spacing4)
+		} else {
+			scrollTopInset = float32(tok.Spacing12)
+		}
+		scrollBottomInset = float32(tok.Spacing48) + float32(tok.Spacing24)
+		padTop = scrollTopInset
+		padBottom = scrollBottomInset
+		padH = float32(tok.Spacing12)
+	}
+	sc := ui.Scroll(c).Fill().Background(tok.Canvas)
+	if mobileLayout {
+		sc.ScrollbarInsets(scrollTopInset, 0, scrollBottomInset, 0)
+	}
+	sc.Children(func() {
+		ui.Column(c).FillWidth().Padding(padTop, padH, padBottom, padH).Gap(float32(tok.Spacing12)).Children(func() {
 			pantryView(c, w, tok)
 			if w.Error != "" {
 				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,18 +106,48 @@ type Vault struct {
 	Events *EventBus
 }
 
-// DefaultVaultDir returns the default single-vault path on the user's machine.
-func DefaultVaultDir() string {
-	if env := strings.TrimSpace(os.Getenv("ASTERLAB_VAULT_DIR")); env != "" {
+// defaultVaultDirForOS computes the platform default vault directory cleanly so
+// mobile sandboxes (where <HOME> itself is read-only on iOS) resolve to writable Paths.
+func defaultVaultDirForOS(goos, envDir, localAppData, home, cfgDir string) string {
+	if env := strings.TrimSpace(envDir); env != "" {
 		return filepath.Clean(env)
 	}
-	if local := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); local != "" {
+	if goos == "ios" {
+		if home = strings.TrimSpace(home); home != "" {
+			return filepath.Join(home, "Documents", "AsterLab")
+		}
+		if cfgDir = strings.TrimSpace(cfgDir); cfgDir != "" {
+			return filepath.Join(cfgDir, "AsterLab")
+		}
+	}
+	if goos == "android" {
+		if home = strings.TrimSpace(home); home != "" {
+			return filepath.Join(home, "AsterLab")
+		}
+		if cfgDir = strings.TrimSpace(cfgDir); cfgDir != "" {
+			return filepath.Join(cfgDir, "AsterLab")
+		}
+	}
+	if local := strings.TrimSpace(localAppData); local != "" {
 		return filepath.Join(local, "AsterLab", "vault")
 	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
+	if home = strings.TrimSpace(home); home != "" {
 		return filepath.Join(home, "AsterLab")
 	}
 	return filepath.Join(".", "AsterLabVault")
+}
+
+// DefaultVaultDir returns the default single-vault path on the user's machine.
+func DefaultVaultDir() string {
+	home, _ := os.UserHomeDir()
+	cfgDir, _ := os.UserConfigDir()
+	return defaultVaultDirForOS(
+		runtime.GOOS,
+		os.Getenv("ASTERLAB_VAULT_DIR"),
+		os.Getenv("LOCALAPPDATA"),
+		home,
+		cfgDir,
+	)
 }
 
 // Open initializes (or opens) an AsterLab vault at rootDir.

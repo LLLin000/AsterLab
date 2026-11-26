@@ -27,6 +27,7 @@ import (
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -211,8 +212,13 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		a.shell.VaultPathInput = v.Root
 		a.shell.FolderTemplates = v.Config.FolderTemplates
 		a.shell.VaultLauncherSeedDemo = true
+		mobileNative := runtime.GOOS == "ios" || runtime.GOOS == "android"
 		if firstRunNoVault {
-			a.shell.VaultLauncherOpen = true
+			if mobileNative {
+				saveLastVaultRoot(v.Root)
+			} else {
+				a.shell.VaultLauncherOpen = true
+			}
 		}
 		a.shell.HideAssetsInTree = v.Config.HideAssetsInTree
 		a.shell.DefaultProjectDir = v.Config.DefaultProjectDir
@@ -261,6 +267,20 @@ func (a *app) initVaultWorkspace(vaultRoot string) error {
 		}
 	}
 	a.refreshVaultTreeAndCalendar()
+	if firstRunNoVault && (runtime.GOOS == "ios" || runtime.GOOS == "android") && a.vault != nil {
+		hasExp := false
+		if a.shell != nil {
+			for _, f := range a.shell.VaultFiles {
+				if !f.IsTemplate && !f.IsAsset {
+					hasExp = true
+					break
+				}
+			}
+		}
+		if !hasExp {
+			a.openOrSeedUserGuideDoc()
+		}
+	}
 	a.syncRecentVaultsToShell()
 	a.lastVaultSig, a.lastPantrySig = computeVaultDiskSignatures(v.Root)
 	return nil
@@ -459,10 +479,36 @@ func (a *app) openNewExperimentDialogAt(folderRel, dateYMD, startTimeHHMM string
 }
 
 func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
-	if !a.newExpOpen || a.vault == nil {
+	if !a.newExpOpen {
 		return
 	}
 	tok := theme.GetTokens(c.Theme())
+	if a.shell != nil && a.shell.IsMobileLayout(c) {
+		ui.Overlay(c, func() {
+			a.renderMobileNewExperimentPage(c, tok)
+		})
+		return
+	}
+	if a.vault == nil {
+		open := a.newExpOpen
+		ui.Box(c.Key("vault-new-exp-dlg")).Children(func() {
+			components.Dialog(c, &open, components.DialogOptions{Label: "新建实验"}, func(panel ui.Element) {
+				panel.Width(float32(tok.Spacing48)*9).Gap(float32(tok.Spacing12)).Children(func() {
+					kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, "本地实验库尚未初始化，请先创建或初始化默认实验库。", "", nil)
+					ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(tok.Spacing8)).Children(func() {
+						if components.Button(c, "取消", components.ButtonGhost).Clicked() {
+							open = false
+						}
+						if components.Button(c, "初始化默认实验库", components.ButtonPrimary).Clicked() {
+							_ = a.initVaultWorkspace("")
+						}
+					})
+				})
+			})
+		})
+		a.newExpOpen = open
+		return
+	}
 	open := a.newExpOpen
 	folders := append([]string{""}, a.vault.ProjectFolders()...)
 	var templates []vault.FileEntry
@@ -631,6 +677,153 @@ func (a *app) renderVaultNewExperimentDialog(c *ui.Context) {
 	if !open {
 		a.newExpOpen = false
 	}
+}
+
+func (a *app) renderMobileNewExperimentPage(c *ui.Context, tok theme.Tokens) {
+	t := c.Theme()
+	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-new-exp-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		// Full-Screen Navigation Bar: Cancel | Title | Primary CTA
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("mb-new-exp-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+				a.newExpOpen = false
+			}
+			components.Text(c, "新建实验").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if a.vault != nil {
+				if components.Button(c.Key("mb-new-exp-submit"), "创建实验", components.ButtonPrimary).Shrink(0).Clicked() {
+					a.confirmCreateVaultExperiment()
+				}
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		if a.vault == nil {
+			ui.Column(c).FillWidth().Grow(1).MinHeight(0).
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, "本地实验库尚未初始化，请先初始化默认实验库后新建实验。", "", nil)
+				if components.Button(c, "初始化默认实验库", components.ButtonPrimary).FillWidth().Clicked() {
+					if err := a.initVaultWorkspace(""); err != nil {
+						a.newExpErr = err.Error()
+					}
+				}
+				if a.newExpErr != "" {
+					components.Text(c, a.newExpErr).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+				}
+			})
+			return
+		}
+
+		folders := append([]string{""}, a.vault.ProjectFolders()...)
+		var templates []vault.FileEntry
+		if a.shell != nil {
+			for _, f := range a.shell.VaultFiles {
+				if f.IsTemplate {
+					templates = append(templates, f)
+				}
+			}
+		}
+
+		ui.Scroll(c.Key("mb-new-exp-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				titleCol := ui.Column(c.Key("mb-new-exp-title-col")).FillWidth().Gap(t.Space(1))
+				theme.ApplyNudge(titleCol, a.newExpNudgeSeq)
+				titleCol.Children(func() {
+					ui.Text(c, "实验名称").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+					components.TextBox(c, &a.newExpTitle, components.TextBoxOptions{}).Placeholder("例如：CCK-8 药物敏感性测定").FillWidth()
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "日期").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
+						components.TextBox(c, &a.newExpDate, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "时段").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted).SingleLine()
+						components.TextBox(c, &a.newExpStartTime, components.TextBoxOptions{}).Placeholder("如 14:00").FillWidth()
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "保存位置（路径）").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+					ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							components.TextBox(c, &a.newExpFolder, components.TextBoxOptions{}).
+								Placeholder("留空存入根目录").FillWidth()
+						})
+						folderPick := a.newExpFolder
+						ui.Box(c).Width(t.Space(28)).Shrink(0).Children(func() {
+							sel := components.Select(c, &folderPick)
+							sel.Trigger.FillWidth().Children(func() {
+								ui.Text(c, "已有目录").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+							})
+							sel.Popup(func(p ui.Element) {
+								ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.2).Children(func() {
+									ui.Column(c).FillWidth().Gap(2).Children(func() {
+										for _, f := range folders {
+											f := f
+											lbl := f
+											if lbl == "" {
+												lbl = "根目录 (/)"
+											}
+											sel.Item(f).Children(func() {
+												ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+											})
+										}
+									})
+								})
+							})
+						})
+						if folderPick != a.newExpFolder {
+							a.newExpFolder = folderPick
+						}
+					})
+				})
+
+				if len(templates) > 0 {
+					ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "选用模板").FontSize(float32(tok.TextData)).Bold().TextColor(tok.TextMuted)
+						tSel := components.Select(c, &a.newExpTemplate)
+						tSel.Trigger.FillWidth().Children(func() {
+							lbl := strings.TrimSuffix(filepath.Base(a.newExpTemplate), ".asterml")
+							if lbl == "" || lbl == "." {
+								lbl = "空白实验"
+							}
+							tSel.Trigger.Label(lbl)
+							ui.Text(c, lbl).FontSize(float32(tok.TextData)).TextColor(tok.Text)
+						})
+						tSel.Popup(func(p ui.Element) {
+							tSel.SearchField(&a.newExpTplQuery).Label("筛选模板").Placeholder("搜索模板…")
+							q := strings.ToLower(strings.TrimSpace(a.newExpTplQuery))
+							ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.8).Children(func() {
+								ui.Column(c).FillWidth().Gap(2).Children(func() {
+									for _, tpl := range templates {
+										tpl := tpl
+										if q != "" && !strings.Contains(strings.ToLower(tpl.Name), q) {
+											continue
+										}
+										tSel.Item(tpl.RelPath).Children(func() {
+											ui.Text(c, tpl.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+										})
+									}
+								})
+							})
+						})
+					})
+				}
+
+				if a.newExpErr != "" {
+					kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, a.newExpErr, "", nil)
+				}
+			})
+		})
+	})
 }
 
 func (a *app) confirmCreateVaultExperiment() {

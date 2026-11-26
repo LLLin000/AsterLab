@@ -32,6 +32,28 @@ type paletteEntry struct {
 }
 
 func (s *Shell) renderCommandPalette(c *ui.Context) {
+	if s.IsMobileLayout(c) {
+		if !s.PaletteOpen {
+			return
+		}
+		entries := s.buildPaletteEntries()
+		if len(entries) == 0 {
+			s.PaletteCursor = 0
+		} else {
+			if s.PaletteCursor < 0 {
+				s.PaletteCursor = 0
+			}
+			if s.PaletteCursor >= len(entries) {
+				s.PaletteCursor = len(entries) - 1
+			}
+		}
+		tok := theme.GetTokens(c.Theme())
+		ui.Overlay(c, func() {
+			s.renderMobileCommandPalettePage(c, tok, entries)
+		})
+		return
+	}
+
 	if !s.PaletteOpen {
 		ui.Box(c.Key("command-palette-dlg")).Children(func() {
 			components.Dialog(c, &s.PaletteOpen, components.DialogOptions{Label: "命令面板"}, nil)
@@ -126,7 +148,7 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 						bg, fg = tok.AccentSoftBg, tok.Accent
 					}
 					chip := ui.ButtonBase(c.Key("pal-mode-"+m.key)).Label(m.lbl).
-						Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+						Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 						Background(bg).Shrink(0).OnClick(func() {
 						s.PaletteMode = m.key
 						s.PaletteCursor = 0
@@ -147,56 +169,58 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 				return
 			}
 
-			ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 9.0).Children(func() {
-				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
-					var lastKind paletteEntryKind = 255
-					for i, entry := range entries {
-						entry := entry
-						if entry.kind != lastKind {
-							lastKind = entry.kind
-							ui.Text(c, paletteGroupLabel(entry.kind)).
-								FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
-								Padding(float32(tok.Spacing4), float32(tok.Spacing4))
-						}
-						selected := i == s.PaletteCursor
-						targetBg := ui.Transparent
-						if selected {
-							targetBg = tok.AccentSoftBg
-						}
-						palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-							Radius(float32(tok.ControlRadius)).
-							AlignItems(ui.Center).Gap(float32(tok.Spacing8))
-						palRow.Background(palRow.AnimateColor("pal-bg", targetBg, theme.MotionSnappy))
-						palRow.Children(func() {
-							rowBtn := ui.ButtonBase(c).Grow(1).MinWidth(0).Justify(ui.Start).Label(entry.title)
-							theme.ApplyTactilePress(rowBtn)
-							rowBtn.Children(func() {
-								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-									ui.Icon(c, paletteEntryIcon(entry)).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
-									ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-										components.Text(c, entry.title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-										if entry.subtitle != "" {
-											components.Text(c, entry.subtitle).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+			ui.Box(c).FillWidth().MaxHeight(float32(tok.Spacing48)*9.0).Clip().Children(func() {
+				ui.Scroll(c).Fill().Children(func() {
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+						var lastKind paletteEntryKind = 255
+						for i, entry := range entries {
+							entry := entry
+							if entry.kind != lastKind {
+								lastKind = entry.kind
+								ui.Text(c, paletteGroupLabel(entry.kind)).
+									FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+									Padding(float32(tok.Spacing4), float32(tok.Spacing4))
+							}
+							selected := i == s.PaletteCursor
+							targetBg := ui.Transparent
+							if selected {
+								targetBg = tok.AccentSoftBg
+							}
+							palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+								Radius(float32(tok.ControlRadius)).
+								AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+							palRow.Background(palRow.AnimateColor("pal-bg", targetBg, theme.MotionSnappy))
+							palRow.Children(func() {
+								rowBtn := ui.ButtonBase(c).Grow(1).MinWidth(0).Justify(ui.Start).Label(entry.title)
+								theme.ApplyTactilePress(rowBtn)
+								rowBtn.Children(func() {
+									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+										ui.Icon(c, paletteEntryIcon(entry)).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+											components.Text(c, entry.title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+											if entry.subtitle != "" {
+												components.Text(c, entry.subtitle).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+											}
+										})
+										if entry.shortcut != "" {
+											kit.Keycap(c, tok, entry.shortcut)
 										}
 									})
-									if entry.shortcut != "" {
-										kit.Keycap(c, tok, entry.shortcut)
-									}
 								})
-							})
-							if rowBtn.Clicked() {
-								s.executePaletteEntry(entry, false)
-								open = false
-							}
-							if entry.kind == paletteExperiment && entry.exp != nil {
-								sp := components.IconButton(c, lucide.Columns2(), "在分屏中打开", components.IconButtonCompact)
-								if sp.Clicked() {
-									s.executePaletteEntry(entry, true)
+								if rowBtn.Clicked() {
+									s.executePaletteEntry(entry, false)
 									open = false
 								}
-							}
-						})
-					}
+								if entry.kind == paletteExperiment && entry.exp != nil {
+									sp := components.IconButton(c, lucide.Columns2(), "在分屏中打开", components.IconButtonCompact)
+									if sp.Clicked() {
+										s.executePaletteEntry(entry, true)
+										open = false
+									}
+								}
+							})
+						}
+					})
 				})
 			})
 			ui.Divider(c)
@@ -215,6 +239,109 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 	})
 	})
 	s.PaletteOpen = open
+}
+
+func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, entries []paletteEntry) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-pal-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		// Sticky Full-Screen Header: Search box + Cancel + Scope selector row
+		ui.Column(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).
+			Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				ui.Row(c).Grow(1).MinWidth(0).Padding(t.Space(2), t.Space(3)).
+					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Icon(c, lucide.Search()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					inp := ui.TextInputBase(c, &s.PaletteQuery).Grow(1).MinWidth(0).
+						FontSize(float32(tok.TextBody)).TextColor(tok.Text).
+						Placeholder("搜索实验、试剂或快捷命令…")
+					inp.AutoFocus()
+				})
+				if components.Button(c, "取消", components.ButtonGhost).Shrink(0).Clicked() {
+					s.PaletteOpen = false
+				}
+			})
+
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				for _, m := range []struct{ key, lbl string }{
+					{"", "全部"},
+					{"files", "文件与储藏室"},
+					{"commands", "命令"},
+				} {
+					m := m
+					active := s.PaletteMode == m.key
+					bg, fg, bd := tok.Elevated, tok.TextMuted, tok.Border
+					if active {
+						bg, fg, bd = tok.AccentSoftBg, tok.Accent, tok.Accent
+					}
+					chip := ui.ButtonBase(c.Key("mb-pal-mode-"+m.key)).Label(m.lbl).
+						Grow(1).Basis(0).Padding(t.Space(1), t.Space(2)).
+						Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bd).Center().
+						OnClick(func() {
+							s.PaletteMode = m.key
+							s.PaletteCursor = 0
+						})
+					chip.Children(func() {
+						txt := ui.Text(c, m.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+						if active {
+							txt.Bold()
+						}
+					})
+				}
+			})
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		if len(entries) == 0 {
+			ui.Column(c).FillWidth().Grow(1).MinHeight(0).
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+				Children(func() {
+				kit.EmptyState(c, tok, lucide.Search(), "未找到匹配实验、试剂或命令", "尝试输入实验名称、试剂位置或清空搜索词。", "", nil)
+			})
+			return
+		}
+
+		ui.Scroll(c.Key("mb-pal-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(1)).Children(func() {
+				var lastKind paletteEntryKind = 255
+				for _, entry := range entries {
+					entry := entry
+					if entry.kind != lastKind {
+						lastKind = entry.kind
+						ui.Text(c, paletteGroupLabel(entry.kind)).
+							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+							Padding(t.Space(2), t.Space(1), t.Space(1), t.Space(1))
+					}
+					rowBtn := ui.ButtonBase(c.Key("mb-pal-"+entry.key)).FillWidth().
+						MinHeight(float32(tok.Spacing48)).Padding(t.Space(2), t.Space(3)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+						Justify(ui.Start).Label(entry.title).
+						OnClick(func() {
+							s.executePaletteEntry(entry, false)
+							s.PaletteOpen = false
+						})
+					theme.ApplyTactilePress(rowBtn)
+					rowBtn.Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+							kit.IconBox(c, tok, paletteEntryIcon(entry), tok.Accent)
+							ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+								components.Text(c, entry.title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+								if entry.subtitle != "" {
+									components.Text(c, entry.subtitle).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+								}
+							})
+						})
+					})
+				}
+			})
+		})
+	})
+	})
 }
 
 func pantryQuickStatusBadge(st string) (string, components.BadgeTone) {
@@ -435,13 +562,6 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 			subtitle: "创建 CCK-8 示范实验与预置试剂，快速熟悉 AsterLab 结构",
 			runAct: func() {
 				s.WelcomeOpen = true
-			},
-		},
-		paletteEntry{
-			kind: paletteAction, key: "cmd-ui-storybook", title: "打开全站 UI 组件画廊 (Storybook)",
-			subtitle: "浏览全站 Token、动效、Shell、AsterDoc 模块、科学载体与动物贴纸",
-			runAct: func() {
-				s.ComponentGalleryOpen = true
 			},
 		},
 	)

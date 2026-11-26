@@ -478,7 +478,7 @@ func computeLivePreviewDecorationsFull(
 					Label: label,
 					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
 						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4), 0, 0).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col)
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(float32(tok.PillRadius)).Background(col)
 							ui.Row(c).Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)*0.75).
 								Radius(float32(tok.ControlRadius)).Background(col.Alpha(0.14)).
 								AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
@@ -501,7 +501,7 @@ func computeLivePreviewDecorationsFull(
 					Label: activeCalloutTone,
 					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
 						e.Row().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4), 0, 0).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col)
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(float32(tok.PillRadius)).Background(col)
 							ui.Icon(c, icon).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(col)
 						})
 					},
@@ -519,7 +519,7 @@ func computeLivePreviewDecorationsFull(
 					Width: float32(tok.Spacing12),
 					Content: func(c *ui.Context, e ui.Element, r editor.Replacement) {
 						e.Row().AlignItems(ui.Center).Children(func() {
-							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(1.5).Background(col.Alpha(0.8))
+							ui.Box(c).Width(3).Height(float32(tok.Spacing24)-4).Radius(float32(tok.PillRadius)).Background(col.Alpha(0.8))
 						})
 					},
 				})
@@ -1741,6 +1741,18 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.OnLocatePantryCode,
 			v.OnOpenVaultLink,
 		)
+		if isMobileAsterdocViewport(c, v) {
+			vw, _ := c.Size()
+			maxHR := float32(tok.Spacing48) * 6.5
+			if vw > 0 {
+				maxHR = max(float32(tok.Spacing48)*4, vw-float32(tok.Spacing48)*1.5)
+			}
+			for i := range repls {
+				if repls[i].Width > maxHR {
+					repls[i].Width = maxHR
+				}
+			}
+		}
 		st.SetLineStyles(styles)
 		entry.baseRepls = repls
 		st.SetReplacements(repls)

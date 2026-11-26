@@ -305,9 +305,9 @@ func (s *Shell) calendarHomeBody(
 		padB = float32(tok.Spacing12)
 	}
 	if mobileMode {
-		padTop = s.MobileTopReserve(c) + float32(tok.Spacing8)
+		padTop = s.MobileTopReserve(c) + float32(tok.Spacing4)
 		padH = float32(tok.Spacing8)
-		padB = s.MobileBottomReserve(c) + float32(tok.Spacing16)
+		padB = s.MobileBottomReserve(c) + float32(tok.Spacing8)
 	}
 	col := ui.Column(c).FillWidth().Padding(padTop, padH, padB, padH).Gap(float32(tok.Spacing16))
 	if !mobileMode {
@@ -319,7 +319,11 @@ func (s *Shell) calendarHomeBody(
 				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.CalendarDays()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
-				components.Text(c, "双击任意日期格新建实验，或从左侧文件树创建项目文件夹分类整理 .asterml 文件。").
+				hint := "双击任意日期格新建实验，或从左侧文件树创建项目文件夹分类整理 .asterml 文件。"
+				if mobileMode {
+					hint = "点按「+ 新建」或「+ 安排」记录实验，从左边缘向右滑展开实验库。"
+				}
+				components.Text(c, hint).
 					FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
 			})
 		}
@@ -1257,8 +1261,10 @@ func (s *Shell) renderAppleWeekTimeGrid(c *ui.Context, tok theme.Tokens, cursor 
 				})
 				if hdrBtn.Clicked() {
 					s.SelectedDate = ymd
-					s.DayPopoverDate = ymd
-					s.DayPopoverOpen = true
+					if !s.IsMobileLayout(c) {
+						s.DayPopoverDate = ymd
+						s.DayPopoverOpen = true
+					}
 				}
 				if ymd == s.DayPopoverDate {
 					components.Popover(c, hdrBtn, &s.DayPopoverOpen, func(panel ui.Element) {
@@ -1503,7 +1509,11 @@ func (s *Shell) renderDayPopover(c *ui.Context, panel ui.Element, tok theme.Toke
 		popoverTitle = dateLabel + " · 综合日程"
 	}
 
-	panel.Width(float32(tok.Spacing48)*9.6).MaxHeight(float32(tok.Spacing48)*10.5).
+	panelW := float32(tok.Spacing48) * 9.6
+	if vw, _ := c.Size(); vw > 0 && panelW > vw-float32(tok.Spacing24) {
+		panelW = max(float32(tok.Spacing48)*5, vw-float32(tok.Spacing24))
+	}
+	panel.Width(panelW).MaxHeight(float32(tok.Spacing48)*10.5).
 		Label(popoverTitle).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.CalendarDays()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)

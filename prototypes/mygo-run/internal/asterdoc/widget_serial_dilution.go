@@ -164,7 +164,7 @@ func (v *View) renderSerialDilutionTubeSchematic(c *ui.Context, tok theme.Tokens
 						stepsVal = float64(parsed)
 					}
 
-					ui.Row(c).FillWidth().Padding(2).Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
+					ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 						for _, vm := range []struct {
 							id    string
 							label string
@@ -482,12 +482,12 @@ func (v *View) renderSerialDilutionPlate96Strip(c *ui.Context, tok theme.Tokens,
 func renderTransferArrowBridge(c *ui.Context, tok theme.Tokens, transferLabel string) {
 	ui.Column(c).Width(float32(tok.Spacing48)+float32(tok.Spacing4)).AlignItems(ui.Center).
 		Padding(0, 0, float32(tok.Spacing48)+float32(tok.Spacing12), 0).Gap(2).Children(func() {
-		ui.Row(c).Padding(1, float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
+		ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).Radius(float32(tok.ControlRadius)).
 			Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.30)).Children(func() {
 			ui.Text(c, transferLabel).FontSize(float32(tok.TextMeta)-1).Bold().
 				TextColor(tok.Accent).FontFeatures("tnum").SingleLine().Shrink(0)
 		})
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Padding(0, 2).Gap(0).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Padding(0, float32(tok.Spacing4)*0.5).Gap(0).Children(func() {
 			ui.Box(c).Grow(1).Height(2).Background(tok.Accent.Alpha(0.75))
 			ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 		})

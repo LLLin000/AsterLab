@@ -1696,6 +1696,21 @@ func (w *Workspace) looseReagentsForBox(box PantryBox) []runs.PantryItem {
 }
 
 func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
+	t := c.Theme()
+	tok := theme.GetTokens(t)
+	title := "新建储藏室收纳盒 / 离心管架"
+	if w.boxEditingID != "" {
+		title = "编辑收纳盒 · " + firstNonEmptyStr(w.boxDraft.Name, "配置")
+	}
+	if isMobileToolsLayout(c) {
+		if !w.PantryBoxDialogOpen {
+			return
+		}
+		ui.Overlay(c, func() {
+			w.renderMobilePantryBoxPage(c, tok, title)
+		})
+		return
+	}
 	if !w.PantryBoxDialogOpen {
 		ui.Box(c.Key("pantry-box-dlg")).Children(func() {
 			components.Dialog(c, &w.PantryBoxDialogOpen, components.DialogOptions{
@@ -1703,12 +1718,6 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 			}, nil)
 		})
 		return
-	}
-	t := c.Theme()
-	tok := theme.GetTokens(t)
-	title := "新建储藏室收纳盒 / 离心管架"
-	if w.boxEditingID != "" {
-		title = "编辑收纳盒 · " + firstNonEmptyStr(w.boxDraft.Name, "配置")
 	}
 
 	ui.Box(c.Key("pantry-box-dlg")).Children(func() {
@@ -1855,6 +1864,150 @@ func (w *Workspace) renderPantryBoxDialog(c *ui.Context) {
 			})
 		})
 	})
+	})
+}
+
+func (w *Workspace) renderMobilePantryBoxPage(c *ui.Context, tok theme.Tokens, title string) {
+	t := c.Theme()
+	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-box-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		// Full-Screen Form Navigation Bar: Cancel | Title | Save
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("mb-box-dlg-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+				w.PantryBoxDialogOpen = false
+				w.boxConfirmDel = false
+				w.boxDialogErr = ""
+			}
+			ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if components.Button(c.Key("mb-box-dlg-save"), "保存收纳盒", components.ButtonPrimary).Shrink(0).Clicked() {
+				_ = w.SavePantryBoxDialog()
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		// Clipped Single-Column Scroll Body
+		ui.Scroll(c.Key("mb-box-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "选择容器规格（贴纸与默认管型自动匹配）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+					if r, er := strconv.Atoi(strings.TrimSpace(w.boxDraftRowsStr)); er == nil {
+						if col, ec := strconv.Atoi(strings.TrimSpace(w.boxDraftColsStr)); ec == nil && r > 0 && col > 0 {
+							components.Badge(c, fmt.Sprintf("共 %d 孔位", r*col), components.BadgeOptions{Tone: components.BadgeAccent})
+						}
+					}
+				})
+				specs := AllPantryBoxSpecs()
+				const cols = 2
+				for i := 0; i < len(specs); i += cols {
+					end := min(i+cols, len(specs))
+					ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+						for _, sp := range specs[i:end] {
+							sp := sp
+							chosen := w.boxDraft.Kind == sp.Kind
+							bg, bd := tok.Elevated, tok.Border
+							if chosen {
+								bg, bd = tok.AccentSoftBg, tok.Accent
+							}
+							tile := ui.ButtonBase(c.Key("mb-box-spec-"+string(sp.Kind))).Label("选用 "+sp.Title).
+								Grow(1).Basis(0).MinWidth(0).Padding(t.Space(2)).
+								Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bd).
+								OnClick(func() {
+									w.selectBoxDraftPreset(sp.Kind)
+								})
+							tile.Children(func() {
+								ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+									labsticker.RenderSticker(c, sp.StickerID, nil, labsticker.StickerOptions{
+										TargetHeightDIP: 36,
+										BorderDIP:       3.0,
+									})
+									ui.Text(c, sp.ShortTitle).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+										SingleLine().Ellipsis("…")
+									ui.Text(c, sp.TubeHint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+										SingleLine().Ellipsis("…")
+								})
+							})
+						}
+					})
+				}
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "盒子名称 *").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					components.TextBox(c, &w.boxDraft.Name, components.TextBoxOptions{}).Placeholder("如 抗体冻存盒 #1 / qPCR 引物 96 孔盒").FillWidth()
+				})
+
+				if w.boxDraft.Kind != BoxPCR96 {
+					ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+						ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+							ui.Text(c, "行数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &w.boxDraftRowsStr, components.TextBoxOptions{}).FillWidth()
+						})
+						ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+							ui.Text(c, "列数 (2–12)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &w.boxDraftColsStr, components.TextBoxOptions{}).FillWidth()
+						})
+					})
+				}
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "所属温区货架").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					zones := []struct{ k, lbl string }{
+						{"-80", "-80°C"},
+						{"-20", "-20°C"},
+						{"4C", "4°C"},
+						{"ambient", "常温避光"},
+					}
+					ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).Children(func() {
+						for _, z := range zones {
+							z := z
+							variant := components.ButtonGhost
+							if w.boxDraft.ZoneKey == z.k {
+								variant = components.ButtonSecondary
+							}
+							if components.Button(c, z.lbl, variant).Clicked() {
+								w.boxDraft.ZoneKey = z.k
+							}
+						}
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "架层补充位置").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					components.TextBox(c, &w.boxDraft.ShelfPos, components.TextBoxOptions{}).Placeholder("如 二层左 / 门架顶格").FillWidth()
+				})
+
+				if w.boxDialogErr != "" {
+					ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(3)).
+						Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger).Children(func() {
+						ui.Text(c, w.boxDialogErr).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+					})
+				}
+
+				if w.boxEditingID != "" {
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Padding(t.Space(2), 0, 0, 0).Children(func() {
+						if !w.boxConfirmDel {
+							if components.Button(c, "删除收纳盒", components.ButtonGhost).Clicked() {
+								w.boxConfirmDel = true
+							}
+						} else {
+							ui.Text(c, "盒内试剂将退回货架：").FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+							if components.Button(c, "确认移除盒子", components.ButtonSecondary).Clicked() {
+								_ = w.DeletePantryBox(w.boxEditingID)
+								w.PantryBoxDialogOpen = false
+								w.boxConfirmDel = false
+							}
+							if components.Button(c.Key("mb-box-del-cancel"), "取消", components.ButtonGhost).Clicked() {
+								w.boxConfirmDel = false
+							}
+						}
+					})
+				}
+			})
+		})
 	})
 }
 

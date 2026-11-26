@@ -121,7 +121,7 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 	}
 
 	var topInset float32
-	if s.window != nil {
+	if s.window != nil && !s.IsMobileLayout(c) {
 		topInset = sidebar.HeaderHeight(c)
 	}
 
@@ -805,7 +805,7 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 					Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, sevCol.Alpha(0.32)).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						ui.Box(c).Size(6, 6).Radius(3).Background(sevCol)
+						ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(sevCol)
 						ui.Text(c, sevLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(sevCol)
 						ui.Spacer(c)
 						if diag.PantryItemID != "" && s.OnLocatePantry != nil {

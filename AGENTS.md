@@ -65,11 +65,13 @@ Kandev 卡片与权威文档冲突时，不允许在实现中静默选择一方�
 
 ### UI 工作方法（强制）
 
-- 动任何界面之前先读 [`docs/product/design-system.md`](docs/product/design-system.md)：它规定了唯一 token 源、4 倍数间距、三档圆角、需求→组件对照表（Do/Don't）与文案规则。
-- 组件按语义选，不自造：先查 `github.com/oneo-me/onevra/source/components`（本地副本 `~/go/pkg/mod/github.com/oneo-me/onevra/source@*/components/`）与仓库既有包；同类控件全项目只有一种用法。
-- 通用颜色/圆角/控件高度取自 `internal/theme` 的 `Tokens`；字号用文本 token 或 `t.Rem`，间距用间距 token 或 `t.Space`；科学语义颜色只能复用 `docs/product/design-system.md` §1 登记的具名调色板；调用点不写字面值。
-- 需要新组件时，先确认仓库与 onevra 都没有等价实现，并在 `docs/product/design-system.md` 的组件表登记原因。
-- 视觉相关 PR 必须带 `## 设计一致性` 小节（用了哪些 token、复用了哪些组件、新增了什么及原因），规则 id 用 `UX-DESIGN`。
+- **动任何界面前必读** [`docs/product/design-system.md`](docs/product/design-system.md)：全部 UI 必须遵守统一 Token 源、严格 4px 栅格、四档圆角、90/10 极简信息层级与渲染态验收门禁，任何新改动不得回潮。
+- **单一 Token 源 & 严格 4px 栅格（活跃包零字面量）**：通用颜色、字号（`TextPage/TextSection/TextBody/TextData/TextMeta` 或 `t.Rem`）、间距（`Spacing4..48` 或 `t.Space(n)`，compact/default/comfortable 与缩放后一律对齐 4 的倍数）、偶数图标（`IconSm=16 / IconMd=18 / IconLg=20` + `IconBoxSize=24`）及四档圆角（`ControlRadius=6 / PanelRadius=12 / DialogRadius=14 / PillRadius=999`）必须全部取自 `internal/theme/theme.go` 的 `Tokens`；科学语义色只复用 §1 登记的具名调色板。活跃 UI 包内禁止 `ui.Hex`、`FontSize(数字)`、非零 `Padding(数字)` 和 `Radius(数字)`。
+- **图标光学对齐框**：行内、标题、设置项、列表与卡片图标统一使用 `kit.IconBox(c, tok, icon, color)`（固定 `24×24` 透明方框居中渲染 `18px` 图标），确保不同宽高比矢量图标中心对齐。
+- **去嵌套边框与废话文案（90/10 极简层级）**：90% 中性黑白灰纸面（主字 `#18181b` / 次字 `#71717a`）+ 10% 单一 `Accent`（每屏唯一 Primary CTA，禁渐变/霓虹/复杂阴影）。**禁止大框套小框、禁止列表行各自套边框卡片**——同类行统一放进单个分组容器并用 `1px` `tok.BorderSubtle` 发丝线或 4px 倍数留白分隔；**能用对齐和留白分清层级的地方，严禁堆叠标语、副标题或解释性描述文字**。
+- **按意图显隐控件 & 桌面端多级菜单安全三角区**：编辑手柄与行内次要按钮优先按悬停/聚焦显隐；桌面右键/弹出菜单及级联子菜单统一调用 `kit.ContextMenu` + `m.Submenu(...)`（内置 `120ms` 开启延时、`260ms` 关闭延时与 `pointInSafeTriangle` 安全三角区，禁止直接调用 `components.ContextMenu`）；移动端（`< 680dp` 或 `ios/android`）采用 Obsidian 风格全屏页面（两级设置页 / 顶部 `取消 | 标题 | 保存` 导航栏）与 `mobile.Sheet`，不照搬桌面弹窗。
+- **组件按语义选，不自造**：先查 `github.com/oneo-me/onevra/source/components` 与 `internal/uikit/kit` 等既有包；同类控件全项目只有一种用法；新增组件须先确认无等价实现并在 `docs/product/design-system.md` 登记原因。
+- **门禁 + 真实视觉截图验收（强制）**：修改 UI 后必须运行 `python scripts/ci/check_ui_hygiene.py` 通过（活跃包 0 违规 + 旧包基线棘轮），并且必须导出/检查真实视口渲染截图（桌面宽屏与 `402×874` 移动视口）核对折行、截断、留白与遮挡——严禁仅凭代码数值或单测 `HasText` 验收；视觉相关 PR 必须带 `## 设计一致性` 小节，规则 id 用 `UX-DESIGN`。
 
 ### 状态语义
 

@@ -608,40 +608,76 @@ func (v *View) renderParamTable(c *ui.Context, data map[string]any) {
 				newLabel := v.ensureWidgetDraft("pt:"+moduleID+":label", "")
 				newVal := v.ensureWidgetDraft("pt:"+moduleID+":val", "")
 				newUnit := v.ensureWidgetDraft("pt:"+moduleID+":unit", "")
-				ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing8), 0, 0, 0).
-					AlignItems(ui.Center).Children(func() {
-					ui.Box(c).FillWidth().Children(func() {
-						components.TextBox(c, newLabel, components.TextBoxOptions{}).Placeholder("新参数名（如 OD600）")
+				if isMobileAsterdocViewport(c, v) {
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing8), 0, 0, 0).Children(func() {
+						components.TextBox(c, newLabel, components.TextBoxOptions{}).Placeholder("新参数名（如 OD600）").FillWidth()
+						ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								components.TextBox(c, newVal, components.TextBoxOptions{}).Placeholder("计划值").FillWidth()
+							})
+							ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
+								components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位").FillWidth()
+							})
+							if components.Button(c, "添加参数", components.ButtonSecondary).Shrink(0).Clicked() &&
+								strings.TrimSpace(*newLabel) != "" && strings.TrimSpace(*newVal) != "" {
+								next := append([]map[string]any{}, rows...)
+								var typedVal any = strings.TrimSpace(*newVal)
+								if f, err := strconv.ParseFloat(strings.TrimSpace(*newVal), 64); err == nil {
+									typedVal = f
+								}
+								rowObj := map[string]any{
+									"key":           sanitizeIDFrag(*newLabel),
+									"label":         strings.TrimSpace(*newLabel),
+									"value":         typedVal,
+									"record_actual": true,
+								}
+								if strings.TrimSpace(*newUnit) != "" {
+									rowObj["unit"] = strings.TrimSpace(*newUnit)
+								}
+								next = append(next, rowObj)
+								v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+								*newLabel = ""
+								*newVal = ""
+								*newUnit = ""
+							}
+						})
 					})
-					ui.Box(c).Width(float32(tok.Spacing48)*2).Children(func() {
-						components.TextBox(c, newVal, components.TextBoxOptions{}).Placeholder("计划值")
+				} else {
+					ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing8), 0, 0, 0).
+						AlignItems(ui.Center).Children(func() {
+						ui.Box(c).FillWidth().Children(func() {
+							components.TextBox(c, newLabel, components.TextBoxOptions{}).Placeholder("新参数名（如 OD600）")
+						})
+						ui.Box(c).Width(float32(tok.Spacing48)*2).Children(func() {
+							components.TextBox(c, newVal, components.TextBoxOptions{}).Placeholder("计划值")
+						})
+						ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
+							components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位")
+						})
+						if components.Button(c, "添加参数", components.ButtonSecondary).Clicked() &&
+							strings.TrimSpace(*newLabel) != "" && strings.TrimSpace(*newVal) != "" {
+							next := append([]map[string]any{}, rows...)
+							var typedVal any = strings.TrimSpace(*newVal)
+							if f, err := strconv.ParseFloat(strings.TrimSpace(*newVal), 64); err == nil {
+								typedVal = f
+							}
+							rowObj := map[string]any{
+								"key":           sanitizeIDFrag(*newLabel),
+								"label":         strings.TrimSpace(*newLabel),
+								"value":         typedVal,
+								"record_actual": true,
+							}
+							if strings.TrimSpace(*newUnit) != "" {
+								rowObj["unit"] = strings.TrimSpace(*newUnit)
+							}
+							next = append(next, rowObj)
+							v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
+							*newLabel = ""
+							*newVal = ""
+							*newUnit = ""
+						}
 					})
-					ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
-						components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位")
-					})
-					if components.Button(c, "添加参数", components.ButtonSecondary).Clicked() &&
-						strings.TrimSpace(*newLabel) != "" && strings.TrimSpace(*newVal) != "" {
-						next := append([]map[string]any{}, rows...)
-						var typedVal any = strings.TrimSpace(*newVal)
-						if f, err := strconv.ParseFloat(strings.TrimSpace(*newVal), 64); err == nil {
-							typedVal = f
-						}
-						rowObj := map[string]any{
-							"key":           sanitizeIDFrag(*newLabel),
-							"label":         strings.TrimSpace(*newLabel),
-							"value":         typedVal,
-							"record_actual": true,
-						}
-						if strings.TrimSpace(*newUnit) != "" {
-							rowObj["unit"] = strings.TrimSpace(*newUnit)
-						}
-						next = append(next, rowObj)
-						v.emitAnyModuleEdit(moduleID, map[string]any{"rows": next})
-						*newLabel = ""
-						*newVal = ""
-						*newUnit = ""
-					}
-				})
+				}
 			}
 		})
 	})
@@ -675,7 +711,7 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 			}
 
 			rowBox := ui.Row(c.Key(fmt.Sprintf("live-pt:%s:%d:%s", moduleID, idx, key))).FillWidth().
-				Padding(2, float32(tok.Spacing4)).
+				Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).
 				Radius(float32(tok.ControlRadius)).
 				AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).
 				Transition(theme.AccordionTransition())
@@ -687,7 +723,11 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 			rowBox.Background(rowBox.AnimateColor("ptrow-bg", targetRowBg, theme.MotionSnappy))
 			rowBox.Children(func() {
 				// Column 1: Parameter label (+ optional pantry badge)
-				ui.Row(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				lblMinW := float32(tok.Spacing48) * 2.0
+				if isMobileAsterdocViewport(c, v) {
+					lblMinW = float32(tok.Spacing48) * 1.4
+				}
+				ui.Row(c).Grow(1).MinWidth(lblMinW).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					if editableDesign {
 						lblBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_lbl:%s:%d:%s", moduleID, idx, key), label)
 						ti := BorderlessTextInput(c, tok, lblBuf, float32(tok.TextBody), true, "参数名")
@@ -718,8 +758,8 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 					if editableDesign {
 						valBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_v:%s:%d:%s", moduleID, idx, key), valStr)
 						valW := float32(tok.Spacing48) * 3.8
-						if v.inPairedRow {
-							valW = float32(tok.Spacing48) * 2.2
+						if v.inPairedRow || isMobileAsterdocViewport(c, v) {
+							valW = float32(tok.Spacing48) * 2.0
 						}
 						ui.Box(c).Width(valW).Children(func() {
 							tb := BorderlessTextInput(c, tok, valBuf, float32(tok.TextData), true, "设定值").FontFeatures("tnum")
@@ -777,7 +817,11 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 				// Inline deviation ("实测/偏离") only shown when opened or already recorded
 				if *devOpenPtr {
 					actBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_act:%s:%d:%s", moduleID, idx, key), actualStr)
-					ui.Box(c.Key("pt-dev-box:"+moduleID+":"+key)).Width(float32(tok.Spacing48)*2.2).
+					devW := float32(tok.Spacing48) * 2.2
+					if touchMode {
+						devW = float32(tok.Spacing48) * 1.8
+					}
+					ui.Box(c.Key("pt-dev-box:"+moduleID+":"+key)).Width(devW).
 						Transition(theme.AccordionTransition()).Children(func() {
 						if !v.ReadOnly {
 							tb := BorderlessTextInput(c, tok, actBuf, float32(tok.TextMeta), false, "实测偏离值").FontFeatures("tnum")
@@ -1470,6 +1514,14 @@ func (v *View) renderDataTable(c *ui.Context, data map[string]any) {
 				return
 			}
 
+			if isMobileAsterdocViewport(c, v) {
+				v.renderMobileDataTableCards(c, tok, moduleID, cols, authoredRows, rowCount, extraRowsStr, extraRows, editableColPos, editableColKeys, interactiveRun)
+				if editableDesign {
+					v.renderDataTableAddColBar(c, tok, moduleID, cols)
+				}
+				return
+			}
+
 			// Column headers with unit & threshold pills
 			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
@@ -1730,66 +1782,268 @@ func valueKindLabel(kind string) string {
 	}
 }
 
+func (v *View) renderMobileDataTableCards(
+	c *ui.Context,
+	tok theme.Tokens,
+	moduleID string,
+	cols []map[string]any,
+	authoredRows []map[string]any,
+	rowCount int,
+	extraRowsStr *string,
+	extraRows int,
+	editableColPos map[string]int,
+	editableColKeys []string,
+	interactiveRun bool,
+) {
+	t := c.Theme()
+	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+		for rIdx := 0; rIdx < rowCount; rIdx++ {
+			rIdx := rIdx
+			var pre map[string]any
+			if rIdx < len(authoredRows) {
+				pre = authoredRows[rIdx]
+			}
+			rowVars := map[string]float64{}
+			for _, cm := range cols {
+				ckey := textValue(cm, "key")
+				if textValue(cm, "value_kind") == "formula" {
+					continue
+				}
+				rawCell := v.dataTableCellVal(moduleID, rIdx, ckey, pre)
+				if f, err := strconv.ParseFloat(strings.TrimSpace(rawCell), 64); err == nil {
+					rowVars[ckey] = f
+				}
+			}
+			sampleID := firstNonEmpty(v.dataTableCellVal(moduleID, rIdx, "sample_id", pre), fmt.Sprintf("row-%d", rIdx+1))
+
+			ui.Column(c.Key(fmt.Sprintf("mb-dt-card:%s:%d", moduleID, rIdx))).FillWidth().
+				Padding(t.Space(3)).
+				Radius(float32(tok.PanelRadius)).
+				Background(tok.Surface).Border(1, tok.Border).
+				Gap(t.Space(2)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					components.Badge(c, fmt.Sprintf("#%d", rIdx+1), components.BadgeOptions{Tone: components.BadgeNeutral})
+					ui.Text(c, sampleID).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+						Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				})
+				for _, cm := range cols {
+					ckey := textValue(cm, "key")
+					clabel := firstNonEmpty(textValue(cm, "label"), ckey)
+					cunit := textValue(cm, "unit")
+					vkind := textValue(cm, "value_kind")
+					minV, hasMin := numericValue(cm["min"])
+					maxV, hasMax := numericValue(cm["max"])
+					hdr := clabel
+					if cunit != "" {
+						hdr += " (" + cunit + ")"
+					}
+					if vkind == "formula" {
+						hdr = "fx " + hdr
+					}
+
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						ui.Text(c, hdr).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+							Width(float32(tok.Spacing48)*2.0).Shrink(0).SingleLine().Ellipsis("…")
+						ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+							if vkind == "formula" {
+								expr := textValue(cm, "formula")
+								res, err := EvalFormula(expr, rowVars)
+								if err != nil {
+									ui.Text(c, "—").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted).FontFeatures("tnum")
+								} else {
+									txt := formatNumber(round4(res))
+									if cunit != "" {
+										txt += " " + cunit
+									}
+									ui.Text(c, txt).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
+									if (hasMin && res < minV) || (hasMax && res > maxV) {
+										components.Badge(c, rangeWarningText(hasMin, minV, hasMax, maxV, cunit), components.BadgeOptions{Tone: components.BadgeWarning})
+									}
+								}
+								return
+							}
+
+							initStr := ""
+							if pre != nil && pre[ckey] != nil {
+								initStr = formatAnyValue(pre[ckey])
+							}
+							cellKey := v.cellDraftKey(moduleID, rIdx, ckey)
+							buf := v.ensureWidgetDraft(cellKey, initStr)
+							if v.TableCells != nil && v.TableCells[moduleID] != nil {
+								if saved, exists := v.TableCells[moduleID][cellKey]; exists {
+									*buf = saved
+								}
+							}
+							if interactiveRun {
+								tb := components.TextBox(c, buf, components.TextBoxOptions{}).Placeholder("输入").FillWidth()
+								tb.FocusBind(&v.FocusedTableCell, cellKey)
+								_ = extraRowsStr
+								_ = extraRows
+								_ = editableColPos
+								_ = editableColKeys
+								v.setTableCell(moduleID, cellKey, *buf)
+							} else {
+								ui.Text(c, firstNonEmpty(*buf, "—")).FontSize(float32(tok.TextData)).TextColor(tok.Text).FontFeatures("tnum").SingleLine().Ellipsis("…")
+							}
+							if vkind == "number" && strings.TrimSpace(*buf) != "" {
+								if numVal, err := strconv.ParseFloat(strings.TrimSpace(*buf), 64); err == nil {
+									if (hasMin && numVal < minV) || (hasMax && numVal > maxV) {
+										components.Badge(c, rangeWarningText(hasMin, minV, hasMax, maxV, cunit), components.BadgeOptions{Tone: components.BadgeWarning})
+									}
+								}
+							}
+						})
+					})
+				}
+
+				if v.Mode == ModeRun {
+					ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+						qKey := fmt.Sprintf("dt_qual:%s:%d", moduleID, rIdx)
+						qDraft := v.ensureWidgetDraft(qKey, "正常")
+						if interactiveRun {
+							qSel := components.Select(c, qDraft)
+							qSel.Trigger.Children(func() {
+								ui.Text(c, "读数: "+*qDraft).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+							qSel.Popup(func(panel ui.Element) {
+								for _, opt := range []string{"正常", "<LOD", ">ULOQ", "未检出"} {
+									opt := opt
+									qSel.Item(opt).Children(func() {
+										ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+									})
+								}
+							})
+						}
+						sStatus := v.SampleStatuses[sampleID]
+						if sStatus == "" {
+							sStatus = "正常"
+						}
+						sDraft := v.ensureWidgetDraft("dt_stat:"+moduleID+":"+sampleID, sStatus)
+						if interactiveRun {
+							sSel := components.Select(c, sDraft)
+							sSel.Trigger.Children(func() {
+								ui.Text(c, "样本: "+*sDraft).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							})
+							sSel.Popup(func(panel ui.Element) {
+								for _, opt := range []string{"正常", "QC剔除", "删失", "重做"} {
+									opt := opt
+									sSel.Item(opt).Children(func() {
+										ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+									})
+								}
+							})
+							if sSel.Trigger.Changed() && v.OnExcludeSample != nil {
+								v.OnExcludeSample(sampleID, *sDraft)
+							}
+						} else if sStatus != "正常" {
+							components.Badge(c, sStatus, components.BadgeOptions{Tone: components.BadgeWarning})
+						}
+					})
+				}
+			})
+		}
+	})
+}
+
 func (v *View) renderDataTableAddColBar(c *ui.Context, tok theme.Tokens, moduleID string, cols []map[string]any) {
 	newKey := v.ensureWidgetDraft("dt:"+moduleID+":ckey", "")
 	newLbl := v.ensureWidgetDraft("dt:"+moduleID+":clbl", "")
 	newKind := v.ensureWidgetDraft("dt:"+moduleID+":ckind", "number")
 	newUnit := v.ensureWidgetDraft("dt:"+moduleID+":cunit", "")
 	newFormula := v.ensureWidgetDraft("dt:"+moduleID+":cform", "")
+	addColAction := func() {
+		if strings.TrimSpace(*newLbl) == "" {
+			return
+		}
+		next := append([]map[string]any{}, cols...)
+		keyVal := strings.TrimSpace(*newKey)
+		if keyVal == "" {
+			keyVal = sanitizeIDFrag(*newLbl)
+		}
+		colObj := map[string]any{
+			"key":        keyVal,
+			"label":      strings.TrimSpace(*newLbl),
+			"value_kind": *newKind,
+		}
+		if strings.TrimSpace(*newUnit) != "" {
+			colObj["unit"] = strings.TrimSpace(*newUnit)
+		}
+		if *newKind == "formula" {
+			colObj["formula"] = strings.TrimSpace(*newFormula)
+		}
+		next = append(next, colObj)
+		v.emitAnyModuleEdit(moduleID, map[string]any{"columns": next})
+		*newLbl = ""
+		*newKey = ""
+		*newUnit = ""
+		*newFormula = ""
+	}
 	ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing8), 0, 0, 0).Children(func() {
-		ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-			ui.Box(c).Width(float32(tok.Spacing48)*3).Children(func() {
-				components.TextBox(c, newLbl, components.TextBoxOptions{}).Placeholder("列名（如菌落数）")
+		if isMobileAsterdocViewport(c, v) {
+			components.TextBox(c, newLbl, components.TextBoxOptions{}).Placeholder("列名（如菌落数）").FillWidth()
+			ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+				kSel := components.Select(c, newKind)
+				kSel.Trigger.Children(func() {
+					ui.Text(c, valueKindLabel(*newKind)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				})
+				kSel.Popup(func(panel ui.Element) {
+					for _, opt := range []string{"number", "text", "categorical", "formula"} {
+						opt := opt
+						kSel.Item(opt).Children(func() {
+							ui.Text(c, valueKindLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						})
+					}
+				})
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位").FillWidth()
+				})
 			})
-			kSel := components.Select(c, newKind)
-			kSel.Trigger.Children(func() {
-				ui.Text(c, valueKindLabel(*newKind)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+			ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					if *newKind == "formula" {
+						components.TextBox(c, newFormula, components.TextBoxOptions{}).Placeholder("公式，如 (d1+d2)/2").FillWidth()
+					} else {
+						components.TextBox(c, newKey, components.TextBoxOptions{}).Placeholder("变量代号（可选）").FillWidth()
+					}
+				})
+				if components.Button(c, "添加列", components.ButtonSecondary).Shrink(0).Clicked() {
+					addColAction()
+				}
 			})
-			kSel.Popup(func(panel ui.Element) {
-				for _, opt := range []string{"number", "text", "categorical", "formula"} {
-					opt := opt
-					kSel.Item(opt).Children(func() {
-						ui.Text(c, valueKindLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+		} else {
+			ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+				ui.Box(c).Width(float32(tok.Spacing48)*3).Children(func() {
+					components.TextBox(c, newLbl, components.TextBoxOptions{}).Placeholder("列名（如菌落数）")
+				})
+				kSel := components.Select(c, newKind)
+				kSel.Trigger.Children(func() {
+					ui.Text(c, valueKindLabel(*newKind)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+				})
+				kSel.Popup(func(panel ui.Element) {
+					for _, opt := range []string{"number", "text", "categorical", "formula"} {
+						opt := opt
+						kSel.Item(opt).Children(func() {
+							ui.Text(c, valueKindLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+						})
+					}
+				})
+				ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
+					components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位")
+				})
+				if *newKind == "formula" {
+					ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Children(func() {
+						components.TextBox(c, newFormula, components.TextBoxOptions{}).Placeholder("点下方列名或输公式，如 (d1+d2)/2")
+					})
+				} else {
+					ui.Box(c).Width(float32(tok.Spacing48)*2).Children(func() {
+						components.TextBox(c, newKey, components.TextBoxOptions{}).Placeholder("变量代号（可选）")
 					})
 				}
+				if components.Button(c, "添加列", components.ButtonSecondary).Clicked() {
+					addColAction()
+				}
 			})
-			ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
-				components.TextBox(c, newUnit, components.TextBoxOptions{}).Placeholder("单位")
-			})
-			if *newKind == "formula" {
-				ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Children(func() {
-					components.TextBox(c, newFormula, components.TextBoxOptions{}).Placeholder("点下方列名或输公式，如 (d1+d2)/2")
-				})
-			} else {
-				ui.Box(c).Width(float32(tok.Spacing48)*2).Children(func() {
-					components.TextBox(c, newKey, components.TextBoxOptions{}).Placeholder("变量代号（可选）")
-				})
-			}
-			if components.Button(c, "添加列", components.ButtonSecondary).Clicked() && strings.TrimSpace(*newLbl) != "" {
-				next := append([]map[string]any{}, cols...)
-				keyVal := strings.TrimSpace(*newKey)
-				if keyVal == "" {
-					keyVal = sanitizeIDFrag(*newLbl)
-				}
-				colObj := map[string]any{
-					"key":        keyVal,
-					"label":      strings.TrimSpace(*newLbl),
-					"value_kind": *newKind,
-				}
-				if strings.TrimSpace(*newUnit) != "" {
-					colObj["unit"] = strings.TrimSpace(*newUnit)
-				}
-				if *newKind == "formula" {
-					colObj["formula"] = strings.TrimSpace(*newFormula)
-				}
-				next = append(next, colObj)
-				v.emitAnyModuleEdit(moduleID, map[string]any{"columns": next})
-				*newLbl = ""
-				*newKey = ""
-				*newUnit = ""
-				*newFormula = ""
-			}
-		})
+		}
 		if *newKind == "formula" && len(cols) > 0 {
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 				ui.Text(c, "点选列插入：").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -1917,7 +2171,7 @@ func (v *View) renderDataTableMatrix(
 							Radius(float32(tok.ControlRadius)).Background(cellBg).Border(1, borderCol).
 							Gap(2).Children(func() {
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-								ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
+								ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(dotCol)
 								lbl := wID
 								if sid := pl.Samples[wID]; sid != "" && geom.Columns <= 12 {
 									rs := []rune(sid)

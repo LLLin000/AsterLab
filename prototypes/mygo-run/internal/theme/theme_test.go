@@ -81,4 +81,31 @@ func TestDesignTokens(t *testing.T) {
 	if dark.GhostHover.A == 0 || dark.TopHighlight.A == 0 || dark.BorderFocused != dark.Accent {
 		t.Fatalf("expected Zed-inspired interaction state & top highlight tokens in dark mode: %+v", dark)
 	}
+	if light.IconSm != 16 || light.IconMd != 18 || light.IconLg != 20 || light.IconBoxSize != 24 || light.PillRadius != 999 {
+		t.Fatalf("optical icon/box/pill tokens mismatch: %+v", light)
+	}
+
+	assert4pxGrid := func(label string, tk Tokens) {
+		for name, val := range map[string]int{
+			"Spacing4":    tk.Spacing4,
+			"Spacing8":    tk.Spacing8,
+			"Spacing12":   tk.Spacing12,
+			"Spacing16":   tk.Spacing16,
+			"Spacing24":   tk.Spacing24,
+			"Spacing32":   tk.Spacing32,
+			"Spacing48":   tk.Spacing48,
+			"IconBoxSize": tk.IconBoxSize,
+		} {
+			if val <= 0 || val%4 != 0 {
+				t.Fatalf("%s %s=%d violates strict 4px grid", label, name, val)
+			}
+		}
+	}
+	for _, sc := range []float32{0, 1.25} {
+		SetAccessibilityPrefs(sc, false)
+		for _, dn := range []string{DensityCompact, DensityDefault, DensityComfortable} {
+			SetActiveDensity(dn)
+			assert4pxGrid("scale="+dn, LightTokens())
+		}
+	}
 }

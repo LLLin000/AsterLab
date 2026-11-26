@@ -33,8 +33,8 @@ func Keycap(c *ui.Context, tok theme.Tokens, chord string) {
 						continue
 					}
 					ui.Row(c).
-						Padding(1, float32(tok.Spacing4)+1).
-						Radius(float32(tok.ControlRadius)-2).
+						Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).
+						Radius(float32(tok.ControlRadius)).
 						Background(tok.ElementBg).
 						Border(1, tok.Border).
 						Center().Children(func() {

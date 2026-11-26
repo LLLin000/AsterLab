@@ -554,30 +554,57 @@ func (v *View) renderCalculator(c *ui.Context, data map[string]any) {
 				})
 			}
 			if len(res.Rows) > 0 {
-				calcCols := []ui.TableColumn{
-					{ID: "item", Title: "分项", MinWidth: 140},
-					{ID: "amount", Title: "计算值", Width: float32(tok.Spacing48) * 2.5, Align: ui.End},
-					{ID: "note", Title: "计算说明", MinWidth: 160},
-				}
-				components.Table(c, nil, calcCols, func() {
-					for rIdx, row := range res.Rows {
-						rIdx, row := rIdx, row
-						amtStr := formatNumber(row.Amount)
-						if row.Unit != "" {
-							amtStr += " " + row.Unit
-						}
-						components.TableRow(c, rIdx, row.Label, false, func(col int) {
-							switch col {
-							case 0:
-								ui.Text(c, row.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
-							case 1:
-								ui.Text(c, amtStr).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum")
-							case 2:
-								ui.Text(c, firstNonEmpty(row.Note, "—")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				if isMobileAsterdocViewport(c, v) {
+					ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+						Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+						for rIdx, row := range res.Rows {
+							if rIdx > 0 {
+								ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 							}
-						})
+							amtStr := formatNumber(row.Amount)
+							if row.Unit != "" {
+								amtStr += " " + row.Unit
+							}
+							ui.Column(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+								Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Text(c, row.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+										Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+									ui.Text(c, amtStr).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).
+										FontFeatures("tnum").Shrink(0).SingleLine()
+								})
+								if strings.TrimSpace(row.Note) != "" {
+									ui.Text(c, row.Note).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								}
+							})
+						}
+					})
+				} else {
+					calcCols := []ui.TableColumn{
+						{ID: "item", Title: "分项", MinWidth: 140},
+						{ID: "amount", Title: "计算值", Width: float32(tok.Spacing48) * 2.5, Align: ui.End},
+						{ID: "note", Title: "计算说明", MinWidth: 160},
 					}
-				})
+					components.Table(c, nil, calcCols, func() {
+						for rIdx, row := range res.Rows {
+							rIdx, row := rIdx, row
+							amtStr := formatNumber(row.Amount)
+							if row.Unit != "" {
+								amtStr += " " + row.Unit
+							}
+							components.TableRow(c, rIdx, row.Label, false, func(col int) {
+								switch col {
+								case 0:
+									ui.Text(c, row.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+								case 1:
+									ui.Text(c, amtStr).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum")
+								case 2:
+									ui.Text(c, firstNonEmpty(row.Note, "—")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								}
+							})
+						}
+					})
+				}
 			}
 		})
 	})
@@ -1279,10 +1306,20 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 					runit := textValue(rm, "unit")
 					valStr := formatAnyValue(rm["value"])
 
+					mobileCalc := isMobileAsterdocViewport(c, v)
+					valBoxW := float32(tok.Spacing48) * 2.3
+					unitBoxW := float32(tok.Spacing48) * 1.5
+					if mobileCalc {
+						valBoxW = float32(tok.Spacing48) * 1.9
+						unitBoxW = float32(tok.Spacing48) * 1.25
+					}
 					rowBox := ui.Row(c.Key(fmt.Sprintf("calc-in:%s:%d", moduleID, idx))).FillWidth().
 						Padding(float32(tok.Spacing4)*1.25, float32(tok.Spacing8)).
 						Radius(float32(tok.ControlRadius)).
 						AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+					if mobileCalc {
+						rowBox.Wrap()
+					}
 					rowHover := rowBox.Hovered()
 					rowBg := ui.Transparent
 					if rowHover {
@@ -1395,7 +1432,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 
 						if isLinkedRef {
 							chipRow := ui.Row(c.Key(fmt.Sprintf("calc-link:%s:%d", moduleID, idx))).
-								Width(float32(tok.Spacing48)*2.3).Shrink(0).
+								Width(valBoxW).Shrink(0).
 								Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).
 								Radius(float32(tok.ControlRadius)).
 								Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35)).
@@ -1430,7 +1467,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								components.Tooltip(c, chipRow, linkTip)
 							}
 						} else {
-							ui.Box(c).Width(float32(tok.Spacing48)*2.3).Shrink(0).
+							ui.Box(c).Width(valBoxW).Shrink(0).
 								Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).
 								Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.BorderStrong.Alpha(0.55)).Children(func() {
 								if !v.ReadOnly {
@@ -1453,7 +1490,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						}
 
 						// Unit pill / input
-						ui.Box(c).Width(float32(tok.Spacing48)*1.5).Shrink(0).Children(func() {
+						ui.Box(c).Width(unitBoxW).Shrink(0).Children(func() {
 							if editableDesign {
 								ui.Box(c).FillWidth().Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).
 									Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border.Alpha(0.7)).Children(func() {
@@ -1534,9 +1571,15 @@ func (v *View) renderCalcQtyInput(c *ui.Context, moduleID string, data map[strin
 	tok := theme.GetTokens(c.Theme())
 	qv, qu, _ := quantityParts(data[field])
 	buf := v.ensureCalcScratch(moduleID, field, formatNumber(qv))
-	ui.Column(c).Width(float32(tok.Spacing48)*2.5).Gap(float32(tok.Spacing4)).Children(func() {
+	col := ui.Column(c).Gap(float32(tok.Spacing4))
+	if isMobileAsterdocViewport(c, v) {
+		col.FillWidth()
+	} else {
+		col.Width(float32(tok.Spacing48) * 2.5)
+	}
+	col.Children(func() {
 		ui.Text(c, label+" ("+qu+")").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(ui.KeyboardDecimal)
+		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(ui.KeyboardDecimal).FillWidth()
 	})
 }
 
@@ -1548,9 +1591,15 @@ func (v *View) renderCalcNumInput(c *ui.Context, moduleID, field, label string, 
 	if field == "steps_count" {
 		kb = ui.KeyboardNumber
 	}
-	ui.Column(c).Width(float32(tok.Spacing48)*2.2).Gap(float32(tok.Spacing4)).Children(func() {
+	col := ui.Column(c).Gap(float32(tok.Spacing4))
+	if isMobileAsterdocViewport(c, v) {
+		col.FillWidth()
+	} else {
+		col.Width(float32(tok.Spacing48) * 2.2)
+	}
+	col.Children(func() {
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(kb)
+		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(kb).FillWidth()
 	})
 }
 
@@ -1568,9 +1617,15 @@ func (v *View) calcScratchString(moduleID, field string) (string, bool) {
 func (v *View) renderCalcTextInput(c *ui.Context, moduleID, field, label, initVal string, width float32) {
 	tok := theme.GetTokens(c.Theme())
 	buf := v.ensureCalcScratch(moduleID, field, initVal)
-	ui.Column(c).Width(width).Gap(float32(tok.Spacing4)).Children(func() {
+	col := ui.Column(c).Gap(float32(tok.Spacing4))
+	if isMobileAsterdocViewport(c, v) {
+		col.FillWidth()
+	} else {
+		col.Width(width)
+	}
+	col.Children(func() {
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		components.TextBox(c, buf, components.TextBoxOptions{})
+		components.TextBox(c, buf, components.TextBoxOptions{}).FillWidth()
 	})
 }
 
@@ -1924,7 +1979,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 			hasClockAnchor := false
 			if editableDesign && inlineStatus == "idle" {
 				clkBtn := ui.ButtonBase(c.Key("tm-clk-btn:"+moduleID)).
-					Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated.Alpha(0.85)).Label("设置计时参数")
 				if *cfgOpen || clkBtn.Hovered() {
 					clkBtn.Background(tok.AccentSoftBg)
@@ -2793,51 +2848,93 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				if v.AssetZoom <= 0 {
 					v.AssetZoom = 1
 				}
-				ui.Box(c.Key("asset-dlg:"+moduleID)).Children(func() {
-					components.Dialog(c, &v.assetOpen, components.DialogOptions{Label: firstNonEmpty(exp.Label, exp.AssetID)}, func(panel ui.Element) {
-					panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
-						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Text(c, firstNonEmpty(exp.Label, exp.AssetID)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-							if exp.WellID != "" {
-								components.Badge(c, fmt.Sprintf("%s #%d", exp.WellID, exp.FovIndex))
+				if isMobileAsterdocViewport(c, v) {
+					assetTitle := firstNonEmpty(exp.Label, exp.AssetID)
+					renderResponsiveLightboxPage(c, "mb-asset-dlg:"+moduleID, tok, assetTitle, func() {
+						v.assetOpen = false
+					}, func() {
+						if exp.WellID != "" {
+							components.Badge(c, fmt.Sprintf("%s #%d", exp.WellID, exp.FovIndex))
+						}
+						for _, z := range []float32{1.0, 1.5, 2.0} {
+							z := z
+							style := components.ButtonOutline
+							if v.AssetZoom == z {
+								style = components.ButtonSecondary
 							}
-							ui.Spacer(c)
-							for _, z := range []float32{1.0, 1.5, 2.0} {
-								z := z
-								style := components.ButtonOutline
-								if v.AssetZoom == z {
-									style = components.ButtonSecondary
-								}
-								if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
-									v.AssetZoom = z
-								}
+							if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+								v.AssetZoom = z
 							}
-							if v.OnOpenExternalAsset != nil {
-								if components.Button(c, "系统打开", components.ButtonOutline).Clicked() {
-									v.OnOpenExternalAsset(exp)
-								}
+						}
+						if v.OnOpenExternalAsset != nil {
+							if components.Button(c, "系统打开", components.ButtonOutline).Clicked() {
+								v.OnOpenExternalAsset(exp)
 							}
-							if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-								v.assetOpen = false
-							}
-						})
+						}
+					}, func(maxCanvasH float32) {
 						if resolvedExp := resolveFigurePath(v.BaseDir, exp.FilePath); resolvedExp != "" {
 							imgSrc, errText := v.cachedImageFile(resolvedExp)
 							if errText == "" && imgSrc != nil {
-								ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
-									ui.Image(c, imgSrc).Height(300 * v.AssetZoom)
+								ui.ScrollBoth(c).FillWidth().MaxHeight(maxCanvasH).Children(func() {
+									ui.Image(c, imgSrc).Height(260 * v.AssetZoom)
 								})
 							} else {
 								ui.Text(c, "文件预览不可用："+firstNonEmpty(errText, resolvedExp)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 							}
 						}
+					}, func() {
 						if exp.AssetID != "" {
 							ui.Text(c, fmt.Sprintf("资产 ID: %s · 路径: %s", exp.AssetID, exp.FilePath)).
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						}
 					})
-				})
-				})
+				} else {
+					ui.Box(c.Key("asset-dlg:"+moduleID)).Children(func() {
+						components.Dialog(c, &v.assetOpen, components.DialogOptions{Label: firstNonEmpty(exp.Label, exp.AssetID)}, func(panel ui.Element) {
+						panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+							ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Text(c, firstNonEmpty(exp.Label, exp.AssetID)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+								if exp.WellID != "" {
+									components.Badge(c, fmt.Sprintf("%s #%d", exp.WellID, exp.FovIndex))
+								}
+								ui.Spacer(c)
+								for _, z := range []float32{1.0, 1.5, 2.0} {
+									z := z
+									style := components.ButtonOutline
+									if v.AssetZoom == z {
+										style = components.ButtonSecondary
+									}
+									if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+										v.AssetZoom = z
+									}
+								}
+								if v.OnOpenExternalAsset != nil {
+									if components.Button(c, "系统打开", components.ButtonOutline).Clicked() {
+										v.OnOpenExternalAsset(exp)
+									}
+								}
+								if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+									v.assetOpen = false
+								}
+							})
+							if resolvedExp := resolveFigurePath(v.BaseDir, exp.FilePath); resolvedExp != "" {
+								imgSrc, errText := v.cachedImageFile(resolvedExp)
+								if errText == "" && imgSrc != nil {
+									ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+										ui.Image(c, imgSrc).Height(300 * v.AssetZoom)
+									})
+								} else {
+									ui.Text(c, "文件预览不可用："+firstNonEmpty(errText, resolvedExp)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								}
+							}
+							if exp.AssetID != "" {
+								ui.Text(c, fmt.Sprintf("资产 ID: %s · 路径: %s", exp.AssetID, exp.FilePath)).
+									FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							}
+						})
+					})
+					})
+				}
 			}
 		})
 	}

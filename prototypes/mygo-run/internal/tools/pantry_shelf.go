@@ -1199,6 +1199,21 @@ func renderPantryTableView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 }
 
 func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
+	t := c.Theme()
+	tok := theme.GetTokens(t)
+	title := "新增储藏室试剂"
+	if w.PantryID != "" {
+		title = "试剂档案 · " + firstNonEmptyStr(w.PantryName, "详情与说明书")
+	}
+	if isMobileToolsLayout(c) {
+		if !w.PantryDialogOpen {
+			return
+		}
+		ui.Overlay(c, func() {
+			w.renderMobilePantryDetailPage(c, tok, title)
+		})
+		return
+	}
 	if !w.PantryDialogOpen {
 		ui.Box(c.Key("pantry-detail-dlg")).Children(func() {
 			components.Dialog(c, &w.PantryDialogOpen, components.DialogOptions{
@@ -1206,12 +1221,6 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 			}, nil)
 		})
 		return
-	}
-	t := c.Theme()
-	tok := theme.GetTokens(t)
-	title := "新增储藏室试剂"
-	if w.PantryID != "" {
-		title = "试剂档案 · " + firstNonEmptyStr(w.PantryName, "详情与说明书")
 	}
 
 		ui.Box(c.Key("pantry-detail-dlg")).Children(func() {
@@ -1288,7 +1297,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 						ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(2)).Children(func() {
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 								ui.Text(c, "条目类型").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-								ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+								ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 									Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
 									for _, opt := range []struct{ key, lbl string }{
 										{"reagent", "试剂 / 耗材"},
@@ -1337,7 +1346,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 										// NOTE: Do NOT use components.Tabs inside components.Dialog — Onevra's
 										// Tabs.Draw captures a frame-local ui.Element for slideBehind(), which
 										// panics ("element from pass N used in pass M") during Dialog's exit transition.
-										ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+										ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 											Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
 											for idx, lbl := range []string{"未开封", "已开封", "已用尽"} {
 												idx, lbl := idx, lbl
@@ -1362,7 +1371,7 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 								} else {
 									ui.Column(c).Gap(t.Space(1)).Children(func() {
 										ui.Text(c, "样本类别").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-										ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+										ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 											Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
 											for _, sk := range []string{"细胞株", "菌株", "质粒", "组织"} {
 												sk := sk
@@ -1790,6 +1799,502 @@ func (w *Workspace) renderPantryDetailDialog(c *ui.Context) {
 			})
 		})
 	})
+	})
+}
+
+func (w *Workspace) renderMobilePantryDetailPage(c *ui.Context, tok theme.Tokens, title string) {
+	t := c.Theme()
+	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-rg-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		// Full-Screen Form Navigation Bar: Cancel | Title | Primary Save
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("mb-pantry-dlg-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+				w.PantryDialogOpen = false
+				w.pantryConfirmDel = false
+				w.pantryDialogErr = ""
+			}
+			ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if components.Button(c.Key("mb-pantry-dlg-save"), "保存试剂档案", components.ButtonPrimary).Shrink(0).Clicked() {
+				_ = w.SavePantryDetail()
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		// Clipped Single-Column Scroll Body
+		ui.Scroll(c.Key("mb-rg-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				isBio := w.pantryDraftMeta.ItemType == "biosample"
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+					ui.Text(c, "台账状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+					if w.PantryID != "" {
+						if curItem, ok := findPantryItemByID(w.Pantry.Items, w.PantryID); ok {
+							kit.Badge(c, pantryItemStatus(curItem), components.BadgeOptions{Tone: detailStatusTone(curItem.Status)})
+						} else {
+							kit.Badge(c, "在库试剂", components.BadgeOptions{Tone: components.BadgeNeutral})
+						}
+					} else {
+						kit.Badge(c, "新试剂上架", components.BadgeOptions{Tone: components.BadgeAccent})
+					}
+				})
+
+					// 1. Compact Mobile Sticker + Identity Card
+					ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+							customImg := w.loadCustomStickerImage(w.pantryDraftMeta.CustomStickerRel)
+							labsticker.RenderSticker(c, w.pantryDraftMeta.VesselID, customImg, labsticker.StickerOptions{
+								TargetHeightDIP: 56,
+								BorderDIP:       3.5,
+								Exhausted:       w.pantryStatusIdx == 2,
+							})
+							ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+								if spec, ok := labsticker.Lookup(w.pantryDraftMeta.VesselID); ok {
+									ui.Text(c, spec.Title).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+								}
+								btnLabel := "更换器皿贴纸"
+								if w.pantryPickerOpen {
+									btnLabel = "收起贴纸库"
+								}
+								if components.Button(c.Key("mb-rg-sticker"), btnLabel, components.ButtonSecondary).Clicked() {
+									w.pantryPickerOpen = !w.pantryPickerOpen
+								}
+							})
+						})
+
+						if w.pantryPickerOpen {
+							ui.Column(c).FillWidth().Padding(t.Space(2)).Radius(float32(tok.ControlRadius)).
+								Background(tok.Surface).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+									ui.Text(c, "选择容器样式").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+									if components.Button(c.Key("mb-rg-custom-stk"), "上传自定义图片", components.ButtonGhost).Clicked() && w.Callbacks.PickStickerImage != nil {
+										if p, err := w.Callbacks.PickStickerImage(); err == nil && p != "" {
+											if err := w.SetDraftCustomSticker(p); err != nil {
+												w.pantryDialogErr = err.Error()
+											}
+										}
+									}
+								})
+								specs := labsticker.AllVessels()
+								const cols = 3
+								for start := 0; start < len(specs); start += cols {
+									end := min(start+cols, len(specs))
+									ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+										for _, spec := range specs[start:end] {
+											spec := spec
+											chosen := w.pantryDraftMeta.CustomStickerRel == "" && w.pantryDraftMeta.VesselID == spec.ID
+											bg, bd := tok.Elevated, tok.Border
+											if chosen {
+												bg, bd = tok.AccentSoftBg, tok.Accent
+											}
+											tile := ui.ButtonBase(c.Key("mb-pick-vessel-"+string(spec.ID))).Label("选用 "+spec.Title).
+												Grow(1).Basis(0).MinWidth(0).Padding(t.Space(1)).
+												Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bd).
+												OnClick(func() {
+													w.SelectDraftVessel(spec.ID)
+												})
+											tile.Children(func() {
+												ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+													labsticker.RenderSticker(c, spec.ID, nil, labsticker.StickerOptions{
+														TargetHeightDIP: 36,
+														BorderDIP:       3.0,
+													})
+													ui.Text(c, spec.Title).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+														SingleLine().Ellipsis("…").MinWidth(0)
+												})
+											})
+										}
+									})
+								}
+							})
+						}
+
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							ui.Text(c, "条目类型").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+								Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+								for _, opt := range []struct{ key, lbl string }{
+									{"reagent", "试剂 / 耗材"},
+									{"biosample", "生物样本"},
+								} {
+									opt := opt
+									active := (opt.key == "biosample") == isBio
+									bg, fg := ui.Transparent, tok.TextMuted
+									if active {
+										bg, fg = tok.AccentSoftBg, tok.Accent
+									}
+									btn := ui.ButtonBase(c.Key("mb-pantry-type-"+opt.key)).Label(opt.lbl).
+										Grow(1).Basis(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius) - 1).Background(bg).Center().
+										OnClick(func() {
+											w.pantryDraftMeta.ItemType = opt.key
+											if opt.key == "biosample" && w.pantryDraftMeta.SampleKind == "" {
+												w.pantryDraftMeta.SampleKind = "细胞株"
+											}
+										})
+									btn.Children(func() {
+										txt := ui.Text(c, opt.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+										if active {
+											txt.Bold()
+										}
+									})
+								}
+							})
+						})
+
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							nameLbl := "试剂 / 耗材名称 *"
+							namePH := "例如：SYBR Green Premix Ex Taq (2×)"
+							if isBio {
+								nameLbl = "细胞株 / 菌株 / 样本名称 *"
+								namePH = "例如：HUVEC / S. aureus ATCC 25923"
+							}
+							ui.Text(c, nameLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &w.PantryName, components.TextBoxOptions{}).Placeholder(namePH).FillWidth()
+						})
+
+						if !isBio {
+							ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "在库状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+									Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+									for idx, lbl := range []string{"未开封", "已开封", "已用尽"} {
+										idx, lbl := idx, lbl
+										active := w.pantryStatusIdx == idx
+										bg, fg := ui.Transparent, tok.TextMuted
+										if active {
+											bg, fg = tok.AccentSoftBg, tok.Accent
+										}
+										seg := ui.ButtonBase(c.Key(fmt.Sprintf("mb-pantry-status-%d", idx))).Label(lbl).
+											Grow(1).Basis(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+											Radius(float32(tok.ControlRadius) - 1).Background(bg).Center().
+											OnClick(func() { w.pantryStatusIdx = idx })
+										seg.Children(func() {
+											txt := ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+											if active {
+												txt.Bold()
+											}
+										})
+									}
+								})
+							})
+							ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "品牌与货号 (Catalog #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+									components.TextBox(c, &w.pantryDraftMeta.CatalogNo, components.TextBoxOptions{}).Placeholder("如 Takara RR820A").FillWidth()
+								})
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "批次号 (Lot #)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+									components.TextBox(c, &w.pantryDraftMeta.LotNo, components.TextBoxOptions{}).Placeholder("如 AJF1042A").FillWidth()
+								})
+							})
+							ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "货架标签说明").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.pantryDraftMeta.VolumeNote, components.TextBoxOptions{}).Placeholder("如 2 mL · 余 40%").FillWidth()
+							})
+						} else {
+							ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "样本类别").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+									Background(tok.Surface).Border(1, tok.Border).Gap(2).Children(func() {
+									for _, sk := range []string{"细胞株", "菌株", "质粒", "组织"} {
+										sk := sk
+										active := w.pantryDraftMeta.SampleKind == sk
+										bg, fg := ui.Transparent, tok.TextMuted
+										if active {
+											bg, fg = tok.AccentSoftBg, tok.Accent
+										}
+										seg := ui.ButtonBase(c.Key("mb-pantry-sk-"+sk)).Label(sk).
+											Grow(1).Basis(0).Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+											Radius(float32(tok.ControlRadius) - 1).Background(bg).Center().
+											OnClick(func() { w.pantryDraftMeta.SampleKind = sk })
+										seg.Children(func() {
+											txt := ui.Text(c, sk).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+											if active {
+												txt.Bold()
+											}
+										})
+									}
+								})
+							})
+							ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "代次 (Passage)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.pantryDraftMeta.Passage, components.TextBoxOptions{}).Placeholder("如 P4").FillWidth()
+								})
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "冻存人 / 来源").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.pantryDraftMeta.Operator, components.TextBoxOptions{}).Placeholder("如 ATCC").FillWidth()
+								})
+							})
+							ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "冻存液 / 保护体系").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.pantryDraftMeta.CryoMedium, components.TextBoxOptions{}).Placeholder("如 90% FBS + 10% DMSO").FillWidth()
+								})
+								ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+									ui.Text(c, "浓度 / 细胞数").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+									components.TextBox(c, &w.pantryDraftMeta.Concentration, components.TextBoxOptions{}).Placeholder("如 1×10⁶ cells/mL").FillWidth()
+								})
+							})
+						}
+					})
+
+					// 2. Storage Location & Dates
+					w.EnsurePantryBoxesLoaded()
+					activeBox, placedInBox := w.FindPantryBox(w.pantryDraftMeta.BoxID)
+					if placedInBox {
+						w.PantryLocation = FormatBoxLocation(activeBox.ZoneKey, activeBox.Name, w.pantryDraftMeta.BoxSlot)
+					}
+					ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+						secTitle := "存放位置与效期记录"
+						if placedInBox {
+							secTitle = "盒内定位与效期记录"
+						}
+						ui.Text(c, secTitle).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+						if placedInBox {
+							components.Badge(c, fmt.Sprintf("%s · %s · 孔位 %s", ZoneDisplayPrefix(activeBox.ZoneKey), activeBox.Name, firstNonEmptyStr(w.pantryDraftMeta.BoxSlot, "未选")), components.BadgeOptions{Tone: components.BadgeAccent})
+						} else {
+							curZoneKey := ""
+							if strings.TrimSpace(w.PantryLocation) != "" {
+								curZoneKey, _, _ = pantryZoneCategory(w.PantryLocation)
+							}
+							ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).Children(func() {
+								for _, zp := range []struct{ zoneKey, preset string }{
+									{"-80", "-80°C"},
+									{"-20", "-20°C 酶盒"},
+									{"4C", "4°C 冷藏架"},
+									{"ambient", "常温避光"},
+								} {
+									zp := zp
+									variant := components.ButtonGhost
+									if curZoneKey == zp.zoneKey {
+										variant = components.ButtonSecondary
+									}
+									if components.Button(c, zp.preset, variant).Clicked() {
+										w.PantryLocation = zp.preset
+									}
+								}
+							})
+							ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "存放柜层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.PantryLocation, components.TextBoxOptions{}).
+									Placeholder("点击上方温区或填写位置").FillWidth()
+							})
+						}
+						ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+							ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "购入日期").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.PantryPurchasedOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+							})
+							ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "开封日期").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.PantryOpenedOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+							})
+						})
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							ui.Text(c, "保质期 (天)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							components.TextBox(c, &w.PantryShelfLifeDays, components.TextBoxOptions{}).Placeholder("365").FillWidth()
+						})
+						if len(w.PantryBoxes) > 0 {
+							ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "放入收纳盒 / 离心管架（可选）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								boxSel := components.Select(c, &w.pantryDraftMeta.BoxID)
+								boxSel.Trigger.FillWidth().Children(func() {
+									lbl := "独立摆放（不放入盒子）"
+									if bx, ok := w.FindPantryBox(w.pantryDraftMeta.BoxID); ok {
+										lbl = fmt.Sprintf("%s · %s (%d×%d)", ZoneDisplayPrefix(bx.ZoneKey), bx.Name, bx.Rows, bx.Cols)
+									}
+									ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+								})
+								boxSel.Popup(func(panel ui.Element) {
+									ui.Scroll(c).FillWidth().MaxHeight(float32(tok.Spacing48) * 5.2).Children(func() {
+										ui.Column(c).FillWidth().Gap(2).Children(func() {
+											noneItem := boxSel.Item("")
+											noneItem.Children(func() {
+												ui.Text(c, "独立摆放（不放入盒子）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+											})
+											if noneItem.Clicked() {
+												w.pantryDraftMeta.BoxID = ""
+												w.pantryDraftMeta.BoxSlot = ""
+												w.pantryDraftMeta.BoxSlots = nil
+											}
+											for _, bx := range w.PantryBoxes {
+												bx := bx
+												it := boxSel.Item(bx.ID)
+												it.Children(func() {
+													ui.Text(c, fmt.Sprintf("%s · %s (%d×%d)", ZoneDisplayPrefix(bx.ZoneKey), bx.Name, bx.Rows, bx.Cols)).
+														FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+												})
+												if it.Clicked() {
+													w.pantryDraftMeta.BoxID = bx.ID
+													if w.pantryDraftMeta.BoxSlot == "" {
+														w.pantryDraftMeta.BoxSlot = w.FirstEmptyBoxSlot(bx)
+													}
+													w.PantryLocation = FormatBoxLocation(bx.ZoneKey, bx.Name, w.pantryDraftMeta.BoxSlot)
+												}
+											}
+										})
+									})
+								})
+							})
+							if bx, ok := w.FindPantryBox(w.pantryDraftMeta.BoxID); ok {
+								ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
+									ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+										ui.Text(c, "盒内孔位").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+										components.TextBox(c, &w.pantryDraftMeta.BoxSlot, components.TextBoxOptions{}).Placeholder("如 C2").FillWidth()
+									})
+									if components.Button(c.Key("mb-rg-pick-slot"), "选空位", components.ButtonSecondary).Clicked() {
+										if free := w.FirstEmptyBoxSlot(bx); free != "" {
+											w.pantryDraftMeta.BoxSlot = free
+											w.PantryLocation = FormatBoxLocation(bx.ZoneKey, bx.Name, free)
+										}
+									}
+								})
+							}
+						}
+					})
+
+					// 3. Manuals & Vendor URL
+					ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Icon(c, lucide.FileText()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+							ui.Text(c, "说明书与产品网址").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+							if len(w.pantryDraftMeta.Manuals) > 0 {
+								components.Badge(c, fmt.Sprintf("%d 份文档", len(w.pantryDraftMeta.Manuals)), components.BadgeOptions{Tone: components.BadgeAccent})
+							}
+						})
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								components.TextBox(c, &w.pantryDraftMeta.ProductURL, components.TextBoxOptions{
+									LeadingIcon: lucide.Globe(),
+								}).Placeholder("官网产品页链接（https://...）").FillWidth()
+							})
+							if components.Button(c.Key("mb-rg-open-url"), "打开网页", components.ButtonSecondary).Shrink(0).Clicked() {
+								_ = w.ValidateAndOpenProductURL(w.pantryDraftMeta.ProductURL)
+							}
+						})
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Text(c, "说明书 / COA / SDS (PDF · 图片)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+							if components.Button(c.Key("mb-rg-upload"), "上传说明书", components.ButtonSecondary).Clicked() && w.Callbacks.PickManualFiles != nil {
+								if paths, err := w.Callbacks.PickManualFiles(); err == nil && len(paths) > 0 {
+									_ = w.AttachManualFiles(paths)
+								}
+							}
+						})
+						for _, manual := range w.pantryDraftMeta.Manuals {
+							manual := manual
+							ui.Row(c).FillWidth().Padding(t.Space(2)).
+								Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border).
+								AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+								components.FileIcon(c, manual.FileName)
+								ui.Text(c, manual.FileName).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).
+									Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+								if components.Button(c, "查阅", components.ButtonGhost).Clicked() {
+									_ = w.OpenManualFile(manual)
+								}
+								if components.IconButton(c, lucide.Trash(), "移除说明书", components.IconButtonCompact).Clicked() {
+									w.RemoveManualFile(manual.ID)
+								}
+							})
+						}
+					})
+
+					// 4. Stock Ledger
+					if w.pantryDraftMeta.QtyUnit == "" {
+						w.pantryDraftMeta.QtyUnit = "mL"
+					}
+					ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Icon(c, lucide.Gauge()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+							ui.Text(c, "库存余量、计划补货与领用流水").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+							if w.pantryDraftMeta.LowStockThreshold > 0 && w.pantryDraftMeta.RemainingQty <= w.pantryDraftMeta.LowStockThreshold {
+								kit.Badge(c, "低库存预警", components.BadgeOptions{Tone: components.BadgeWarning})
+							}
+						})
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
+							ui.Column(c).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "当前余量").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								kit.ScrubNumber(c, "mb-rg-rem-qty", tok, &w.pantryDraftMeta.RemainingQty, kit.ScrubOptions{
+									Unit: w.pantryDraftMeta.QtyUnit, Min: 0, Max: 100000, Step: 0.5, Decimals: 1, Width: float32(tok.Spacing48) * 2.8,
+								})
+							})
+							ui.Column(c).Width(float32(tok.Spacing48)*1.6).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "单位").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.pantryDraftMeta.QtyUnit, components.TextBoxOptions{}).Placeholder("mL").FillWidth()
+							})
+							ui.Column(c).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "低库存警戒线").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								kit.ScrubNumber(c, "mb-rg-low-thr", tok, &w.pantryDraftMeta.LowStockThreshold, kit.ScrubOptions{
+									Unit: w.pantryDraftMeta.QtyUnit, Min: 0, Max: 10000, Step: 0.5, Decimals: 1, Width: float32(tok.Spacing48) * 2.8,
+								})
+							})
+							ui.Column(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.6).Gap(t.Space(1)).Children(func() {
+								ui.Text(c, "计划补货 (日历)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								components.TextBox(c, &w.pantryDraftMeta.RestockBy, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+							})
+						})
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							if components.Button(c.Key("mb-rg-tx-out"), "- 记领用 1 份", components.ButtonSecondary).Clicked() {
+								reagent.ApplyTransaction(&w.pantryDraftMeta.RemainingQty, &w.pantryDraftMeta.StockLedger, reagent.StockTx{
+									Kind: reagent.TxOut, Delta: -1, Unit: w.pantryDraftMeta.QtyUnit, Note: "实验领用",
+								})
+							}
+							if components.Button(c.Key("mb-rg-tx-in"), "+ 记入库 5 份", components.ButtonSecondary).Clicked() {
+								reagent.ApplyTransaction(&w.pantryDraftMeta.RemainingQty, &w.pantryDraftMeta.StockLedger, reagent.StockTx{
+									Kind: reagent.TxIn, Delta: 5, Unit: w.pantryDraftMeta.QtyUnit, Note: "采购入库",
+								})
+							}
+						})
+					})
+
+					// 5. Notes
+					ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "配制与存放备注").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.pantryDraftMeta.Notes, components.TextBoxOptions{}).
+							Placeholder("如分装体积、避免反复冻融…").FillWidth()
+					})
+
+					if w.pantryDialogErr != "" {
+						ui.Row(c).FillWidth().Padding(t.Space(2), t.Space(3)).
+							Radius(float32(tok.ControlRadius)).Background(tok.DangerBg).Border(1, tok.Danger).Children(func() {
+							ui.Text(c, w.pantryDialogErr).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+						})
+					}
+
+					if w.PantryID != "" {
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							if !w.pantryConfirmDel {
+								if components.Button(c, "删除试剂", components.ButtonGhost).Clicked() {
+									w.pantryConfirmDel = true
+								}
+							} else {
+								ui.Text(c, "确认从台账移除？").FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText)
+								if components.Button(c, "确认删除", components.ButtonSecondary).Clicked() {
+									if it, ok := findPantryItemByID(w.Pantry.Items, w.PantryID); ok {
+										w.DeletePantry(it)
+									}
+									w.PantryDialogOpen = false
+									w.pantryConfirmDel = false
+								}
+								if components.Button(c.Key("mb-pantry-del-cancel"), "取消", components.ButtonGhost).Clicked() {
+									w.pantryConfirmDel = false
+								}
+							}
+						})
+					}
+				})
+		})
 	})
 }
 

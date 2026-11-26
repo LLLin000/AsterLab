@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
@@ -567,15 +568,34 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		}
 	}
 
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		kit.SectionHeader(c, tok, lucide.PawPrint(), "动物房 · 笼卡与实验动物台账",
-			fmt.Sprintf("%d 笼 · %d 只/尾", totalCages, totalAnimals), func() {
-				components.Tabs(c, &w.vivariumViewTab, components.TabsSegmented, "笼架视图", "动物台账")
-				if components.Button(c, "+ 新建笼卡", components.ButtonPrimary).Clicked() {
+	mobileLayout := isMobileToolsLayout(c)
+	if mobileLayout {
+		t := c.Theme()
+		ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				kit.IconBox(c, tok, lucide.PawPrint(), tok.Accent)
+				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+					ui.Text(c, "动物房").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+					ui.Text(c, fmt.Sprintf("%d 笼 · %d 只/尾", totalCages, totalAnimals)).
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+				})
+				if components.Button(c, "+ 新建笼卡", components.ButtonPrimary).Shrink(0).Clicked() {
 					w.OpenNewVivariumDialog()
 				}
 			})
-	})
+			components.Tabs(c, &w.vivariumViewTab, components.TabsSegmented, "笼架视图", "动物台账")
+		})
+	} else {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			kit.SectionHeader(c, tok, lucide.PawPrint(), "动物房 · 笼卡与实验动物台账",
+				fmt.Sprintf("%d 笼 · %d 只/尾", totalCages, totalAnimals), func() {
+					components.Tabs(c, &w.vivariumViewTab, components.TabsSegmented, "笼架视图", "动物台账")
+					if components.Button(c, "+ 新建笼卡", components.ButtonPrimary).Clicked() {
+						w.OpenNewVivariumDialog()
+					}
+				})
+		})
+	}
 
 	// Twenty/Plane-style composable FilterBar with Saved Quick Views + multi-condition pills
 	speciesOpts := make([]kit.FilterOption, 0, len(labsticker.AllAnimals()))
@@ -644,6 +664,10 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	}
 
 	if w.vivariumViewTab == 1 {
+		if mobileLayout {
+			renderMobileVivariumLedgerList(c, w, tok, filtered)
+			return
+		}
 		renderVivariumTableView(c, w, tok, filtered)
 		return
 	}
@@ -660,6 +684,37 @@ func renderVivariumView(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	}
 
 	now := time.Now()
+	if mobileLayout {
+		t := c.Theme()
+		for _, g := range gradeOrder {
+			list := buckets[g]
+			if len(list) == 0 {
+				continue
+			}
+			sort.SliceStable(list, func(i, j int) bool {
+				return list[i].CageCode < list[j].CageCode
+			})
+			ui.Column(c.Key("mb-viv-tier-" + g)).FillWidth().Gap(t.Space(2)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					kit.IconBox(c, tok, lucide.Building(), tok.Accent)
+					ui.Text(c, vivariumGradeLabel(g)).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+						Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					components.Badge(c, fmt.Sprintf("%d 笼", len(list)), components.BadgeOptions{Tone: components.BadgeNeutral})
+				})
+				ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+					Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+					for i, cg := range list {
+						cg := cg
+						if i > 0 {
+							ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+						}
+						renderMobileVivariumCageRow(c, w, tok, cg, now)
+					}
+				})
+			})
+		}
+		return
+	}
 	for _, g := range gradeOrder {
 		list := buckets[g]
 		if len(list) == 0 {
@@ -892,13 +947,18 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 	welfare := VivariumWelfareReport(*cg)
 	densityWarn := welfare.DensityWarning
 
+	mobileLayout := isMobileToolsLayout(c)
 	kit.SidePeek(c, "vivarium-sidepeek", tok, &w.VivariumPeekOpen, kit.SidePeekOptions{
 		Title:    fmt.Sprintf("%s · %s", cg.CageCode, cg.Strain),
 		Subtitle: fmt.Sprintf("%s · %s · %s", spec.Title, vivariumGradeLabel(cg.FacilityGrade), firstNonEmptyStr(cg.Room, "未分配房间")),
 		Icon:     lucide.PawPrint(),
 		HeaderActions: func() {
 			kit.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
-			if components.Button(c, "完整弹窗编辑", components.ButtonSecondary).Clicked() {
+			editLbl := "完整弹窗编辑"
+			if mobileLayout {
+				editLbl = "编辑"
+			}
+			if components.Button(c, editLbl, components.ButtonSecondary).Shrink(0).Clicked() {
 				snap := *cg
 				w.VivariumPeekOpen = false
 				w.OpenEditVivariumDialog(snap)
@@ -1044,7 +1104,7 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 						chkIco = lucide.CircleCheck()
 						chkCol = tok.Success
 					}
-					chkBtn := ui.ButtonBase(c).Label("完成节点 " + lbl).Padding(2)
+					chkBtn := ui.ButtonBase(c).Label("完成节点 " + lbl).Padding(float32(tok.Spacing4) * 0.5)
 					chkBtn.Children(func() {
 						ui.Icon(c, chkIco).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(chkCol)
 					})
@@ -1072,35 +1132,72 @@ func renderVivariumSidePeek(c *ui.Context, w *Workspace, tok theme.Tokens) {
 			if strings.TrimSpace(w.vivariumMsDateDraft) == "" {
 				w.vivariumMsDateDraft = time.Now().AddDate(0, 0, 3).Format("2006-01-02")
 			}
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-				if components.Button(c, msKinds[w.vivariumMsKindIdx].label, components.ButtonGhost).Clicked() {
-					w.vivariumMsKindIdx = (w.vivariumMsKindIdx + 1) % len(msKinds)
-				}
-				ui.Box(c).Width(float32(tok.Spacing48)*2.3).Children(func() {
-					components.TextBox(c, &w.vivariumMsDateDraft, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
-				})
-				ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.0).Children(func() {
-					components.TextBox(c, &w.vivariumMsTitleDraft, components.TextBoxOptions{}).Placeholder("如 处死取瘤/血清…")
-				})
-				if components.Button(c, "+ 加节点", components.ButtonSecondary).Clicked() {
-					chosen := msKinds[w.vivariumMsKindIdx]
-					title := strings.TrimSpace(w.vivariumMsTitleDraft)
-					if title == "" {
-						title = chosen.label
-					}
-					cg.Milestones = append(cg.Milestones, vivarium.Milestone{
-						ID:      fmt.Sprintf("ms-%d", time.Now().UnixNano()),
-						Kind:    chosen.kind,
-						DateYMD: strings.TrimSpace(w.vivariumMsDateDraft),
-						Title:   title,
+			if mobileLayout {
+				t := c.Theme()
+				ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						if components.Button(c, msKinds[w.vivariumMsKindIdx].label, components.ButtonGhost).Shrink(0).Clicked() {
+							w.vivariumMsKindIdx = (w.vivariumMsKindIdx + 1) % len(msKinds)
+						}
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							components.TextBox(c, &w.vivariumMsDateDraft, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+						})
 					})
-					w.vivariumMsTitleDraft = ""
-					_ = w.saveVivarium()
-					if w.Callbacks.OnToast != nil {
-						w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("已添加 %s（%s）并同步日历", title, strings.TrimSpace(w.vivariumMsDateDraft))})
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+							components.TextBox(c, &w.vivariumMsTitleDraft, components.TextBoxOptions{}).Placeholder("如 处死取瘤/血清…").FillWidth()
+						})
+						if components.Button(c, "+ 加节点", components.ButtonSecondary).Shrink(0).Clicked() {
+							chosen := msKinds[w.vivariumMsKindIdx]
+							title := strings.TrimSpace(w.vivariumMsTitleDraft)
+							if title == "" {
+								title = chosen.label
+							}
+							cg.Milestones = append(cg.Milestones, vivarium.Milestone{
+								ID:      fmt.Sprintf("ms-%d", time.Now().UnixNano()),
+								Kind:    chosen.kind,
+								DateYMD: strings.TrimSpace(w.vivariumMsDateDraft),
+								Title:   title,
+							})
+							w.vivariumMsTitleDraft = ""
+							_ = w.saveVivarium()
+							if w.Callbacks.OnToast != nil {
+								w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("已添加 %s（%s）并同步日历", title, strings.TrimSpace(w.vivariumMsDateDraft))})
+							}
+						}
+					})
+				})
+			} else {
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+					if components.Button(c, msKinds[w.vivariumMsKindIdx].label, components.ButtonGhost).Clicked() {
+						w.vivariumMsKindIdx = (w.vivariumMsKindIdx + 1) % len(msKinds)
 					}
-				}
-			})
+					ui.Box(c).Width(float32(tok.Spacing48)*2.3).Children(func() {
+						components.TextBox(c, &w.vivariumMsDateDraft, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD")
+					})
+					ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*2.0).Children(func() {
+						components.TextBox(c, &w.vivariumMsTitleDraft, components.TextBoxOptions{}).Placeholder("如 处死取瘤/血清…")
+					})
+					if components.Button(c, "+ 加节点", components.ButtonSecondary).Clicked() {
+						chosen := msKinds[w.vivariumMsKindIdx]
+						title := strings.TrimSpace(w.vivariumMsTitleDraft)
+						if title == "" {
+							title = chosen.label
+						}
+						cg.Milestones = append(cg.Milestones, vivarium.Milestone{
+							ID:      fmt.Sprintf("ms-%d", time.Now().UnixNano()),
+							Kind:    chosen.kind,
+							DateYMD: strings.TrimSpace(w.vivariumMsDateDraft),
+							Title:   title,
+						})
+						w.vivariumMsTitleDraft = ""
+						_ = w.saveVivarium()
+						if w.Callbacks.OnToast != nil {
+							w.Callbacks.OnToast(kit.Toast{Tone: kit.ToastSuccess, Message: fmt.Sprintf("已添加 %s（%s）并同步日历", title, strings.TrimSpace(w.vivariumMsDateDraft))})
+						}
+					}
+				})
+			}
 		})
 
 		// Weight history trace
@@ -1179,6 +1276,19 @@ func (w *Workspace) RenderVivariumInspector(c *ui.Context, tok theme.Tokens) {
 }
 
 func renderVivariumDialog(c *ui.Context, w *Workspace, tok theme.Tokens) {
+	if isMobileToolsLayout(c) {
+		if !w.VivariumDialogOpen {
+			return
+		}
+		title := "新建动物笼卡"
+		if w.vivariumEditingID != "" {
+			title = "编辑笼卡 · " + firstNonEmptyStr(w.vivariumDraft.CageCode, w.vivariumDraft.Strain)
+		}
+		ui.Overlay(c, func() {
+			w.renderMobileVivariumPage(c, tok, title)
+		})
+		return
+	}
 	if !w.VivariumDialogOpen {
 		ui.Box(c.Key("vivarium-dlg")).Children(func() {
 			components.Dialog(c, &w.VivariumDialogOpen, components.DialogOptions{Label: "实验动物笼卡"}, nil)
@@ -1444,4 +1554,356 @@ func renderVivariumDialog(c *ui.Context, w *Workspace, tok theme.Tokens) {
 		})
 	})
 	w.VivariumDialogOpen = open
+}
+
+func renderMobileVivariumCageRow(c *ui.Context, w *Workspace, tok theme.Tokens, cg VivariumCage, now time.Time) {
+	t := c.Theme()
+	spec, hasSpec := labsticker.LookupAnimal(cg.Species)
+	unit := "只"
+	if hasSpec && spec.DefaultUnit != "" {
+		unit = spec.DefaultUnit
+	}
+	statusTxt, statusTone := vivariumStatusInfo(cg.Status)
+	densityWarn := VivariumDensityWarning(cg)
+	ageLabel := VivariumAgeLabel(cg.DOB, now)
+
+	row := ui.ButtonBase(c.Key("mb-viv-row-"+cg.ID)).
+		Label("查看笼卡 " + cg.CageCode + " " + cg.Strain).
+		FillWidth().MinHeight(float32(tok.Spacing48)).
+		Padding(t.Space(3), t.Space(3)).
+		Background(tok.Surface).Justify(ui.Start).
+		OnClick(func() {
+			mygo.Haptics.Selection()
+			if w != nil {
+				w.OpenVivariumPeek(cg)
+			}
+		})
+	theme.ApplyTactilePress(row)
+	row.Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+			labsticker.RenderAnimalSticker(c, cg.Species, 36)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Text(c, cg.CageCode).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine().Shrink(0)
+					ui.Text(c, cg.Strain).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+						Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					components.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
+				})
+				meta := fmt.Sprintf("♂%d ♀%d (%d%s)", cg.MaleCount, cg.FemaleCount, cg.TotalAnimals(), unit)
+				if ageLabel != "—" {
+					meta += " · " + ageLabel
+				}
+				if cg.WeightG > 0 {
+					meta += fmt.Sprintf(" · %.1fg", cg.WeightG)
+				}
+				if loc := strings.TrimSpace(cg.Room + " " + cg.RackPos); loc != "" {
+					meta += " · " + loc
+				}
+				ui.Text(c, meta).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+				if densityWarn != "" {
+					ui.Text(c, "⚠ "+densityWarn).FontSize(float32(tok.TextMeta)).TextColor(tok.DangerText).SingleLine().Ellipsis("…")
+				}
+			})
+			ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted).Shrink(0)
+		})
+	})
+	if w != nil {
+		kit.ContextMenu(c, row, func(m *kit.Menu) {
+			if m.Item("查看笼卡详情").Chosen() {
+				w.OpenVivariumPeek(cg)
+			}
+			if m.Item("编辑笼卡").Chosen() {
+				w.OpenEditVivariumDialog(cg)
+			}
+			if m.Item("标记为实验中").Chosen() {
+				if idx := w.findVivariumCageIdx(cg.ID); idx >= 0 {
+					w.VivariumCages[idx].Status = "in_study"
+					_ = w.saveVivarium()
+				}
+			}
+			m.Separator()
+			if m.Item("删除笼卡").Chosen() {
+				w.deleteVivariumCage(cg.ID)
+			}
+		})
+	}
+}
+
+func renderMobileVivariumLedgerList(c *ui.Context, w *Workspace, tok theme.Tokens, filtered []VivariumCage) {
+	t := c.Theme()
+	now := time.Now()
+	ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+		Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+		for i, cg := range filtered {
+			cg := cg
+			if i > 0 {
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			}
+			spec, _ := labsticker.LookupAnimal(cg.Species)
+			statusTxt, statusTone := vivariumStatusInfo(cg.Status)
+			ui.Row(c.Key("mb-viv-tbl-"+cg.ID)).FillWidth().
+				Padding(t.Space(3), t.Space(3)).
+				AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+				infoBtn := ui.ButtonBase(c.Key("mb-viv-tbl-open-"+cg.ID)).
+					Label("查看笼卡 "+cg.CageCode).
+					Grow(1).MinWidth(0).Justify(ui.Start).
+					OnClick(func() {
+						mygo.Haptics.Selection()
+						w.OpenVivariumPeek(cg)
+					})
+				infoBtn.Children(func() {
+					ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+							ui.Text(c, cg.CageCode).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine().Shrink(0)
+							lbl := cg.Strain
+							if spec.Title != "" {
+								lbl = spec.Title + " · " + cg.Strain
+							}
+							ui.Text(c, lbl).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+								Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+						})
+						sub := fmt.Sprintf("%d♂/%d♀ · %s", cg.MaleCount, cg.FemaleCount, VivariumAgeLabel(cg.DOB, now))
+						if cg.WeightG > 0 {
+							sub += fmt.Sprintf(" · %.1fg", cg.WeightG)
+						}
+						if cg.IACUCNo != "" {
+							sub += " · " + cg.IACUCNo
+						}
+						ui.Text(c, sub).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+					})
+				})
+				stBtn := ui.ButtonBase(c.Key("mb-viv-tbl-st-" + cg.ID)).Label("切换状态 " + statusTxt).Shrink(0)
+				stBtn.Children(func() {
+					components.Badge(c, statusTxt, components.BadgeOptions{Tone: statusTone})
+				})
+				if stBtn.Clicked() {
+					if idx := w.findVivariumCageIdx(cg.ID); idx >= 0 {
+						w.VivariumCages[idx].Status = vivariumNextStatus(w.VivariumCages[idx].Status)
+						_ = w.saveVivarium()
+					}
+				}
+			})
+		}
+	})
+}
+
+func (w *Workspace) renderMobileVivariumPage(c *ui.Context, tok theme.Tokens, title string) {
+	t := c.Theme()
+	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-viv-dlg-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("mb-viv-dlg-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+				w.VivariumDialogOpen = false
+				w.vivariumDialogErr = ""
+			}
+			ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			if components.Button(c.Key("mb-viv-dlg-save"), "保存笼卡", components.ButtonPrimary).Shrink(0).Clicked() {
+				if w.SaveVivariumDraft() {
+					w.VivariumDialogOpen = false
+				}
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		ui.Scroll(c.Key("mb-viv-dlg-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				if w.vivariumDialogErr != "" {
+					kit.InlineBanner(c, tok, lucide.TriangleAlert(), kit.BannerDanger, w.vivariumDialogErr, "", nil)
+				}
+				if warn := VivariumDensityWarning(VivariumCage{
+					Species:     w.vivariumDraft.Species,
+					MaleCount:   int(w.vivariumMaleF + 0.5),
+					FemaleCount: int(w.vivariumFemaleF + 0.5),
+					Status:      w.vivariumDraft.Status,
+				}); warn != "" {
+					kit.InlineBanner(c, tok, lucide.TriangleAlert(), kit.BannerWarning, "GB 14925 "+warn, "", nil)
+				}
+
+				ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Text(c, "实验动物物种").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+					animals := labsticker.AllAnimals()
+					const cols = 2
+					for i := 0; i < len(animals); i += cols {
+						end := min(i+cols, len(animals))
+						ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+							for _, sp := range animals[i:end] {
+								sp := sp
+								sel := w.vivariumDraft.Species == sp.ID
+								bg, bd := tok.Surface, tok.Border
+								if sel {
+									bg, bd = tok.AccentSoftBg, tok.Accent
+								}
+								tile := ui.ButtonBase(c.Key("mb-viv-sp-" + string(sp.ID))).
+									Label(sp.Title).
+									Grow(1).Basis(0).MinWidth(0).
+									Padding(t.Space(2), t.Space(2)).
+									Radius(float32(tok.ControlRadius)).
+									Background(bg).Border(1, bd)
+								theme.ApplyTactilePress(tile)
+								tile.Children(func() {
+									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+										labsticker.RenderAnimalSticker(c, sp.ID, 28)
+										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+											ui.Text(c, sp.Title).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+											ui.Text(c, sp.CommonStrains).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+										})
+									})
+								})
+								if tile.Clicked() {
+									w.vivariumDraft.Species = sp.ID
+									if strings.TrimSpace(w.vivariumDraft.FacilityGrade) == "" || w.vivariumEditingID == "" {
+										w.vivariumDraft.FacilityGrade = sp.DefaultGrade
+									}
+									if w.vivariumEditingID == "" {
+										w.vivariumDraft.Strain = strings.Split(sp.CommonStrains, " · ")[0]
+									}
+								}
+							}
+						})
+					}
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "笼号 *").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.CageCode, components.TextBoxOptions{}).Placeholder("如 C-01").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "基因型").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.Genotype, components.TextBoxOptions{}).Placeholder("WT / KO").FillWidth()
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "品系 / 背景 *").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					components.TextBox(c, &w.vivariumDraft.Strain, components.TextBoxOptions{}).Placeholder("C57BL/6J / SD 大鼠").FillWidth()
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "雄性 ♂").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.NumberInput(c, &w.vivariumMaleF, 0, 100, 1, components.NumberInputOptions{LeadingText: "♂"}).Label("雄性数量")
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "雌性 ♀").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.NumberInput(c, &w.vivariumFemaleF, 0, 100, 1, components.NumberInputOptions{LeadingText: "♀"}).Label("雌性数量")
+					})
+				})
+
+				ui.Row(c).FillWidth().AlignItems(ui.End).Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "当前均重 (g)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.NumberInput(c, &w.vivariumWeightF, 0, 25000, 0.5, components.NumberInputOptions{LeadingText: "g"}).Label("体重")
+					})
+					if components.Button(c, "+ 记录今日称重", components.ButtonSecondary).Shrink(0).Clicked() {
+						today := time.Now().Format("2006-01-02")
+						w.vivariumDraft.WeightHistory = append(w.vivariumDraft.WeightHistory, WeightEntry{
+							Date:    today,
+							WeightG: w.vivariumWeightF,
+						})
+					}
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "出生日期 (DOB)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.DOB, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "设施等级").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						sel := components.Select(c, &w.vivariumDraft.FacilityGrade)
+						sel.Trigger.FillWidth().Children(func() {
+							components.Text(c, vivariumGradeLabel(w.vivariumDraft.FacilityGrade)).SingleLine().Ellipsis("…")
+						})
+						sel.Popup(func(ui.Element) {
+							for _, g := range []string{"SPF", "conventional", "isolator", "aquatic"} {
+								g := g
+								sel.Item(g).Children(func() {
+									components.Text(c, vivariumGradeLabel(g)).SingleLine()
+								})
+							}
+						})
+					})
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "房间号").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.Room, components.TextBoxOptions{}).Placeholder("SPF-01 房").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "笼架坐标").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.RackPos, components.TextBoxOptions{}).Placeholder("R2-B4").FillWidth()
+					})
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "伦理批件 (IACUC)").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.IACUCNo, components.TextBoxOptions{}).Placeholder("IACUC-2026-0412").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "动物状态").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						stSel := components.Select(c, &w.vivariumDraft.Status)
+						stSel.Trigger.FillWidth().Children(func() {
+							lbl, _ := vivariumStatusInfo(w.vivariumDraft.Status)
+							components.Text(c, lbl).SingleLine().Ellipsis("…")
+						})
+						stSel.Popup(func(ui.Element) {
+							for _, sCode := range []string{"quarantine", "active", "in_study", "breeding", "archived"} {
+								sCode := sCode
+								lbl, _ := vivariumStatusInfo(sCode)
+								stSel.Item(sCode).Children(func() {
+									components.Text(c, lbl).SingleLine()
+								})
+							}
+						})
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "个体标记与关联实验").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					components.TextBox(c, &w.vivariumDraft.AnimalIDs, components.TextBoxOptions{}).Placeholder("剪耳/耳标 #01–#04").FillWidth()
+					components.TextBox(c, &w.vivariumDraft.ExperimentRef, components.TextBoxOptions{}).Placeholder("关联实验课题").FillWidth()
+				})
+
+				ui.Row(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "入栏日").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.ArrivedOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+					})
+					ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(t.Space(1)).Children(func() {
+						ui.Text(c, "批件到期日").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c, &w.vivariumDraft.IACUCExpiresOn, components.TextBoxOptions{}).Placeholder("YYYY-MM-DD").FillWidth()
+					})
+				})
+
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+					ui.Text(c, "动物福利与健康观察").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					components.TextBox(c, &w.vivariumDraft.HealthNotes, components.TextBoxOptions{Multiline: true}).
+						Placeholder("采食饮水、手术恢复或人道终点观察…").FillWidth()
+				})
+
+				if w.vivariumEditingID != "" {
+					ui.Box(c.Key("mb-viv-del-" + w.vivariumEditingID)).Children(func() {
+						h := components.HoldToConfirm(c, &w.vivariumHoldDelReady, "长按删除笼卡", components.HoldToConfirmOptions{
+							ConfirmedLabel: "已删除",
+							Duration:       900 * time.Millisecond,
+							Tone:           components.HoldDanger,
+						})
+						if h.Changed() {
+							w.deleteVivariumCage(w.vivariumEditingID)
+							w.VivariumDialogOpen = false
+						}
+					})
+				}
+			})
+		})
+	})
 }

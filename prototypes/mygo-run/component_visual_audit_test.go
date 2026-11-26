@@ -16,6 +16,7 @@ import (
 	"asterlab-mygo-prototype/internal/reagent"
 	"asterlab-mygo-prototype/internal/schedule"
 	"asterlab-mygo-prototype/internal/shell"
+	"asterlab-mygo-prototype/internal/storybook"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/uikit/kit"
@@ -1146,12 +1147,12 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 		vaultIndex: vault.NewVaultIndex(v),
 		docStore:   vault.NewDocStore(v),
 	}
-	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+	extraSections := storybook.BuildExtraSections()
 
 	// 1. Full Storybook: Tokens + Elevation + Motion (Light & Dark)
 	stTokens := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
 	renderVisualPNGSteps(t, outDir, "s4_01a_storybook_tokens_light.png", 1280, 860, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1159,7 +1160,7 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 	})
 	stTokensDark := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
 	renderVisualPNGSteps(t, outDir, "s4_01b_storybook_tokens_dark.png", 1280, 860, true, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stTokensDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stTokensDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1169,7 +1170,7 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 	// 2. Full Storybook: Controls + 6 UI Engines (ScrubNumber, FilterBar, ContextMenu, Toast trigger)
 	stCtrl := &kit.GalleryState{ActiveSection: "controls-kit", SampleNum: 10, ScrubVal: 24.8, SelectedIdx: 1}
 	renderVisualPNGSteps(t, outDir, "s4_02_storybook_controls_engines_light.png", 1280, 860, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		_ = tt.Click("触发乐观撤销 Toast")
@@ -1180,7 +1181,7 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 	// 3. Full Storybook: Science Carriers (Plate + Dish + Cryo Rack + Reagent Stickers + 8 Animals)
 	stSci := &kit.GalleryState{ActiveSection: "science-carriers", SampleNum: 12, ScrubVal: 20.0}
 	renderVisualPNGSteps(t, outDir, "s4_03_storybook_science_carriers_light.png", 1280, 920, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1190,7 +1191,7 @@ func TestStage4StorybookAndEnginesVisualAudit(t *testing.T) {
 	// 4. Full Storybook: AsterDoc Modules + Shell Chrome (Dark)
 	stDoc := &kit.GalleryState{ActiveSection: "asterdoc-modules", SampleNum: 12}
 	renderVisualPNGSteps(t, outDir, "s4_04_storybook_asterdoc_shell_dark.png", 1280, 900, true, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1308,12 +1309,12 @@ func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
 		vaultIndex: vault.NewVaultIndex(v),
 		docStore:   vault.NewDocStore(v),
 	}
-	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+	extraSections := storybook.BuildExtraSections()
 
 	// 1a. Fixed Storybook Tokens & Controls (Light)
 	stTokens := &kit.GalleryState{ActiveSection: "tokens-motion", SampleNum: 12, ScrubVal: 22.5}
 	renderVisualPNGSteps(t, outDir, "s5_01a_storybook_tokens_fixed_light.png", 1280, 860, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stTokens, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1325,7 +1326,7 @@ func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
 
 	stCtrl := &kit.GalleryState{ActiveSection: "controls-kit", SampleNum: 10, ScrubVal: 24.8, SelectedIdx: 1}
 	renderVisualPNGSteps(t, outDir, "s5_01_storybook_fixed_tokens_controls_light.png", 1280, 860, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stCtrl, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1335,7 +1336,7 @@ func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
 	// 2. Fixed Storybook Science Carriers + AsterDoc (Dark)
 	stSci := &kit.GalleryState{ActiveSection: "science-carriers", SampleNum: 12, ScrubVal: 20.0}
 	renderVisualPNGSteps(t, outDir, "s5_02a_storybook_carriers_fixed_light.png", 1280, 920, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stSci, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1344,7 +1345,7 @@ func TestStage5UnifiedEnginesAndCalendarVisualAudit(t *testing.T) {
 
 	stDoc := &kit.GalleryState{ActiveSection: "asterdoc-modules", SampleNum: 12}
 	renderVisualPNGSteps(t, outDir, "s5_02_storybook_fixed_carriers_asterdoc_dark.png", 1280, 1480, true, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stDoc, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(180 * time.Millisecond)
@@ -1529,12 +1530,12 @@ func TestStage6EditorialStewardStorybookVisualAudit(t *testing.T) {
 		vaultIndex: vault.NewVaultIndex(v),
 		docStore:   vault.NewDocStore(v),
 	}
-	sh.GalleryExtraSections = a.buildStorybookExtraSections()
+	extraSections := storybook.BuildExtraSections()
 
 	// 1 & 2. Full UI Gallery Section 7 (Light & Dark)
 	stEditorialLight := &kit.GalleryState{ActiveSection: "editorial-steward"}
 	renderVisualPNGSteps(t, outDir, "s6_01_storybook_editorial_sidenotes_light.png", 1360, 1460, false, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stEditorialLight, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stEditorialLight, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(220 * time.Millisecond)
@@ -1547,7 +1548,7 @@ func TestStage6EditorialStewardStorybookVisualAudit(t *testing.T) {
 
 	stEditorialDark := &kit.GalleryState{ActiveSection: "editorial-steward"}
 	renderVisualPNGSteps(t, outDir, "s6_02_storybook_editorial_sidenotes_dark.png", 1360, 1460, true, func(c *ui.Context) {
-		kit.RenderComponentGallery(c, stEditorialDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, sh.GalleryExtraSections...)...)
+		kit.RenderComponentGallery(c, stEditorialDark, append([]kit.StorySection{sh.BuiltinShellStorySection()}, extraSections...)...)
 	}, func(tt *ui.Tester) {
 		tt.Frame()
 		tt.Advance(220 * time.Millisecond)

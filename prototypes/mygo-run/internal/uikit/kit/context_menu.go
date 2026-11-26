@@ -3,6 +3,7 @@ package kit
 import (
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -15,6 +16,10 @@ import (
 const (
 	mobileContextBreakpoint = float32(680)
 	mobileSheetMinRowHeight = float32(48)
+
+	submenuOpenDelay  = 120 * time.Millisecond
+	submenuCloseDelay = 260 * time.Millisecond
+	safeTrianglePadY  = float32(6)
 )
 
 type menuState struct {
@@ -25,6 +30,41 @@ type menuState struct {
 	focus, keyboard bool
 	pointer         [2]float32
 	lastItems       int
+
+	// Cascading submenu timing & Safe Triangle state
+	openSub        string
+	pendingSub     string
+	hoverAt        time.Time
+	pendingClose   string
+	leaveAt        time.Time
+	exitOrigin     [2]float32
+	hasExitOrigin  bool
+	openSubRect    ui.Rect
+	subRect        ui.Rect
+	subHovered     bool
+	inSafeTriangle bool
+	panelRect      ui.Rect
+	now            time.Time
+	globalPointer  [2]float32
+}
+
+// Menu builds items inside a ContextMenu panel or mobile bottom sheet.
+type Menu struct {
+	c       *ui.Context
+	st      *menuState
+	panel   ui.Element
+	tok     theme.Tokens
+	moved   bool
+	asSheet bool
+	isSub   bool
+	pending *MenuItem
+	divide  bool
+	shown   bool
+	items   []menuRow
+}
+
+func triSign(p1, p2, p3 [2]float32) float32 {
+	return (p1[0]-p3[0])*(p2[1]-p3[1]) - (p2[0]-p3[0])*(p1[1]-p3[1])
 }
 
 type menuRow struct {
@@ -32,17 +72,15 @@ type menuRow struct {
 	enabled bool
 }
 
-// Menu builds items inside a ContextMenu panel or mobile bottom sheet.
-type Menu struct {
-	c       *ui.Context
-	st      *menuState
-	tok     theme.Tokens
-	moved   bool
-	asSheet bool
-	pending *MenuItem
-	divide  bool
-	shown   bool
-	items   []menuRow
+// pointInSafeTriangle reports whether pointer p lies inside triangle (a, b, c),
+// supporting both right-opening and left-opening cascading submenus.
+func pointInSafeTriangle(p, a, b, c [2]float32) bool {
+	d1 := triSign(p, a, b)
+	d2 := triSign(p, b, c)
+	d3 := triSign(p, c, a)
+	hasNeg := d1 < 0 || d2 < 0 || d3 < 0
+	hasPos := d1 > 0 || d2 > 0 || d3 > 0
+	return !(hasNeg && hasPos)
 }
 
 // MenuItem configures a menu entry and reports whether it was activated.
@@ -80,6 +118,7 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 
 	asked := false
 	target.ContextMenu(func(*ui.Menu) { asked = true })
+
 	if asked {
 		if mobileOS {
 			mygo.Haptics.Medium()
@@ -104,6 +143,10 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 		return
 	}
 	if !st.open {
+		st.openSub = ""
+		st.pendingSub = ""
+		st.pendingClose = ""
+		st.hasExitOrigin = false
 		return
 	}
 
@@ -124,14 +167,40 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 			AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft)
 		ApplyElevation(panel, tok, ElevationFloating)
 
-		x, y, _ := panel.PointerPosition()
-		moved := [2]float32{x, y} != st.pointer
-		st.pointer = [2]float32{x, y}
-		m := &Menu{c: c, st: st, tok: tok, moved: moved}
+		pb := panel.Bounds()
+		st.panelRect = pb
+		st.now = c.Now()
+		lx, ly, _ := panel.PointerPosition()
+		curPtr := [2]float32{pb.X + lx, pb.Y + ly}
+		moved := curPtr != st.pointer
+		st.pointer = curPtr
+		st.globalPointer = curPtr
+
+		st.inSafeTriangle = false
+		if st.openSub != "" && st.subRect.W > 0 {
+			origin := st.exitOrigin
+			if !st.hasExitOrigin && st.openSubRect.W > 0 {
+				origin = [2]float32{st.openSubRect.X + st.openSubRect.W*0.5, st.openSubRect.Y + st.openSubRect.H*0.5}
+			}
+			edgeX := st.subRect.X
+			if st.subRect.X+st.subRect.W <= pb.X+pb.W*0.5 {
+				edgeX = st.subRect.X + st.subRect.W
+			}
+			topEdge := [2]float32{edgeX, st.subRect.Y - safeTrianglePadY}
+			botEdge := [2]float32{edgeX, st.subRect.Y + st.subRect.H + safeTrianglePadY}
+			st.inSafeTriangle = pointInSafeTriangle(curPtr, origin, topEdge, botEdge)
+		}
+
+		subHoveredPrev := st.subHovered
+		st.subHovered = false
+		m := &Menu{c: c, st: st, panel: panel, tok: tok, moved: moved}
 		panel.Children(func() {
 			build(m)
 			m.flush()
 		})
+		if st.openSub != "" && subHoveredPrev {
+			st.pendingClose = ""
+		}
 		st.lastItems = len(m.items)
 		switch {
 		case !st.open:
@@ -265,6 +334,152 @@ func (it *MenuItem) Chosen() bool {
 	return it.chosen
 }
 
+// Submenu adds a cascading submenu entry on desktop with open/close delays and
+// a Safe Triangle pointer corridor, and degrades cleanly to a labeled section on mobile sheets.
+func (m *Menu) Submenu(label string, build func(sub *Menu)) {
+	m.flush()
+	if build == nil {
+		return
+	}
+	if m.asSheet {
+		m.Group(label, build)
+		return
+	}
+	m.dividing()
+	m.shown = true
+	c, tok, st := m.c, m.tok, m.st
+	b := ui.ButtonBase(c).Key(len(m.items)).Label(label).FillWidth().MinWidth(0).
+		Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+		Radius(float32(tok.ControlRadius)).
+		Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+		Role(ui.RoleMenuItem).TextColor(tok.Text)
+	m.items = append(m.items, menuRow{e: b, enabled: true})
+
+	hovered := b.Hovered()
+	isOpen := st.openSub == label
+	if isOpen {
+		st.openSubRect = b.Bounds()
+		if !st.hasExitOrigin {
+			st.exitOrigin = [2]float32{st.openSubRect.X + st.openSubRect.W*0.5, st.openSubRect.Y + st.openSubRect.H*0.5}
+			st.hasExitOrigin = true
+		}
+	}
+
+	if hovered {
+		if isOpen {
+			st.pendingClose = ""
+			st.pendingSub = ""
+			st.exitOrigin = st.globalPointer
+			st.hasExitOrigin = true
+		} else if !st.inSafeTriangle {
+			canSwitch := st.openSub == ""
+			if !canSwitch {
+				if st.pendingClose != st.openSub {
+					st.pendingClose = st.openSub
+					st.leaveAt = st.now
+				}
+				rem := submenuCloseDelay - st.now.Sub(st.leaveAt)
+				if rem <= 0 {
+					canSwitch = true
+				} else {
+					c.After(rem)
+				}
+			}
+			if canSwitch {
+				if st.pendingSub != label {
+					st.pendingSub = label
+					st.hoverAt = st.now
+					c.After(submenuOpenDelay)
+				} else {
+					rem := submenuOpenDelay - st.now.Sub(st.hoverAt)
+					if rem <= 0 {
+						st.openSub = label
+						st.pendingSub = ""
+						st.pendingClose = ""
+						st.openSubRect = b.Bounds()
+						st.exitOrigin = st.globalPointer
+						st.hasExitOrigin = true
+						isOpen = true
+					} else {
+						c.After(rem)
+					}
+				}
+			}
+		}
+	} else if st.pendingSub == label {
+		st.pendingSub = ""
+	}
+
+	if b.Clicked() || (b.Focused() && m.panel.Shortcut(0, ui.KeyRight)) {
+		st.openSub = label
+		st.pendingSub = ""
+		st.pendingClose = ""
+		st.openSubRect = b.Bounds()
+		st.exitOrigin = [2]float32{st.openSubRect.X + st.openSubRect.W*0.5, st.openSubRect.Y + st.openSubRect.H*0.5}
+		st.hasExitOrigin = true
+		isOpen = true
+	}
+
+	hoverBg := ui.Transparent
+	switch {
+	case hovered && m.moved && !b.Focused():
+		b.Focus()
+		fallthrough
+	case hovered, b.Focused(), isOpen:
+		hoverBg = tok.GhostHover
+	}
+	b.Background(b.AnimateColor("kit-cm-sub-bg", hoverBg, theme.MotionInstant))
+	b.Children(func() {
+		ui.Text(c, label).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").FontSize(float32(tok.TextData))
+		ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted).Shrink(0)
+	})
+
+	if isOpen {
+		subOpen := true
+		anchorSelf, anchorTarget := ui.AnchorTopStart, ui.AnchorTopEnd
+		winW, _ := c.Size()
+		if winW > 0 && st.panelRect.X+st.panelRect.W+float32(tok.Spacing48)*4 > winW {
+			anchorSelf, anchorTarget = ui.AnchorTopEnd, ui.AnchorTopStart
+		}
+		ui.PopoverBase(c, b, &subOpen, func(subPanel ui.Element) {
+			subPanel.Column().
+				Role(ui.RoleMenu).Focusable().
+				MinWidth(168).MaxWidth(320).
+				Padding(float32(tok.Spacing4)).Gap(1).
+				TextColor(tok.Text).
+				AttachTo(b, anchorSelf, anchorTarget)
+			ApplyElevation(subPanel, tok, ElevationFloating)
+
+			sx, sy, overSub := subPanel.PointerPosition()
+			sb := subPanel.Bounds()
+			st.subRect = sb
+			if overSub {
+				st.subHovered = true
+				st.pendingClose = ""
+			}
+			subPtr := [2]float32{sb.X + sx, sb.Y + sy}
+			subMoved := subPtr != st.pointer
+			subMenu := &Menu{c: c, st: st, panel: subPanel, tok: tok, moved: subMoved, isSub: true}
+			subPanel.Children(func() {
+				build(subMenu)
+				subMenu.flush()
+			})
+			switch {
+			case subPanel.Shortcut(0, ui.KeyLeft):
+				st.openSub = ""
+				b.Focus()
+			case subPanel.Shortcut(0, ui.KeyDown):
+				subMenu.move(1)
+			case subPanel.Shortcut(0, ui.KeyUp):
+				subMenu.move(-1)
+			}
+		})
+		if !subOpen {
+			st.openSub = ""
+		}
+	}
+}
+
 func (m *Menu) flush() {
 	it := m.pending
 	if it == nil || it.built {
@@ -321,7 +536,7 @@ func (m *Menu) flush() {
 		return
 	}
 	b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).FillWidth().MinWidth(0).
-		Padding(float32(tok.Spacing4)+2, float32(tok.Spacing8)).
+		Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 		Radius(float32(tok.ControlRadius)).
 		Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
 		TextColor(tok.Text)
@@ -332,14 +547,32 @@ func (m *Menu) flush() {
 	}
 	m.items = append(m.items, menuRow{e: b, enabled: !it.disabled})
 
+	hovered := b.Hovered()
+	if hovered && !m.isSub && m.st.openSub != "" && !m.st.inSafeTriangle && !m.st.subHovered {
+		if m.st.pendingClose != m.st.openSub {
+			m.st.pendingClose = m.st.openSub
+			m.st.leaveAt = m.st.now
+			c.After(submenuCloseDelay)
+		} else {
+			rem := submenuCloseDelay - m.st.now.Sub(m.st.leaveAt)
+			if rem <= 0 {
+				m.st.openSub = ""
+				m.st.pendingClose = ""
+				m.st.hasExitOrigin = false
+			} else {
+				c.After(rem)
+			}
+		}
+	}
+
 	hoverBg := ui.Transparent
 	switch {
 	case it.disabled:
 		b.TextColor(tok.TextDisabled)
-	case b.Hovered() && m.moved && !b.Focused():
+	case hovered && m.moved && !b.Focused():
 		b.Focus()
 		fallthrough
-	case b.Hovered(), b.Focused():
+	case hovered, b.Focused():
 		hoverBg = tok.GhostHover
 	}
 	b.Background(b.AnimateColor("kit-cm-bg", hoverBg, theme.MotionInstant))

@@ -1,4 +1,4 @@
-package main
+package storybook
 
 import (
 	"time"
@@ -126,7 +126,9 @@ svg: |
 ` + "```" + `
 `
 
-func (a *app) buildStorybookExtraSections() []kit.StorySection {
+// BuildExtraSections returns Sections 5-7 (AsterDoc modules, Vivarium & Edge cases, Editorial & Steward)
+// shared by visual regression tests and the standalone Storybook desktop app.
+func BuildExtraSections() []kit.StorySection {
 	editorialSample := `---
 title: L929 CCK-8 细胞活力测定（批注与 @ 联动标本）
 date: 2026-11-25
@@ -162,6 +164,7 @@ groups:
 [^2]: CCK-8 避光分装，37°C 孵育 1~1.5h 勿超 2h。
 [^3]: 若对照组 OD450 > 2.0 需先用完全培养基 1:1 稀释重测。
 `
+
 	sbPantry := []asterdoc.PantryMentionItem{
 		{ID: "p-dmem", Name: "DMEM 培养基", LabelCode: "R-001", Location: "4°C 上层", ItemType: "reagent", Status: "normal"},
 		{ID: "p-cck8", Name: "CCK-8 试剂盒", LabelCode: "R-002", Location: "-20°C A1", ItemType: "reagent", Status: "near_expiry"},
@@ -314,4 +317,15 @@ groups:
 			},
 		},
 	}
+}
+
+// BuildAllSections returns Sections 4-8 (Shell, AsterDoc modules, Vivarium & Edge cases,
+// Editorial & Steward, and Mobile 402dp iOS Spec) for the standalone UI Gallery app.
+func BuildAllSections() []kit.StorySection {
+	sh := &shell.Shell{TodayDate: time.Now().Format("2006-01-02")}
+	out := make([]kit.StorySection, 0, 5)
+	out = append(out, sh.BuiltinShellStorySection())
+	out = append(out, BuildExtraSections()...)
+	out = append(out, sh.BuiltinMobileStorySection())
+	return out
 }

@@ -680,7 +680,7 @@ func renderLiveStepComposer(v *View, c *ui.Context, step *Module) {
 				v.stepCollapsed[step.ID] = !collapsed
 			}
 			if stepOrdinal > 0 {
-				ui.Box(c).Padding(2, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+				ui.Box(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
 					Background(tok.AccentSoftBg).Shrink(0).Children(func() {
 					ui.Text(c, fmt.Sprintf("步骤 %d", stepOrdinal)).
 						FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()

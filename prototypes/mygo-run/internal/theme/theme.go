@@ -201,9 +201,9 @@ type Tokens struct {
 	AccentSoftBg, InfoBg, InfoText, CodeBg                                                       ui.Color
 	Spacing4, Spacing8, Spacing12, Spacing16, Spacing24, Spacing32, Spacing48                    int
 	TextPage, TextSection, TextBody, TextMeta, TextData                                          int
-	IconSm, IconMd, IconLg                                                                       int
+	IconSm, IconMd, IconLg, IconBoxSize                                                          int
 	ButtonHeight, InputHeight, RowHeight                                                         int
-	ControlRadius, PanelRadius, DialogRadius                                                     int
+	ControlRadius, PanelRadius, DialogRadius, PillRadius                                         int
 }
 
 func scaleToken(base int, scale float32, minVal int) int {
@@ -211,6 +211,19 @@ func scaleToken(base int, scale float32, minVal int) int {
 		return base
 	}
 	v := int(float32(base)*scale + 0.5)
+	if v < minVal {
+		v = minVal
+	}
+	return v
+}
+
+// scaleGridToken scales a base spacing/layout token and snaps it to the 4px grid.
+func scaleGridToken(base int, scale float32, minVal int) int {
+	v := base
+	if scale > 0 && scale != 1 {
+		v = int(float32(base)*scale + 0.5)
+	}
+	v = ((v + 2) / 4) * 4
 	if v < minVal {
 		v = minVal
 	}
@@ -225,14 +238,14 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 	scale := EffectiveScale()
 	density := ActiveDensity()
 	sp8, sp12, sp16, sp24, sp32, sp48 := 8, 12, 16, 24, 32, 48
-	btnH, inpH, rowH := 32, 32, 34
+	btnH, inpH, rowH := 32, 32, 36
 	switch density {
 	case DensityCompact:
-		sp8, sp12, sp16, sp24, sp32, sp48 = 6, 9, 12, 18, 26, 40
-		btnH, inpH, rowH = 28, 28, 30
+		sp8, sp12, sp16, sp24, sp32, sp48 = 4, 8, 12, 20, 24, 40
+		btnH, inpH, rowH = 28, 28, 32
 	case DensityComfortable:
-		sp8, sp12, sp16, sp24, sp32, sp48 = 8, 14, 18, 28, 36, 52
-		btnH, inpH, rowH = 34, 34, 38
+		sp8, sp12, sp16, sp24, sp32, sp48 = 12, 16, 20, 28, 36, 56
+		btnH, inpH, rowH = 36, 36, 40
 	}
 	t := Tokens{
 		Preset:        p,
@@ -240,26 +253,28 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 		LiquidGlass:   liquidGlass,
 		Dark:          dark,
 		Spacing4:      4,
-		Spacing8:      scaleToken(sp8, scale, 6),
-		Spacing12:     scaleToken(sp12, scale, 8),
-		Spacing16:     scaleToken(sp16, scale, 12),
-		Spacing24:     scaleToken(sp24, scale, 16),
-		Spacing32:     scaleToken(sp32, scale, 24),
-		Spacing48:     scaleToken(sp48, scale, 36),
+		Spacing8:      scaleGridToken(sp8, scale, 4),
+		Spacing12:     scaleGridToken(sp12, scale, 8),
+		Spacing16:     scaleGridToken(sp16, scale, 12),
+		Spacing24:     scaleGridToken(sp24, scale, 16),
+		Spacing32:     scaleGridToken(sp32, scale, 24),
+		Spacing48:     scaleGridToken(sp48, scale, 36),
 		TextPage:      scaleToken(26, scale, 20),
 		TextSection:   scaleToken(18, scale, 15),
 		TextBody:      scaleToken(15, scale, 13),
 		TextData:      scaleToken(14, scale, 12),
 		TextMeta:      scaleToken(13, scale, 11),
-		IconSm:        scaleToken(15, scale, 13),
-		IconMd:        scaleToken(17, scale, 15),
+		IconSm:        scaleToken(16, scale, 14),
+		IconMd:        scaleToken(18, scale, 16),
 		IconLg:        scaleToken(20, scale, 18),
-		ButtonHeight:  scaleToken(btnH, scale, 26),
-		InputHeight:   scaleToken(inpH, scale, 26),
-		RowHeight:     scaleToken(rowH, scale, 28),
+		IconBoxSize:   scaleGridToken(24, scale, 24),
+		ButtonHeight:  scaleGridToken(btnH, scale, 28),
+		InputHeight:   scaleGridToken(inpH, scale, 28),
+		RowHeight:     scaleGridToken(rowH, scale, 28),
 		ControlRadius: 6,
 		PanelRadius:   12,
 		DialogRadius:  14,
+		PillRadius:    999,
 	}
 
 	switch p {

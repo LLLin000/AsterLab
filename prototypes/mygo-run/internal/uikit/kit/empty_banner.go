@@ -71,19 +71,26 @@ func InlineBanner(c *ui.Context, tok theme.Tokens, icon *ui.SVG, tone BannerTone
 
 // SectionHeader renders a uniform icon + bold title + optional count meta + trailing slot header.
 func SectionHeader(c *ui.Context, tok theme.Tokens, icon *ui.SVG, title, meta string, rightSlot func()) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-		if icon != nil {
-			ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent).Shrink(0)
-		}
-		if title != "" {
-			ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-		}
-		if meta != "" {
-			ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
-		}
-		ui.Spacer(c)
-		if rightSlot != nil {
-			ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(rightSlot)
+	inlineMeta := meta != "" && len([]rune(meta)) <= 12
+	ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Row(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				if icon != nil {
+					IconBox(c, tok, icon, tok.Accent)
+				}
+				if title != "" {
+					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				}
+				if inlineMeta {
+					ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
+				}
+			})
+			if rightSlot != nil {
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(rightSlot)
+			}
+		})
+		if meta != "" && !inlineMeta {
+			ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").FillWidth()
 		}
 	})
 }

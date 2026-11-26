@@ -373,7 +373,13 @@ func (v *View) renderNLSuggestionPopover(
 	if sug == nil {
 		return
 	}
-	ui.Column(c).Width(float32(tok.Spacing48)*8.2).Gap(float32(tok.Spacing8)).Children(func() {
+	col := ui.Column(c).Gap(float32(tok.Spacing8))
+	if v.MobileCompact {
+		col.FillWidth()
+	} else {
+		col.Width(float32(tok.Spacing48) * 8.2)
+	}
+	col.Children(func() {
 		v.renderNLSuggestionPopoverInner(c, tok, sug, []*NLSuggestion{sug}, globalLineStart, globalLineEnd, onDismiss)
 	})
 }
@@ -772,7 +778,7 @@ func (v *View) renderMiniAttachmentDiagram(c *ui.Context, tok theme.Tokens, sug 
 			for r := 0; r < 3; r++ {
 				ui.Row(c).Gap(3).Children(func() {
 					for col := 0; col < 3; col++ {
-						ui.Box(c).Size(float32(tok.Spacing12), float32(tok.Spacing12)).Radius(3).
+						ui.Box(c).Size(float32(tok.Spacing12), float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)*0.5).
 							Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.35))
 					}
 				})

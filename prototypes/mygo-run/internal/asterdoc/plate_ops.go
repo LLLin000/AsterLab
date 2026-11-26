@@ -927,7 +927,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 				ui.Text(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer)).
 					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
 			})
-			ui.Row(c).Height(float32(tok.Spacing24)).Padding(2).Radius(float32(tok.ControlRadius)).
+			ui.Row(c).Height(float32(tok.Spacing24)).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(2).Children(func() {
 				for idx, lbl := range []string{"统一填充", "逐孔填入", "梯度稀释"} {
 					idx, lbl := idx, lbl

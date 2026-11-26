@@ -96,3 +96,132 @@ func TestRenderComponentGalleryLightAndDark(t *testing.T) {
 		}
 	}
 }
+
+func TestIconBoxOpticalBounds(t *testing.T) {
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		tok := theme.GetTokens(c.Theme())
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			IconBox(c, tok, lucide.FlaskConical(), tok.Accent).Label("icon-slot-sample")
+		})
+	}, 200, 100)
+	tt.Frame()
+	r, ok := tt.Find("icon-slot-sample")
+	if !ok || r.W != 24 || r.H != 24 {
+		t.Fatalf("expected 24x24 optical IconBox, got ok=%v rect=%+v", ok, r)
+	}
+}
+
+func TestSafeTriangleGeometry(t *testing.T) {
+	origin := [2]float32{100, 120}
+	topEdge := [2]float32{220, 80}
+	botEdge := [2]float32{220, 220}
+	if !pointInSafeTriangle([2]float32{160, 150}, origin, topEdge, botEdge) {
+		t.Fatal("expected midpoint inside right-opening safe triangle")
+	}
+	if pointInSafeTriangle([2]float32{160, 50}, origin, topEdge, botEdge) {
+		t.Fatal("expected upper point outside safe triangle")
+	}
+	if !pointInSafeTriangle([2]float32{220, 80}, origin, topEdge, botEdge) {
+		t.Fatal("expected vertex on boundary to count as inside")
+	}
+	// Left-opening submenu triangle
+	leftTop := [2]float32{20, 80}
+	leftBot := [2]float32{20, 220}
+	if !pointInSafeTriangle([2]float32{60, 150}, origin, leftTop, leftBot) {
+		t.Fatal("expected midpoint inside left-opening safe triangle")
+	}
+}
+
+func TestContextMenuSubmenuOpenDelaySafeTriangleAndCloseDelay(t *testing.T) {
+	chosen := ""
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		tok := theme.GetTokens(c.Theme())
+		box := ui.Column(c.Key("sub-test-target")).Size(320, 240).Padding(float32(tok.Spacing12))
+		box.Children(func() {
+			ui.Text(c, "右键触发多级菜单").FontSize(float32(tok.TextData)).TextColor(tok.Text)
+		})
+		ContextMenu(c, box, func(m *Menu) {
+			m.Submenu("导出与格式", func(sub *Menu) {
+				if sub.Item("导出 PDF").Chosen() {
+					chosen = "pdf"
+				}
+				if sub.Item("导出 CSV").Chosen() {
+					chosen = "csv"
+				}
+			})
+			if m.Item("重命名实验").Chosen() {
+				chosen = "rename"
+			}
+		})
+	}, 720, 420)
+	tt.Frame()
+
+	targetR, ok := tt.Find("右键触发多级菜单")
+	if !ok {
+		t.Fatalf("missing context menu target")
+	}
+	tt.RightClickAt(targetR.X+20, targetR.Y+10)
+	tt.Advance(60 * time.Millisecond)
+	tt.Frame()
+
+	subRow, ok := tt.Find("导出与格式")
+	if !ok {
+		t.Fatalf("expected parent submenu trigger, texts=%v", tt.Texts())
+	}
+	renameRow, ok := tt.Find("重命名实验")
+	if !ok {
+		t.Fatalf("expected sibling menu item, texts=%v", tt.Texts())
+	}
+
+	// Hover trigger -> before 120ms open delay expires, submenu should not open yet
+	tt.Move(subRow.X+subRow.W*0.5, subRow.Y+subRow.H*0.5)
+	tt.Frame()
+	if tt.HasText("导出 PDF") {
+		t.Fatalf("submenu opened prematurely before open delay")
+	}
+
+	// Advance past 120ms open delay -> submenu opens
+	tt.Advance(140 * time.Millisecond)
+	tt.Frame()
+	pdfR, ok := tt.Find("导出 PDF")
+	if !ok {
+		t.Fatalf("expected submenu items after open delay, texts=%v", tt.Texts())
+	}
+
+	// Move diagonally toward submenu through sibling row area inside Safe Triangle:
+	// submenu must remain open even past close delay while cursor is in triangle corridor.
+	tt.Move(renameRow.X+renameRow.W*0.85, renameRow.Y+renameRow.H*0.5)
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+	if !tt.HasText("导出 PDF") {
+		t.Fatalf("expected submenu to stay open inside Safe Triangle corridor, texts=%v", tt.Texts())
+	}
+
+	// Move clearly outside Safe Triangle onto left side of sibling -> closes after close delay
+	tt.Move(renameRow.X+12, renameRow.Y+renameRow.H*0.5)
+	tt.Frame()
+	if !tt.HasText("导出 PDF") {
+		t.Fatalf("expected submenu to honor close delay before closing immediately")
+	}
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+	if tt.HasText("导出 PDF") {
+		t.Fatalf("expected submenu to close after leaving Safe Triangle + close delay")
+	}
+
+	// Re-open submenu via click and trigger nested action
+	_ = pdfR
+	if err := tt.Click("导出与格式"); err != nil {
+		t.Fatalf("click submenu trigger: %v", err)
+	}
+	tt.Frame()
+	if err := tt.Click("导出 CSV"); err != nil {
+		t.Fatalf("click nested submenu action: %v", err)
+	}
+	tt.Frame()
+	if chosen != "csv" || tt.HasText("导出与格式") {
+		t.Fatalf("expected nested choice csv and menu dismissal, chosen=%q texts=%v", chosen, tt.Texts())
+	}
+}

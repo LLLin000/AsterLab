@@ -109,6 +109,81 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 	}
 	step := workbenchTourSteps[s.TourStep]
 
+	if s.IsMobileLayout(c) {
+		ui.Overlay(c, func() {
+			t := c.Theme()
+			topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+			ui.Box(c.Key("mb-spotlight-tour-scrim")).Absolute().Fill().Modal().
+				Background(tok.Text.Alpha(0.36)).
+				Padding(t.Space(4)+topSafe, t.Space(4)+rightSafe, t.Space(4)+bottomSafe, t.Space(4)+leftSafe).
+				Center().Children(func() {
+			card := ui.Column(c.Key(fmt.Sprintf("mb-tour-card-%d", s.TourStep))).
+				FillWidth().
+				Padding(float32(tok.Spacing16)).
+				Radius(float32(tok.PanelRadius)).
+				Background(tok.Surface).Border(1, tok.BorderStrong).
+				Gap(float32(tok.Spacing12))
+			card.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					components.Badge(c, step.Badge, components.BadgeOptions{Tone: components.BadgeAccent})
+					ui.Spacer(c)
+					if components.IconButton(c, lucide.X(), "关闭导览", components.IconButtonCompact).Clicked() {
+						s.TourOpen = false
+						s.syncTourRightDrawer()
+					}
+				})
+				ui.Text(c, step.Title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				ui.Text(c, step.Summary).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+				if len(step.Tips) > 0 {
+					ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+						Gap(float32(tok.Spacing8)).Children(func() {
+						for idx, tip := range step.Tips {
+							ui.Row(c.Key(fmt.Sprintf("mb-tour-tip-%d-%d", s.TourStep, idx))).FillWidth().
+								AlignItems(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).Background(tok.Accent).Margin(float32(tok.Spacing4), 0, 0, 0).Shrink(0)
+								ui.Text(c, tip).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
+							})
+						}
+					})
+				}
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						for i := range workbenchTourSteps {
+							dotCol := tok.BorderStrong
+							dotW := float32(tok.Spacing8)
+							if i == s.TourStep {
+								dotCol = tok.Accent
+								dotW = float32(tok.Spacing16)
+							}
+							ui.Box(c).Width(dotW).Height(float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).Background(dotCol)
+						}
+					})
+					ui.Spacer(c)
+					if s.TourStep > 0 {
+						if components.Button(c, "上一步", components.ButtonOutline).Clicked() {
+							s.TourStep--
+							s.syncTourRightDrawer()
+						}
+					}
+					if s.TourStep < len(workbenchTourSteps)-1 {
+						if components.Button(c, "下一步", components.ButtonPrimary).Clicked() {
+							s.TourStep++
+							s.syncTourRightDrawer()
+						}
+					} else {
+						if components.Button(c, "开始使用", components.ButtonPrimary).Clicked() {
+							s.TourOpen = false
+							s.syncTourRightDrawer()
+						}
+					}
+				})
+			})
+		})
+		})
+		return
+	}
+
 	// Full-window calm scrim overlay
 	ui.Box(c.Key("spotlight-tour-scrim")).Absolute().Fill().
 		Background(tok.Text.Alpha(0.32)).Children(func() {
@@ -161,7 +236,7 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 						for idx, tip := range step.Tips {
 							ui.Row(c.Key(fmt.Sprintf("tour-tip-%d-%d", s.TourStep, idx))).FillWidth().
 								AlignItems(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Box(c).Size(6, 6).Radius(3).Background(tok.Accent).Margin(6, 0, 0, 0).Shrink(0)
+								ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(tok.Accent).Margin(6, 0, 0, 0).Shrink(0)
 								ui.Text(c, tip).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
 							})
 						}
@@ -178,7 +253,7 @@ func (s *Shell) renderSpotlightTour(c *ui.Context, tok theme.Tokens) {
 								dotCol = tok.Accent
 								dotW = 18
 							}
-							ui.Box(c).Width(dotW).Height(6).Radius(3).Background(dotCol)
+							ui.Box(c).Width(dotW).Height(6).Radius(float32(tok.PillRadius)).Background(dotCol)
 						}
 					})
 					ui.Spacer(c)

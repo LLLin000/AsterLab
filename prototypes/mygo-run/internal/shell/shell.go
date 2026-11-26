@@ -5,6 +5,7 @@ package shell
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -280,9 +281,6 @@ type Shell struct {
 	CreateTargetFolder   string
 	CreateTargetTemplate string
 	VaultSettingsOpen     bool
-	ComponentGalleryOpen  bool
-	galleryState          kit.GalleryState
-	GalleryExtraSections  []kit.StorySection
 	Layers                kit.LayerStack
 	Commands              *kit.CommandRegistry
 	Toasts                *kit.ToastQueue
@@ -432,7 +430,8 @@ type Shell struct {
 	ExternalModalOpen      bool
 	IsExternalModalOpen    func() bool
 
-	window *sidebar.Shell
+	window    *sidebar.Shell
+	mobileWin *mygo.Window
 }
 
 // AnyModalOpen reports whether any shell or host modal/dialog/popover currently covers the canvas,
@@ -441,15 +440,24 @@ func (s *Shell) AnyModalOpen() bool {
 	if s.ExternalModalOpen || (s.IsExternalModalOpen != nil && s.IsExternalModalOpen()) {
 		return true
 	}
-	return s.VaultSettingsOpen || s.PaletteOpen || s.ComponentGalleryOpen ||
+	return s.VaultSettingsOpen || s.PaletteOpen ||
 		s.DayPopoverOpen || s.VaultLauncherOpen ||
 		s.newFolderDialogOpen || s.FeedbackOpen || s.WelcomeOpen || s.GlobalSearchOpen
 }
 
 // NewWindow creates the AsterLab window with Ribbon + File Tree on the left
 // and the slim companion drawer (collapsed by default) on the right.
+// On native iOS / Android, it mounts a chromeless mobile window without desktop sidebar chrome.
 func (s *Shell) NewWindow() *sidebar.Shell {
 	s.EnsureTabs()
+	if runtime.GOOS == "ios" || runtime.GOOS == "android" {
+		s.window = nil
+		s.mobileWin = mygo.NewWindow(mygo.WindowOptions{
+			Title:   "AsterLab",
+			Content: ui.View(s.mobileRootView),
+		})
+		return nil
+	}
 	s.window = sidebar.NewShell(sidebar.ShellOptions{
 		Title:          "AsterLab",
 		Width:          1380,
@@ -476,18 +484,26 @@ func (s *Shell) NewWindow() *sidebar.Shell {
 	return s.window
 }
 
+func (s *Shell) mobileRootView(c *ui.Context) {
+	c.SetTheme(theme.Window(c))
+	s.page(c)
+	components.Toasts(c, components.ToastOptions{})
+}
+
 func (s *Shell) Invalidate() {
 	if s.window != nil {
 		s.window.Window().Invalidate()
+	} else if s.mobileWin != nil {
+		s.mobileWin.Invalidate()
 	}
 }
 
 // MyGoWindow returns the underlying native mygo.Window when mounted (nil in headless tests).
 func (s *Shell) MyGoWindow() *mygo.Window {
-	if s.window == nil {
-		return nil
+	if s.window != nil {
+		return s.window.Window()
 	}
-	return s.window.Window()
+	return s.mobileWin
 }
 
 // LeftExpanded reports whether the left navigation sidebar is currently visible.
@@ -770,7 +786,6 @@ func (s *Shell) page(c *ui.Context) {
 	s.renderVaultDialogs(c)
 	s.renderFeedbackDialog(c)
 	s.renderWelcomeDialog(c)
-	s.renderComponentGalleryDialog(c)
 	if !s.inSplitViewRoot {
 		s.renderSpotlightTour(c, tok)
 	}
@@ -780,44 +795,6 @@ func (s *Shell) page(c *ui.Context) {
 	if s.Toasts != nil {
 		s.Toasts.Render(c, tok)
 	}
-}
-
-func (s *Shell) renderComponentGalleryDialog(c *ui.Context) {
-	if !s.ComponentGalleryOpen {
-		return
-	}
-	tok := theme.GetTokens(c.Theme())
-	open := s.ComponentGalleryOpen
-	w, h := c.Size()
-	if w <= 0 {
-		w = 1280
-	}
-	if h <= 0 {
-		h = 880
-	}
-	dlgW := min(float32(tok.Spacing48)*26.5, w*0.95)
-	dlgH := min(float32(tok.Spacing48)*18.2, h*0.92)
-	ui.Box(c.Key("kit-gallery-dlg")).Children(func() {
-		components.Dialog(c, &open, components.DialogOptions{Label: "AsterLab 全站 UI 组件画廊"}, func(panel ui.Element) {
-			panel.Width(dlgW).Height(dlgH).Padding(0).Gap(0).Clip()
-			kit.ApplyElevation(panel, tok, kit.ElevationModal)
-			panel.Children(func() {
-				ui.Row(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Icon(c, lucide.Layers()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-					ui.Text(c, "全站 UI 组件画廊 (Storybook)").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-					ui.Spacer(c)
-					if components.IconButton(c, lucide.X(), "关闭画廊", components.IconButtonPlain).Clicked() {
-						open = false
-					}
-				})
-				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-				extra := append([]kit.StorySection{s.BuiltinShellStorySection()}, s.GalleryExtraSections...)
-				kit.RenderComponentGallery(c, &s.galleryState, extra...)
-			})
-		})
-	})
-	s.ComponentGalleryOpen = open
 }
 
 func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
@@ -858,7 +835,7 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 			if warnLbl != "" {
 				dotCol = tok.Warning
 			}
-			ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
+			ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(dotCol)
 			ui.Text(c, saveLbl).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 		})
 		if warnLbl != "" {
@@ -892,13 +869,13 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 						if blockingCnt > 0 {
 							dotCol = tok.Danger
 						}
-						ui.Box(c).Size(6, 6).Radius(3).Background(dotCol)
+						ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(dotCol)
 						ui.Text(c, fmt.Sprintf("%d 项提醒", alertCnt)).FontSize(float32(tok.TextMeta)).TextColor(dotCol).FontFeatures("tnum").SingleLine()
 					case sugCnt > 0:
 						ui.Icon(c, lucide.Sparkles()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 						ui.Text(c, fmt.Sprintf("%d 处可结构化", sugCnt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
 					default:
-						ui.Box(c).Size(6, 6).Radius(3).Background(tok.Success)
+						ui.Box(c).Size(6, 6).Radius(float32(tok.PillRadius)).Background(tok.Success)
 						ui.Text(c, "方案就绪").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 					}
 				})
@@ -1515,7 +1492,7 @@ func statusLabel(status string) string {
 }
 
 func (s *Shell) Quit() {
-	if s.window != nil {
-		s.window.Window().OnClosed(func() { mygo.App.Quit() })
+	if w := s.MyGoWindow(); w != nil {
+		w.OnClosed(func() { mygo.App.Quit() })
 	}
 }

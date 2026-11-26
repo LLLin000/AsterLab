@@ -18,10 +18,17 @@ type SidePeekOptions struct {
 	Footer        func()
 }
 
-// SidePeek renders a right-hand detail drawer keeping the left workspace visible.
+// SidePeek renders a right-hand detail drawer keeping the left workspace visible on desktop,
+// and an Obsidian-style SafeArea-aware full-screen page on mobile viewports (< 680dp).
 // Clicking the dim scrim or pressing Escape closes the drawer cleanly.
 func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePeekOptions, body func()) {
 	if c == nil || open == nil || !*open {
+		return
+	}
+	if isMobileContextViewport(c) {
+		ui.Overlay(c, func() {
+			renderMobileSidePeekPage(c, key, tok, open, opts, body)
+		})
 		return
 	}
 	w, _ := c.Size()
@@ -85,5 +92,47 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 					Gap(float32(tok.Spacing8)).Children(opts.Footer)
 			}
 		})
+	})
+}
+
+func renderMobileSidePeekPage(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePeekOptions, body func()) {
+	t := c.Theme()
+	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if components.Button(c.Key("sidepeek-mb-back"), "返回", components.ButtonGhost).Shrink(0).Clicked() {
+				*open = false
+			}
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, opts.Title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+				if opts.Subtitle != "" {
+					ui.Text(c, opts.Subtitle).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+				}
+			})
+			if opts.HeaderActions != nil {
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(t.Space(1)).Children(opts.HeaderActions)
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		ui.Scroll(c.Key("sidepeek-mb-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				if body != nil {
+					body()
+				}
+			})
+		})
+
+		if opts.Footer != nil {
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Row(c).FillWidth().Wrap().
+				Padding(t.Space(3), t.Space(4)+rightSafe, t.Space(3)+bottomSafe, t.Space(4)+leftSafe).
+				AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(opts.Footer)
+		}
 	})
 }

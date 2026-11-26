@@ -324,8 +324,16 @@ func TestMobileSafeAreaAndFileTreeSwipeActions(t *testing.T) {
 	tt.Frame()
 	advanceMobileFrames(tt, 260*time.Millisecond)
 
-	if bottomReserve < 109 {
-		t.Fatalf("expected MobileBottomReserve to include 34dp SafeArea inset (>=110), got %v", bottomReserve)
+	if bottomReserve < 60 || bottomReserve > 72 {
+		t.Fatalf("expected MobileBottomReserve inside root SafeArea to be in [60, 72] without 2x safeBottom, got %v", bottomReserve)
+	}
+
+	hdrR, ok := tt.Find("实验库")
+	if !ok {
+		t.Fatalf("expected 实验库 drawer header, texts=%v", tt.Texts())
+	}
+	if hdrR.Y < 44 || hdrR.Y > 72 {
+		t.Fatalf("expected Left Drawer header to apply 1x top SafeArea (44..72), got %+v", hdrR)
 	}
 
 	rowRect, ok := tt.Find("exp1.asterml")

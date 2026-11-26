@@ -301,7 +301,7 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 				} else {
 					// Calm compact 2-segment mode switch: [ 编辑 | 实验 ]
 					ui.Row(c.Key("doc-mode-seg:"+tab.ID)).AlignSelf(ui.Center).
-						Padding(2).Radius(float32(tok.ControlRadius)).
+						Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 						Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 						edAct := tab.Mode == shell.ModeEdit
 						edSeg := ui.ButtonBase(c.Key("doc-mode-ed:"+tab.ID)).
@@ -429,8 +429,8 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			ui.Row(c.Key("doc-find-bar")).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing16)).
 				Background(tok.Elevated).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.Search()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-				ui.Box(c).Width(float32(tok.Spacing48)*6).Children(func() {
-					tb := components.TextBox(c, findQuery, components.TextBoxOptions{}).Placeholder("在当前实验步骤与模块中查找…")
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					tb := components.TextBox(c, findQuery, components.TextBoxOptions{}).Placeholder("在当前实验步骤与模块中查找…").FillWidth()
 					tb.AutoFocus()
 					if tb.Shortcut(0, ui.KeyEscape) {
 						*findOpen = false
@@ -977,9 +977,9 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 			padH := float32(tok.Spacing24)
 			padBot := float32(tok.Spacing48)
 			if mobileLayout && a.shell != nil {
-				padTop = a.shell.MobileTopReserve(c) + float32(tok.Spacing12)
+				padTop = a.shell.MobileTopReserve(c) + float32(tok.Spacing4)
 				padH = float32(tok.Spacing12) + 2
-				padBot = a.shell.MobileBottomReserve(c) + float32(tok.Spacing24)
+				padBot = a.shell.MobileBottomReserve(c) + float32(tok.Spacing8)
 			}
 			docScroll.Children(func() {
 				// Readable line length adapts smoothly to viewport width (widens gently on 27"+ monitors)
@@ -1075,7 +1075,11 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 
 							propRow := func(icon *ui.SVG, label string, valueFn func()) {
 								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Padding(float32(tok.Spacing4)*0.5, 0).Children(func() {
-									ui.Row(c).Width(float32(tok.Spacing48)*1.8).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+									labelW := float32(tok.Spacing48) * 1.8
+									if mobileLayout {
+										labelW = float32(tok.Spacing48) * 1.35
+									}
+									ui.Row(c).Width(labelW).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 										ui.Icon(c, icon).Size(float32(tok.Spacing16)*0.9, float32(tok.Spacing16)*0.9).TextColor(tok.TextMuted)
 										ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 									})
@@ -1286,7 +1290,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												if sum.CCK8 != nil {
 													for _, g := range sum.CCK8.Groups {
 														ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-															ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
+															lblEl := ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+															if !mobileLayout {
+																lblEl.MinWidth(160)
+															}
 															ui.Text(c, fmt.Sprintf("均值 %s ± %s（%d 复孔）", asterdoc.FormatSciStat(g.Mean), asterdoc.FormatSciStat(g.SD), g.N)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
 															ui.Text(c, fmt.Sprintf("相对活力 %.1f%%", g.RelativeActivity*100)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
 														})
@@ -1296,7 +1303,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 												if sum.QPCR != nil {
 													for _, g := range sum.QPCR.Groups {
 														ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-															ui.Text(c, asterdoc.FormatDisplayText(g.SampleID)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
+															lblEl := ui.Text(c, asterdoc.FormatDisplayText(g.SampleID)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+															if !mobileLayout {
+																lblEl.MinWidth(160)
+															}
 															ui.Text(c, fmt.Sprintf("ΔΔCq %.2f", g.DeltaDeltaCq)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1)
 															ui.Text(c, fmt.Sprintf("相对表达 %.2f×", g.FoldChange)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum")
 														})
@@ -1305,7 +1315,10 @@ func (a *app) renderVaultTabContent(c *ui.Context, pane *shell.PaneNode, tab she
 											default:
 												for _, g := range sum.Groups {
 													ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-														ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).MinWidth(160)
+														lblEl := ui.Text(c, asterdoc.FormatDisplayText(g.Group)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text)
+														if !mobileLayout {
+															lblEl.MinWidth(160)
+														}
 														repTxt := fmt.Sprintf("%d 复孔", g.TechReplicates)
 														if g.BioSamples > 0 {
 															repTxt = fmt.Sprintf("%d 复孔 · 独立 n=%d", g.TechReplicates, g.BioSamples)

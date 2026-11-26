@@ -3,6 +3,7 @@ package shell
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,12 +24,20 @@ import (
 )
 
 const (
-	mobileBreakpointWidth    = float32(680)
-	mobilePullActionThresh   = float32(56)
-	mobileDrawerWidthMax     = float32(320)
-	mobileEdgeSwipeZoneWidth = float32(18)
-	mobileToolbarConfigFile  = "mobile_toolbar.json"
+	mobileBreakpointWidth      = float32(680)
+	mobilePullActionThresh     = float32(56)
+	mobileDrawerWidthMax       = float32(320)
+	mobileEdgeSwipeZoneWidth   = float32(18)
+	mobileKeyboardInsetThresh  = float32(120)
+	mobileToolbarConfigFile    = "mobile_toolbar.json"
 )
+
+func mobileDockBottomMargin() float32 {
+	if mobile.Current() == mobile.Material {
+		return 12
+	}
+	return 8
+}
 
 // MobileToolbarActionSpec describes one customizable button in the mobile edit toolbar.
 type MobileToolbarActionSpec struct {
@@ -48,16 +57,21 @@ type MobileToolbarConfig struct {
 }
 
 type mobileExtraState struct {
-	order           []string
-	hidden          map[string]bool
-	pinnedFiles     map[string]bool
-	pullWasReady    bool
-	loadedVaultPath string
-	explicitConfig  bool
-	calAgenda3Day   bool
-	calAgendaInited bool
-	calStripPage    mobile.PageState
-	calStripInited  bool
+	order                  []string
+	hidden                 map[string]bool
+	pinnedFiles            map[string]bool
+	pullWasReady           bool
+	loadedVaultPath        string
+	explicitConfig         bool
+	calAgenda3Day          bool
+	calAgendaInited        bool
+	calModeInited          bool
+	calStripPage           mobile.PageState
+	calStripInited         bool
+	drawerDragOffset       ui.Point
+	drawerDragOpened       string
+	mobileSettingsDetail   bool
+	mobileSettingsLastOpen bool
 }
 
 var (
@@ -409,10 +423,13 @@ func (s *Shell) HandleMobileBack() bool {
 		s.GlobalSearchOpen = false
 		return true
 	case s.VaultSettingsOpen:
+		extra := s.mobileExtra()
+		if extra.mobileSettingsDetail {
+			extra.mobileSettingsDetail = false
+			return true
+		}
 		s.VaultSettingsOpen = false
-		return true
-	case s.ComponentGalleryOpen:
-		s.ComponentGalleryOpen = false
+		extra.mobileSettingsLastOpen = false
 		return true
 	case s.newFolderDialogOpen:
 		s.newFolderDialogOpen = false
@@ -466,6 +483,13 @@ func (s *Shell) EnsureMobileDefaults() {
 	if s.MobilePullAction == "" {
 		s.MobilePullAction = "palette"
 	}
+	extra := s.mobileExtra()
+	if !extra.calModeInited {
+		extra.calModeInited = true
+		if s.CalendarMode == 0 {
+			s.CalendarMode = 1
+		}
+	}
 	if !s.mobilePrefsInited {
 		s.mobilePrefsInited = true
 		if !s.MobileAutoHideDock {
@@ -507,24 +531,22 @@ func (s *Shell) MobileContentScrollState() *ui.ScrollState {
 	return st
 }
 
-// MobileTopReserve returns top clearance below the floating iOS Liquid Glass controls
+// MobileTopReserve returns top clearance below the floating iOS/Android Liquid Glass controls
 // (left drawer orb + right mode/more pill) when Liquid Glass is active.
+// MyGo's root already applies system status/cutout SafeArea padding via padInsets, so this excludes SafeArea.
 func (s *Shell) MobileTopReserve(c *ui.Context) float32 {
 	tok := theme.GetTokens(c.Theme())
 	if !tok.LiquidGlass {
 		return 0
 	}
-	return 56
+	return 48
 }
 
-// MobileBottomReserve returns the bottom clearance needed so scrolled document/calendar
-// items clear the centered floating bottom glass capsule and system home-indicator SafeArea cleanly.
+// MobileBottomReserve returns the bottom clearance inside the root SafeArea needed so scrolled
+// content clears the floating bottom capsule cleanly without double-counting system bottom SafeArea.
 func (s *Shell) MobileBottomReserve(c *ui.Context) float32 {
-	var safeBottom float32
-	if c != nil {
-		_, _, safeBottom, _ = c.SafeArea()
-	}
-	return 76 + safeBottom
+	_ = c
+	return 48 + mobileDockBottomMargin() + 8
 }
 
 func (s *Shell) updateMobileScrollBehavior() {
@@ -597,13 +619,11 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 		s.HandleMobileBack()
 	}
 
+	// MyGo's runtime padInsets already pads the window root for OS SafeArea bars/cutouts/IME.
+	// Only add sidebar.HeaderHeight when a desktop window is narrowed into mobile preview.
 	var topInset float32
 	if s.window != nil {
 		topInset = sidebar.HeaderHeight(c)
-	}
-	safeTop, safeRight, _, safeLeft := c.SafeArea()
-	if safeTop > topInset {
-		topInset = safeTop
 	}
 	activeTab := s.ActiveTab()
 	activePane := s.findPane(s.ActivePaneID)
@@ -619,7 +639,7 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 		sheetMaxW = 240
 	}
 
-	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, safeRight, 0, safeLeft)
+	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, 0, 0, 0)
 	theme.PaintCanvasBackground(rootBox, tok)
 	rootBox.Children(func() {
 		ui.Column(c).Fill().Children(func() {
@@ -679,8 +699,14 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 	s.renderCommandPalette(c)
 	s.renderGlobalSearchModal(c)
 	s.renderVaultDialogs(c)
+	s.renderFeedbackDialog(c)
+	s.renderWelcomeDialog(c)
+	s.renderSpotlightTour(c, tok)
 	if s.RenderOverlays != nil {
 		s.RenderOverlays(c)
+	}
+	if s.Toasts != nil {
+		s.Toasts.Render(c, tok)
 	}
 }
 
@@ -689,13 +715,13 @@ func (s *Shell) renderMobileGlassTopBar(c *ui.Context, tok theme.Tokens, activeT
 	components.ScrollEdge(c, components.ScrollEdgeOptions{
 		Style:      components.ScrollEdgeSoft,
 		Bottom:     false,
-		Extent:     54,
+		Extent:     48,
 		Background: tok.Canvas,
 	})
 
 	// Left: Standalone 40x40 circular Liquid Glass sidebar button (matches Obsidian iOS)
-	leftOrb := ui.ButtonBase(c.Key("mb-top-sidebar")).Absolute().Top(10).Left(14).
-		Size(40, 40).Radius(20).Center().Label("打开实验库抽屉")
+	leftOrb := ui.ButtonBase(c.Key("mb-top-sidebar")).Absolute().Top(float32(tok.Spacing4)).Left(14).
+		Size(40, 40).Radius(float32(tok.PillRadius)).Center().Label("打开实验库抽屉")
 	theme.ApplyCapsuleGlass(leftOrb, tok, true)
 	theme.ApplyTactilePress(leftOrb)
 	leftOrb.Children(func() {
@@ -710,12 +736,12 @@ func (s *Shell) renderMobileGlassTopBar(c *ui.Context, tok theme.Tokens, activeT
 	}
 
 	// Right: Clean twin-icon merged Liquid Glass pill (Zero nested boxes!)
-	rightPill := ui.Row(c.Key("mb-top-right-pill")).Absolute().Top(10).Right(14).
-		Height(40).Padding(0, 6).Radius(20).AlignItems(ui.Center).Gap(2)
+	rightPill := ui.Row(c.Key("mb-top-right-pill")).Absolute().Top(float32(tok.Spacing4)).Right(14).
+		Height(40).Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).AlignItems(ui.Center).Gap(2)
 	theme.ApplyCapsuleGlass(rightPill, tok, false)
 	rightPill.Children(func() {
 		pillIcon := func(key string, icon *ui.SVG, label string, active bool, onClick func()) ui.Element {
-			btn := ui.ButtonBase(c.Key("mb-tr-"+key)).Size(36, 36).Radius(18).Center().Label(label)
+			btn := ui.ButtonBase(c.Key("mb-tr-"+key)).Size(36, 36).Radius(float32(tok.PillRadius)).Center().Label(label)
 			if btn.Hovered() {
 				btn.Background(tok.Text.Alpha(0.05))
 			}
@@ -745,7 +771,7 @@ func (s *Shell) renderMobileGlassTopBar(c *ui.Context, tok theme.Tokens, activeT
 					s.SetActiveTabMode(ModeEdit)
 				})
 			}
-			moreB := ui.ButtonBase(c.Key("mb-tr-more")).Size(36, 36).Radius(18).Center().Label("文档与更多操作")
+			moreB := ui.ButtonBase(c.Key("mb-tr-more")).Size(36, 36).Radius(float32(tok.PillRadius)).Center().Label("文档与更多操作")
 			if moreB.Hovered() {
 				moreB.Background(tok.Text.Alpha(0.05))
 			}
@@ -869,10 +895,11 @@ func (s *Shell) renderMobilePullDownQuickAction(c *ui.Context, tok theme.Tokens)
 		extra.pullWasReady = false
 		return
 	}
-	topZone := s.MobileTopReserve(c)
-	pullZone := ui.Box(c.Key("mb-pull-zone")).Absolute().Left(68).Right(96).Top(topZone).Height(22)
-	_, dy, dragging := pullZone.Dragged()
-	if dragging && dy > 0 {
+	// Place the pull-down trigger inside the empty center gap of the floating top bar
+	// (strictly within MobileTopReserve=48dp) so it never steals taps from Pantry/Calendar buttons.
+	pullZone := ui.Box(c.Key("mb-pull-zone")).Absolute().Left(64).Right(104).Top(0).Height(48)
+	dx, dy, dragging := pullZone.Dragged()
+	if dragging && dy > 0 && dy >= dx && dy >= -dx {
 		damped := dy * 0.72
 		if damped > 92 {
 			damped = 92 + (damped-92)*0.25
@@ -910,9 +937,10 @@ func (s *Shell) renderMobilePullDownQuickAction(c *ui.Context, tok theme.Tokens)
 	if dropY > 44 {
 		dropY = 44
 	}
+	topZone := s.MobileTopReserve(c)
 	ui.Row(c.Key("mb-pull-pill")).Absolute().Left(48).Right(48).Top(topZone+6).Center().PassThrough().Children(func() {
 		pill := ui.Row(c).Padding(float32(tok.Spacing4)*1.5, float32(tok.Spacing12)).
-			Radius(20).Translate(0, dropY).
+			Radius(float32(tok.PillRadius)).Translate(0, dropY).
 			AlignItems(ui.Center).Gap(float32(tok.Spacing8))
 		if ready {
 			theme.ApplyAccentGlass(pill, tok, false)
@@ -988,11 +1016,15 @@ func (s *Shell) renderMobileFloatingBottomBar(
 	hideT := stage.AnimateTo("mb-dock-hide", targetHide, theme.MotionFluid)
 
 	_, _, safeBottom, _ := c.SafeArea()
+	if safeBottom > mobileKeyboardInsetThresh && !editingBar {
+		return
+	}
+	bottomMargin := mobileDockBottomMargin()
 	if hideT > 0.85 {
 		pill := ui.ButtonBase(c.Key("mb-dock-reveal")).Absolute().
-			Left(120).Right(120).Bottom(8 + safeBottom).Height(18).Center().Label("显示导航栏")
+			Left(120).Right(120).Bottom(4).Height(18).Center().Label("显示导航栏")
 		pill.Children(func() {
-			ui.Box(c).Width(42).Height(4).Radius(2).Background(tok.TextMuted.Alpha(0.45))
+			ui.Box(c).Width(42).Height(4).Radius(float32(tok.PillRadius)).Background(tok.TextMuted.Alpha(0.45))
 		})
 		if pill.Clicked() {
 			s.MobileDockHidden = false
@@ -1005,15 +1037,15 @@ func (s *Shell) renderMobileFloatingBottomBar(
 		tabCount = len(activePane.Tabs)
 	}
 
-	// Centered compact floating capsule (horizontally scrollable on narrow screens for edit toolbar!)
+	// Centered compact floating capsule positioned by platform HIG/M3 spacing above root SafeArea.
 	vw, _ := c.Size()
 	maxCapsuleW := float32(360)
 	if vw > 48 {
 		maxCapsuleW = vw - 32
 	}
-	ui.Row(c.Key("mb-dock-wrap")).Absolute().Left(16).Right(16).Bottom(14 + safeBottom).Center().PassThrough().Children(func() {
-		capsule := ui.Row(c.Key("mb-dock-capsule")).Height(48).MaxWidth(maxCapsuleW).Radius(24).
-			Padding(0, 12).AlignItems(ui.Center).Gap(4).Clip().
+	ui.Row(c.Key("mb-dock-wrap")).Absolute().Left(16).Right(16).Bottom(bottomMargin).Center().PassThrough().Children(func() {
+		capsule := ui.Row(c.Key("mb-dock-capsule")).Height(48).MaxWidth(maxCapsuleW).Radius(float32(tok.PillRadius)).
+			Padding(0, float32(tok.Spacing12)).AlignItems(ui.Center).Gap(4).Clip().
 			Translate(0, hideT*78).
 			Opacity(1 - hideT*0.92)
 		theme.ApplyCapsuleGlass(capsule, tok, false)
@@ -1029,7 +1061,7 @@ func (s *Shell) renderMobileFloatingBottomBar(
 
 func (s *Shell) renderMobileNavDockItems(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab, tabCount int) {
 	navBtn := func(key, label string, enabled, active bool, custom func(fg ui.Color), onClick func()) {
-		b := ui.ButtonBase(c.Key("mb-nav-"+key)).Size(40, 40).Radius(20).Center().
+		b := ui.ButtonBase(c.Key("mb-nav-"+key)).Size(40, 40).Radius(float32(tok.PillRadius)).Center().
 			Disabled(!enabled).Label(label)
 		if b.Hovered() && enabled {
 			b.Background(tok.Text.Alpha(0.06))
@@ -1087,9 +1119,9 @@ func (s *Shell) renderMobileNavDockItems(c *ui.Context, tok theme.Tokens, active
 
 	// 5. Tab Counter Box ([N]) - faithful to Obsidian iOS Tab Switcher glyph!
 	navBtn("tabs", "标签", true, s.MobileTabSwitcherOpen, func(fg ui.Color) {
-		ui.Box(c).Size(20, 20).Radius(5).Border(1.6, fg).Center().Children(func() {
+		ui.Box(c).Size(20, 20).Radius(float32(tok.ControlRadius)).Border(1.6, fg).Center().Children(func() {
 			components.Text(c, fmt.Sprintf("%d", tabCount)).
-				FontSize(11).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
+				FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
 		})
 	}, func() {
 		s.MobileDrawer = ""
@@ -1129,7 +1161,7 @@ func (s *Shell) renderMobileEditToolbarCapsule(c *ui.Context, tok theme.Tokens, 
 }
 
 func (s *Shell) renderMobileToolbarButton(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab, spec MobileToolbarActionSpec) {
-	b := ui.ButtonBase(c.Key("mb-ed-"+spec.ID)).Size(36, 36).Radius(18).Center().Label(spec.Label)
+	b := ui.ButtonBase(c.Key("mb-ed-"+spec.ID)).Size(36, 36).Radius(float32(tok.PillRadius)).Center().Label(spec.Label)
 	if b.Hovered() {
 		b.Background(tok.Text.Alpha(0.06))
 	}
@@ -1214,6 +1246,7 @@ func (s *Shell) renderMobileEditToolbarItems(c *ui.Context, tok theme.Tokens, ac
 }
 
 func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetMaxW float32) {
+	extra := s.mobileExtra()
 	activeKind := s.MobileDrawer
 	if activeKind == "" && s.MobileSwipeKind != "" && s.MobileDrawerProgress > 0.01 {
 		activeKind = s.MobileSwipeKind
@@ -1228,13 +1261,15 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		targetP = s.MobileDrawerProgress
 	}
 
-	root := ui.Box(c.Key("mb-drawer-host")).Absolute().Fill().PassThrough()
-	pAnim := root.AnimateTo("mb-drawer-p", targetP, theme.MotionFluid)
+	animHost := ui.Box(c.Key("mb-drawer-host")).Absolute().Size(0, 0).PassThrough()
+	pAnim := animHost.AnimateTo("mb-drawer-p", targetP, theme.MotionFluid)
 	if s.MobileSwipeKind != "" {
 		pAnim = targetP
 	}
 	if activeKind == "" && pAnim <= 0.01 {
 		s.mobileLastDrawerKind = ""
+		extra.drawerDragOffset = ui.Point{}
+		extra.drawerDragOpened = ""
 		return
 	}
 	if activeKind == "" {
@@ -1244,7 +1279,9 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		}
 	}
 
-	root.Children(func() {
+	ui.Overlay(c, func() {
+		root := ui.Box(c.Key("mb-drawer-overlay")).Absolute().Fill().PassThrough()
+		root.Children(func() {
 		maxScrim := float32(0.18)
 		if tok.Dark {
 			maxScrim = 0.48
@@ -1254,19 +1291,13 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		if s.MobileDrawer != "" && backdrop.Clicked() {
 			s.MobileDrawer = ""
 			s.MobileDrawerProgress = 0
+			extra.drawerDragOffset = ui.Point{}
+			extra.drawerDragOpened = ""
 		}
 
 		isLeft := activeKind == "tree"
-		sheetOffsetX := float32(0)
-		if isLeft {
-			sheetOffsetX = -(1 - pAnim) * sheetMaxW
-		} else {
-			sheetOffsetX = (1 - pAnim) * sheetMaxW
-		}
-
 		sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
-			Shadow(0, 8, 32, 0, tok.Text.Alpha(0.16)).
-			Translate(sheetOffsetX, 0)
+			Shadow(0, 8, 32, 0, tok.Text.Alpha(0.16)).Clip()
 		theme.ApplyPanelGlass(sheet, tok, 0.45)
 		if isLeft {
 			sheet.Left(0)
@@ -1275,53 +1306,90 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 		}
 
 		if s.MobileDrawer != "" {
-			if dx, _, dragging := sheet.Dragged(); dragging {
-				if isLeft && dx < -4 {
-					p := 1 + dx/sheetMaxW
-					if p < 0 {
-						p = 0
-					}
-					sheet.Translate((1-p)*(-sheetMaxW), 0)
-					s.MobileDrawerProgress = p
-				} else if !isLeft && dx > 4 {
-					p := 1 - dx/sheetMaxW
-					if p < 0 {
-						p = 0
-					}
-					sheet.Translate((1-p)*sheetMaxW, 0)
-					s.MobileDrawerProgress = p
-				}
-			} else if s.MobileDrawerProgress > 0 && s.MobileDrawerProgress < 0.99 {
-				vx, _ := sheet.DragVelocity()
-				dismiss := s.MobileDrawerProgress < 0.65 || (isLeft && vx < -280) || (!isLeft && vx > 280)
-				if dismiss {
-					s.MobileDrawer = ""
-					mygo.Haptics.Light()
-				}
-				s.MobileDrawerProgress = 0
+			gone := -sheetMaxW
+			bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
+			if !isLeft {
+				gone = sheetMaxW
+				bounds = ui.Rect{X: 0, W: sheetMaxW}
 			}
+			if extra.drawerDragOpened != s.MobileDrawer {
+				extra.drawerDragOffset = ui.Point{}
+				extra.drawerDragOpened = s.MobileDrawer
+			}
+			sheet.Draggable(&extra.drawerDragOffset, ui.DraggableOptions{
+				Axis:   ui.Horizontal,
+				Bounds: &bounds,
+				Rigid:  true,
+				Snap:   ui.Nearest(ui.Point{}, ui.Point{X: gone}),
+			})
+			if !sheet.Dragging() && math.Abs(float64(extra.drawerDragOffset.X-gone)) < 1.0 {
+				s.MobileDrawer = ""
+				s.MobileDrawerProgress = 0
+				extra.drawerDragOffset = ui.Point{}
+				extra.drawerDragOpened = ""
+				mygo.Haptics.Light()
+			}
+		} else {
+			sheetOffsetX := (1 - pAnim) * sheetMaxW
+			if isLeft {
+				sheetOffsetX = -(1 - pAnim) * sheetMaxW
+			}
+			sheet.Translate(sheetOffsetX, 0)
 		}
 
 		safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
+		t := c.Theme()
 		sheet.Children(func() {
 			if isLeft {
-				// Clean Obsidian iOS Drawer: Scrollable Tree (with SwipeRow actions) on top + Floating 3-Tier Bottom Control Island
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).
-					Padding(safeTop+float32(tok.Spacing12), float32(tok.Spacing8)+safeRight, 0, float32(tok.Spacing8)+safeLeft).Children(func() {
+				// Left Drawer: compact header + clipped scrollable file tree + 3-tier bottom control island.
+				ui.Row(c).FillWidth().
+					Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
+					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Icon(c, lucide.FolderOpen()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					components.Text(c, "实验库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+					if components.IconButton(c.Key("mb-left-close"), lucide.X(), "关闭实验库抽屉", components.IconButtonPlain).Clicked() {
+						s.MobileDrawer = ""
+						s.MobileDrawerProgress = 0
+						extra.drawerDragOffset = ui.Point{}
+						extra.drawerDragOpened = ""
+					}
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
+					Padding(t.Space(1), t.Space(2)+safeRight, 0, t.Space(2)+safeLeft).Children(func() {
 					s.renderMobileFileTreeScrollBody(c, tok)
 				})
 				ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
 					s.renderMobileDrawerBottomIsland(c, tok, "tree")
 				})
 			} else {
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Padding(safeTop, safeRight, 0, safeLeft).Children(func() {
-					s.rightDrawer(c)
+				// Dedicated Right Companion Drawer: clean header with drawer switch + close, and full-height clipped body
+				// (NO bottom island overlapping timers or calculator controls).
+				ui.Row(c).FillWidth().
+					Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
+					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+					ui.Icon(c, lucide.Calculator()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					components.Text(c, "步骤与速算").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+					if components.IconButton(c.Key("mb-right-to-left"), lucide.PanelLeft(), "切换实验库", components.IconButtonCompact).Clicked() {
+						s.MobileDrawer = "tree"
+						extra.drawerDragOffset = ui.Point{}
+						extra.drawerDragOpened = "tree"
+					}
+					if components.IconButton(c.Key("mb-right-close"), lucide.X(), "关闭右侧抽屉", components.IconButtonPlain).Clicked() {
+						s.MobileDrawer = ""
+						s.MobileDrawerProgress = 0
+						extra.drawerDragOffset = ui.Point{}
+						extra.drawerDragOpened = ""
+					}
 				})
-				ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
-					s.renderMobileDrawerBottomIsland(c, tok, "outline")
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
+					Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
+					s.rightDrawer(c)
 				})
 			}
 		})
+	})
 	})
 }
 
@@ -1344,7 +1412,7 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 		// Tier 1: Quiet centered icon-only action toolbar (New, Folder, Calendar, Pantry, Collapse)
 		ui.Row(c).FillWidth().Justify(ui.SpaceEvenly).AlignItems(ui.Center).Children(func() {
 			miniAction := func(icon *ui.SVG, label string, onClick func()) {
-				b := ui.ButtonBase(c).Size(36, 36).Radius(18).Center().Label(label)
+				b := ui.ButtonBase(c).Size(36, 36).Radius(float32(tok.PillRadius)).Center().Label(label)
 				theme.ApplyTactilePress(b)
 				b.Children(func() {
 					ui.Icon(c, icon).Size(18, 18).TextColor(tok.Text)
@@ -1383,7 +1451,7 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			modeText = "步骤与速算"
 		}
 		pillSwitch := ui.ButtonBase(c.Key("mb-drawer-mode-pill")).FillWidth().Height(40).
-			Radius(20).Padding(0, float32(tok.Spacing16)).Background(tok.Elevated).Label(modeText)
+			Radius(float32(tok.PillRadius)).Padding(0, float32(tok.Spacing16)).Background(tok.Elevated).Label(modeText)
 		theme.ApplyTactilePress(pillSwitch)
 		pillSwitch.Children(func() {
 			ui.Row(c).Fill().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -1413,7 +1481,7 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 
 			s.renderMobileDrawerSyncIndicator(c, tok)
 
-			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(40, 40).Radius(20).Center().Label("打开设置")
+			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(40, 40).Radius(float32(tok.PillRadius)).Center().Label("打开设置")
 			theme.ApplyCapsuleGlass(gearBtn, tok, true)
 			theme.ApplyTactilePress(gearBtn)
 			gearBtn.Children(func() {
@@ -1421,6 +1489,11 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			})
 			if gearBtn.Clicked() {
 				s.MobileDrawer = ""
+				s.SettingsView.Category = ""
+				s.SettingsView.Query = ""
+				extra := s.mobileExtra()
+				extra.mobileSettingsLastOpen = false
+				extra.mobileSettingsDetail = false
 				s.VaultSettingsOpen = true
 			}
 		})
@@ -1769,13 +1842,14 @@ func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, 
 		s.MobileTabSwitcherOpen = false
 		return
 	}
-	safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
-	overlay := ui.Column(c.Key("mb-tab-switcher")).Absolute().Fill().
-		Padding(float32(tok.Spacing16)+safeTop, float32(tok.Spacing16)+safeRight, float32(tok.Spacing16)+safeBottom, float32(tok.Spacing16)+safeLeft).
-		Gap(float32(tok.Spacing12)).
-		Transition(theme.FloatingBarTransition())
-	theme.ApplyPanelGlass(overlay, tok, 0.35)
-	overlay.Children(func() {
+	ui.Overlay(c, func() {
+		safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
+		overlay := ui.Column(c.Key("mb-tab-switcher")).Absolute().Fill().Modal().
+			Padding(float32(tok.Spacing16)+safeTop, float32(tok.Spacing16)+safeRight, float32(tok.Spacing16)+safeBottom, float32(tok.Spacing16)+safeLeft).
+			Gap(float32(tok.Spacing12)).
+			Transition(theme.FloatingBarTransition())
+		theme.ApplyPanelGlass(overlay, tok, 0.35)
+		overlay.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			components.Text(c, fmt.Sprintf("标签页概览 (%d)", len(activePane.Tabs))).
 				FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
@@ -1810,7 +1884,7 @@ func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, 
 							}
 
 							card := ui.ButtonBase(c.Key("mb-ts-"+t.ID)).Grow(1).MinWidth(0).Height(96).
-								Padding(float32(tok.Spacing12)).Radius(14).
+								Padding(float32(tok.Spacing12)).Radius(float32(tok.DialogRadius)).
 								Background(cardBg).Border(borderW, cardBorder).
 								Label(t.Title)
 							theme.ApplyTactilePress(card)
@@ -1870,5 +1944,6 @@ func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, 
 				}
 			})
 		})
+	})
 	})
 }

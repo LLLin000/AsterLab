@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -246,35 +247,40 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		}
 
 		openFig := v.figureOpen && v.ExpandedFigureID == moduleID
-		ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
-			components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
-			panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
-				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-					ui.Spacer(c)
-					for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
-						z := z
-						style := components.ButtonOutline
-						if v.FigureZoom == z {
-							style = components.ButtonSecondary
+		openFig = v.figureOpen && v.ExpandedFigureID == moduleID
+	if openFig && isMobileAsterdocViewport(c, v) {
+			renderFigureLightboxMobile(c, v, tok, "mb-fig-dlg:"+moduleID, moduleID, title, src, svgRaw, annotations, caption, &openFig)
+		} else {
+			ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
+				components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
+					panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+							ui.Spacer(c)
+							for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
+								z := z
+								style := components.ButtonOutline
+								if v.FigureZoom == z {
+									style = components.ButtonSecondary
+								}
+								if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+									v.FigureZoom = z
+								}
+							}
+							if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+								openFig = false
+							}
+						})
+						ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+							v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
+						})
+						if caption != "" {
+							ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						}
-						if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
-							v.FigureZoom = z
-						}
-					}
-					if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-						openFig = false
-					}
+					})
 				})
-				ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
-					v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
-				})
-				if caption != "" {
-					ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-				}
 			})
-		})
-		})
+		}
 		if !openFig && v.ExpandedFigureID == moduleID {
 			v.figureOpen = false
 		}
@@ -510,63 +516,207 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 		}
 	})
 
-	ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
-		components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
-		panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-				ui.Spacer(c)
-				for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
-					z := z
-					style := components.ButtonOutline
-					if v.FigureZoom == z {
-						style = components.ButtonSecondary
+	openFig = v.figureOpen && v.ExpandedFigureID == moduleID
+	if openFig && isMobileAsterdocViewport(c, v) {
+		renderFigureLightboxMobile(c, v, tok, "mb-fig-dlg:"+moduleID, moduleID, title, src, svgRaw, annotations, caption, &openFig)
+	} else {
+		ui.Box(c.Key("fig-dlg:"+moduleID)).Children(func() {
+			components.Dialog(c, &openFig, components.DialogOptions{Label: title}, func(panel ui.Element) {
+				panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+						ui.Spacer(c)
+						for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
+							z := z
+							style := components.ButtonOutline
+							if v.FigureZoom == z {
+								style = components.ButtonSecondary
+							}
+							if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+								v.FigureZoom = z
+							}
+						}
+						if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
+							openFig = false
+						}
+					})
+					ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
+						ui.Column(c.Key("fig-modal-hero:"+moduleID)).FillWidth().
+							Transition(theme.HeroFlyTransition(figHeroMatch{ID: moduleID})).Children(func() {
+							v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
+						})
+					})
+					if caption != "" {
+						ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					}
-					if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
-						v.FigureZoom = z
-					}
-				}
-				if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-					openFig = false
-				}
-			})
-			ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
-				ui.Column(c.Key("fig-modal-hero:"+moduleID)).FillWidth().
-					Transition(theme.HeroFlyTransition(figHeroMatch{ID: moduleID})).Children(func() {
-					v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 320, v.FigureZoom)
 				})
 			})
-			if caption != "" {
-				ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-			}
 		})
-	})
-	})
+	}
 	if !openFig && v.ExpandedFigureID == moduleID {
 		v.figureOpen = false
 	}
 
 	if editableDesign {
 		svgBuf := v.ensureWidgetDraft("fig:"+moduleID+":svg", svgRaw)
-		ui.Box(c.Key("fig-svg-ed:"+moduleID)).Children(func() {
-			components.Dialog(c, svgEdOpen, components.DialogOptions{Label: "编辑 SVG 矢量源码"}, func(panel ui.Element) {
-			panel.Width(float32(tok.Spacing48)*11).Gap(float32(tok.Spacing12)).Children(func() {
-				components.TextBox(c, svgBuf, components.TextBoxOptions{Multiline: true}).
-					Placeholder("<svg viewBox=\"0 0 360 220\">…</svg>").Lines(8, 16)
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Spacer(c)
-					if components.Button(c, "取消", components.ButtonOutline).Clicked() {
-						*svgEdOpen = false
+		if *svgEdOpen && isMobileAsterdocViewport(c, v) {
+			renderMobileSVGEditorPage(c, tok, "mb-fig-svg-ed:"+moduleID, svgEdOpen, svgBuf, func(val string) {
+				v.emitAnyModuleEdit(moduleID, map[string]any{"svg": val})
+			})
+		} else {
+			ui.Box(c.Key("fig-svg-ed:"+moduleID)).Children(func() {
+				components.Dialog(c, svgEdOpen, components.DialogOptions{Label: "编辑 SVG 矢量源码"}, func(panel ui.Element) {
+					panel.Width(float32(tok.Spacing48)*11).Gap(float32(tok.Spacing12)).Children(func() {
+						components.TextBox(c, svgBuf, components.TextBoxOptions{Multiline: true}).
+							Placeholder("<svg viewBox=\"0 0 360 220\">…</svg>").Lines(8, 16)
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Spacer(c)
+							if components.Button(c, "取消", components.ButtonOutline).Clicked() {
+								*svgEdOpen = false
+							}
+							if components.Button(c, "应用 SVG", components.ButtonPrimary).Clicked() {
+								v.emitAnyModuleEdit(moduleID, map[string]any{"svg": strings.TrimSpace(*svgBuf)})
+								*svgEdOpen = false
+							}
+						})
+					})
+				})
+			})
+		}
+	}
+}
+
+func isMobileAsterdocViewport(c *ui.Context, v *View) bool {
+	if (v != nil && v.MobileCompact) || runtime.GOOS == "ios" || runtime.GOOS == "android" {
+		return true
+	}
+	if c != nil {
+		if w, _ := c.Size(); w > 0 && w < 680 {
+			return true
+		}
+	}
+	return false
+}
+
+func renderResponsiveLightboxPage(
+	c *ui.Context,
+	key any,
+	tok theme.Tokens,
+	title string,
+	onClose func(),
+	toolbar func(),
+	body func(maxCanvasH float32),
+	footer func(),
+) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+		_, vh := c.Size()
+		maxH := float32(tok.Spacing48) * 9
+		if vh > 0 {
+			maxH = max(float32(tok.Spacing48)*5, vh-topSafe-bottomSafe-float32(tok.Spacing48)*4)
+		}
+		ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+			ui.Row(c).FillWidth().
+				Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+				MinHeight(t.Space(12)+topSafe).
+				AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+				if components.Button(c.Key("mb-lb-close"), "关闭", components.ButtonGhost).Shrink(0).Clicked() && onClose != nil {
+					onClose()
+				}
+				ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+					Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			if toolbar != nil {
+				ui.Row(c).FillWidth().Wrap().
+					Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+					AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Elevated).Children(toolbar)
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			}
+			ui.Scroll(c.Key("mb-lb-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+				ui.Column(c).FillWidth().
+					Padding(t.Space(3), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+					Gap(t.Space(3)).Children(func() {
+					if body != nil {
+						body(maxH)
 					}
-					if components.Button(c, "应用 SVG", components.ButtonPrimary).Clicked() {
-						v.emitAnyModuleEdit(moduleID, map[string]any{"svg": strings.TrimSpace(*svgBuf)})
-						*svgEdOpen = false
+					if footer != nil {
+						footer()
 					}
 				})
 			})
 		})
+	})
+}
+
+func renderFigureLightboxMobile(
+	c *ui.Context,
+	v *View,
+	tok theme.Tokens,
+	key any,
+	moduleID string,
+	title string,
+	src string,
+	svgRaw string,
+	annotations []svgTextLabel,
+	caption string,
+	openFig *bool,
+) {
+	renderResponsiveLightboxPage(c, key, tok, title, func() {
+		*openFig = false
+	}, func() {
+		for _, z := range []float32{0.75, 1.0, 1.5, 2.0} {
+			z := z
+			style := components.ButtonOutline
+			if v.FigureZoom == z {
+				style = components.ButtonSecondary
+			}
+			if components.Button(c, fmt.Sprintf("%d%%", int(z*100)), style).Clicked() {
+				v.FigureZoom = z
+			}
+		}
+	}, func(maxCanvasH float32) {
+		ui.ScrollBoth(c).FillWidth().MaxHeight(maxCanvasH).Children(func() {
+			v.drawFigureCanvas(c, moduleID, src, svgRaw, annotations, 260, v.FigureZoom)
 		})
-	}
+	}, func() {
+		if caption != "" {
+			ui.Text(c, caption).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+		}
+	})
+}
+
+func renderMobileSVGEditorPage(c *ui.Context, tok theme.Tokens, key any, open *bool, svgBuf *string, onApply func(string)) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+		ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+			ui.Row(c).FillWidth().
+				Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+				MinHeight(t.Space(12)+topSafe).
+				AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+				if components.Button(c.Key("mb-svg-cancel"), "取消", components.ButtonGhost).Shrink(0).Clicked() {
+					*open = false
+				}
+				ui.Text(c, "编辑 SVG 矢量源码").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+					Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				if components.Button(c.Key("mb-svg-apply"), "应用 SVG", components.ButtonPrimary).Shrink(0).Clicked() {
+					if onApply != nil {
+						onApply(strings.TrimSpace(*svgBuf))
+					}
+					*open = false
+				}
+			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Column(c).FillWidth().Grow(1).MinHeight(0).
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(2)).Children(func() {
+				components.TextBox(c, svgBuf, components.TextBoxOptions{Multiline: true}).
+					Placeholder("<svg viewBox=\"0 0 360 220\">…</svg>").Lines(10, 20).FillWidth()
+			})
+		})
+	})
 }
 
 // PortableFigureAssetPath resolves or copies a user-selected image into
@@ -614,15 +764,21 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 	if zoom <= 0 {
 		zoom = 1
 	}
+	maxInlineW := float32(480)
+	if v.inPairedRow {
+		maxInlineW = 360
+	}
+	if vw, _ := c.Size(); vw > 0 && (v.MobileCompact || vw < 680) {
+		mobileMax := max(float32(tok.Spacing48)*4, vw-float32(tok.Spacing48)*2.0)
+		if mobileMax < maxInlineW {
+			maxInlineW = mobileMax
+		}
+	}
 	if svgRaw != "" {
 		vbX, vbY, vbW, vbH, labels := CachedSVGMetrics(svgRaw)
 		allLabels := append(labels, annotations...)
 		drawH := maxH * zoom
 		drawW := float32(vbW/vbH) * drawH
-		maxInlineW := float32(480)
-		if v.inPairedRow {
-			maxInlineW = 360
-		}
 		if zoom <= 1 && drawW > maxInlineW {
 			drawW = maxInlineW
 			drawH = float32(vbH/vbW) * drawW
@@ -640,7 +796,7 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 		}
 		ui.Row(c).FillWidth().Justify(ui.Center).
 			Padding(float32(tok.Spacing12), float32(tok.Spacing12), float32(tok.Spacing16), float32(tok.Spacing12)).
-			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Children(func() {
+			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Clip().Children(func() {
 			ui.Box(c).Size(drawW, drawH).DrawOver(func(p *ui.Painter, r ui.Rect) {
 				sx := float64(r.W) / vbW
 				sy := float64(r.H) / vbH
@@ -700,9 +856,12 @@ func (v *View) drawFigureCanvas(c *ui.Context, moduleID, src, svgRaw string, ann
 		}
 		imgRow := ui.Row(c).FillWidth().Justify(ui.Center).
 			Padding(float32(tok.Spacing12), float32(tok.Spacing12), float32(tok.Spacing16), float32(tok.Spacing12)).
-			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle)
+			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).Clip()
 		imgRow.Children(func() {
 			imgEl := ui.Image(c, imgSrc).Height(maxH * zoom)
+			if zoom <= 1 {
+				imgEl.MaxWidth(maxInlineW)
+			}
 			if tok.Dark && zoom <= 1 {
 				op := float32(0.86)
 				if imgRow.Hovered() {

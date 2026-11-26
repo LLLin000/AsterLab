@@ -94,14 +94,6 @@ func (s *Shell) ensureCommandRegistry() *kit.CommandRegistry {
 			Run: func() { s.OpenPantryTab() },
 		},
 		{
-			ID: "ui.storybook", Title: "打开全站 UI 组件画廊 (Storybook)", Subtitle: "一站式浏览全站 Token、动效、Shell、AsterDoc 模块与科研贴纸",
-			Category: "系统", Icon: lucide.Layers(),
-			Run: func() {
-				s.VaultSettingsOpen = false
-				s.ComponentGalleryOpen = true
-			},
-		},
-		{
 			ID: "doc.toggle_mode", Title: "切换编辑 / 实验操作模式", Subtitle: "在结构编辑与实时实验记录态间无损切换",
 			Category: "编辑器", DefaultShortcut: "Ctrl+E", Icon: lucide.FlaskConical(),
 			When: func(ctx kit.CommandContext) bool { return ctx.IsFileTab && !ctx.ModalOpen },
@@ -151,7 +143,6 @@ func (s *Shell) registerShellOverlays(c *ui.Context) {
 	s.Layers.Register("vault-launcher", s.VaultLauncherOpen, func() { s.VaultLauncherOpen = false })
 	s.Layers.Register("feedback", s.FeedbackOpen, func() { s.FeedbackOpen = false })
 	s.Layers.Register("vault-settings", s.VaultSettingsOpen, func() { s.VaultSettingsOpen = false })
-	s.Layers.Register("storybook-gallery", s.ComponentGalleryOpen, func() { s.ComponentGalleryOpen = false })
 	s.Layers.Register("global-search", s.GlobalSearchOpen, func() { s.GlobalSearchOpen = false })
 	s.Layers.Register("command-palette", s.PaletteOpen, func() { s.PaletteOpen = false })
 	s.Layers.Register("spotlight-tour", s.TourOpen, func() {

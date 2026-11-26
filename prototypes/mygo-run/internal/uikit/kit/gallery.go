@@ -35,6 +35,7 @@ type GalleryState struct {
 	PresetOverride  string // "" | obsidian | zinc | warm
 	DensityOverride string // "" | compact | default | comfortable
 	NarrowPreview   bool   // Constrain canvas to 520dp narrow-pane check
+	MobilePreview   bool   // Constrain canvas to 402dp iPhone viewport check
 
 	SampleNum     float64
 	ScrubVal      float64
@@ -164,26 +165,42 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		modeLabel = "深色"
 	}
 
+	vw, _ := c.Size()
+	compactGallery := vw > 0 && vw < 760
+
 	root := ui.Column(c).Fill().Background(tok.Canvas)
 	root.Children(func() {
 		// Top Story Title & Live Control Toolbar
+		topPadX := float32(tok.Spacing16)
+		if compactGallery {
+			topPadX = float32(tok.Spacing12)
+		}
 		ui.Column(c).FillWidth().Shrink(0).
-			Padding(float32(tok.Spacing8), float32(tok.Spacing16)).
+			Padding(float32(tok.Spacing8), topPadX).
 			Background(tok.Surface).
 			Gap(float32(tok.Spacing8)).Children(func() {
-			SectionHeader(c, tok, lucide.Layers(), "AsterLab 统一 UI 组件画廊",
-				fmt.Sprintf("%s · %s · %s", densityLabel, presetLabel, modeLabel), func() {
+			var desktopSearchSlot func()
+			if !compactGallery {
+				desktopSearchSlot = func() {
 					ui.Box(c).Width(float32(tok.Spacing48) * 3.8).Children(func() {
 						components.TextBox(c, &st.Search, components.TextBoxOptions{
 							LeadingIcon: lucide.Search(),
 						}).Placeholder("过滤展区或控件…")
 					})
-				})
+				}
+			}
+			SectionHeader(c, tok, lucide.Layers(), "AsterLab 统一 UI 组件画廊",
+				fmt.Sprintf("%s · %s · %s", densityLabel, presetLabel, modeLabel), desktopSearchSlot)
+			if compactGallery {
+				components.TextBox(c, &st.Search, components.TextBoxOptions{
+					LeadingIcon: lucide.Search(),
+				}).Placeholder("过滤展区或控件…").FillWidth()
+			}
 
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				// Theme Light/Dark override pills
 				ui.Text(c, "明暗").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, tm := range []struct{ id, lbl string }{
 						{"follow", "跟随"},
@@ -204,7 +221,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 
 				// Preset override pills
 				ui.Text(c, "色盘").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, pr := range []struct{ id, lbl string }{
 						{theme.PresetObsidian, "纯净白纸"},
@@ -225,7 +242,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 
 				// Density override pills
 				ui.Text(c, "密度").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(2).Radius(float32(tok.ControlRadius)).
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 					for _, dn := range []struct{ id, lbl string }{
 						{theme.DensityCompact, "紧凑"},
@@ -244,75 +261,132 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 					}
 				})
 
-				narrowVar := components.ButtonSecondary
-				if st.NarrowPreview {
-					narrowVar = components.ButtonPrimary
-				}
-				if components.Button(c, "520dp 窄屏预览", narrowVar).Clicked() {
-					st.NarrowPreview = !st.NarrowPreview
+				if !compactGallery {
+					narrowVar := components.ButtonSecondary
+					if st.NarrowPreview {
+						narrowVar = components.ButtonPrimary
+					}
+					if components.Button(c, "520dp 窄屏预览", narrowVar).Clicked() {
+						st.NarrowPreview = !st.NarrowPreview
+						if st.NarrowPreview {
+							st.MobilePreview = false
+						}
+					}
+
+					mobileVar := components.ButtonSecondary
+					if st.MobilePreview {
+						mobileVar = components.ButtonPrimary
+					}
+					if components.Button(c, "402dp iPhone 预览", mobileVar).Clicked() {
+						st.MobilePreview = !st.MobilePreview
+						if st.MobilePreview {
+							st.NarrowPreview = false
+						}
+					}
 				}
 			})
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 
-		// Main body: Left category sidebar + Right live preview canvas
-		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			// Sidebar nav
-			ui.Column(c).Width(float32(tok.Spacing48)*4.5).FillHeight().
-				Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).
+		if compactGallery {
+			ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 				Background(tok.Surface).Children(func() {
-				ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-					ui.Column(c).FillWidth().Gap(2).Children(func() {
-						ListItem(c, "story-nav-all", tok, ListItemOptions{
-							Title:    "全部展区总览",
-							Subtitle: fmt.Sprintf("%d 个模块组", len(sections)),
-							Selected: st.ActiveSection == "all",
-							StartSlot: func() {
-								ui.Icon(c, lucide.LayoutGrid()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
-							},
-							OnClick: func() { st.ActiveSection = "all" },
-						})
-						lastGroup := ""
+				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						allBtn := components.Button(c, "全部", components.ButtonGhost)
+						if st.ActiveSection == "all" {
+							allBtn = components.Button(c, "全部", components.ButtonPrimary)
+						}
+						if allBtn.Clicked() {
+							st.ActiveSection = "all"
+						}
 						for _, sec := range sections {
 							sec := sec
-							if sec.Group != lastGroup {
-								lastGroup = sec.Group
-								ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8), 2, float32(tok.Spacing8)).Children(func() {
-									ui.Text(c, sec.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
-								})
-							}
 							navLbl := sec.NavTitle
 							if navLbl == "" {
 								navLbl = sec.Title
 							}
-							ListItem(c, "story-nav-"+sec.ID, tok, ListItemOptions{
-								Title:    navLbl,
-								Selected: st.ActiveSection == sec.ID,
-								StartSlot: func() {
-									ico := sec.Icon
-									if ico == nil {
-										ico = lucide.Box()
-									}
-									ui.Icon(c, ico).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
-								},
-								OnClick: func() { st.ActiveSection = sec.ID },
-							})
+							v := components.ButtonSecondary
+							if st.ActiveSection == sec.ID {
+								v = components.ButtonPrimary
+							}
+							if components.Button(c.Key("mob-nav-"+sec.ID), navLbl, v).Clicked() {
+								st.ActiveSection = sec.ID
+							}
 						}
 					})
 				})
 			})
-			ui.Box(c).Width(1).FillHeight().Background(tok.BorderSubtle)
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+		}
+
+		// Main body: Left category sidebar (hidden on compact mobile screens) + Right live preview canvas
+		ui.Row(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+			if !compactGallery {
+				// Sidebar nav
+				ui.Column(c).Width(float32(tok.Spacing48)*4.5).FillHeight().
+					Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing4)).
+					Background(tok.Surface).Children(func() {
+					ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+						ui.Column(c).FillWidth().Gap(2).Children(func() {
+							ListItem(c, "story-nav-all", tok, ListItemOptions{
+								Title:    "全部展区总览",
+								Subtitle: fmt.Sprintf("%d 个模块组", len(sections)),
+								Selected: st.ActiveSection == "all",
+								StartSlot: func() {
+									ui.Icon(c, lucide.LayoutGrid()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+								},
+								OnClick: func() { st.ActiveSection = "all" },
+							})
+							lastGroup := ""
+							for _, sec := range sections {
+								sec := sec
+								if sec.Group != lastGroup {
+									lastGroup = sec.Group
+									ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8), 2, float32(tok.Spacing8)).Children(func() {
+										ui.Text(c, sec.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
+									})
+								}
+								navLbl := sec.NavTitle
+								if navLbl == "" {
+									navLbl = sec.Title
+								}
+								ListItem(c, "story-nav-"+sec.ID, tok, ListItemOptions{
+									Title:    navLbl,
+									Selected: st.ActiveSection == sec.ID,
+									StartSlot: func() {
+										ico := sec.Icon
+										if ico == nil {
+											ico = lucide.Box()
+										}
+										ui.Icon(c, ico).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+									},
+									OnClick: func() { st.ActiveSection = sec.ID },
+								})
+							}
+						})
+					})
+				})
+				ui.Box(c).Width(1).FillHeight().Background(tok.BorderSubtle)
+			}
 
 			// Right preview canvas
 			ui.Column(c).Grow(1).FillHeight().MinWidth(0).MinHeight(0).Clip().Children(func() {
 				ui.Scroll(c).Fill().Children(func() {
-					wrap := ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing16))
-					if st.NarrowPreview {
+					canvasPad := float32(tok.Spacing16)
+					if compactGallery {
+						canvasPad = float32(tok.Spacing12)
+					}
+					wrap := ui.Column(c).FillWidth().Padding(canvasPad).Gap(float32(tok.Spacing16))
+					if !compactGallery && (st.NarrowPreview || st.MobilePreview) {
 						wrap.AlignItems(ui.Center)
 					}
 					wrap.Children(func() {
 						inner := ui.Column(c).FillWidth().Gap(float32(tok.Spacing16))
-						if st.NarrowPreview {
+						if !compactGallery && st.MobilePreview {
+							inner.MaxWidth(402).Padding(float32(tok.Spacing12)).
+								Radius(float32(tok.DialogRadius)).Border(2, tok.BorderStrong)
+						} else if !compactGallery && st.NarrowPreview {
 							inner.MaxWidth(520).Padding(float32(tok.Spacing12)).
 								Radius(float32(tok.PanelRadius)).Border(1, tok.BorderSelected)
 						}
@@ -582,6 +656,14 @@ func renderStoryControlsAndEngines(c *ui.Context, tok theme.Tokens, st *GalleryS
 				if m.Item("复制模块结构").Shortcut("Ctrl+C").Chosen() {
 					st.CtxLastAction = "复制模块结构"
 				}
+				m.Submenu("导出与格式", func(sub *Menu) {
+					if sub.Item("导出 PDF 报告").Chosen() {
+						st.CtxLastAction = "导出 PDF 报告"
+					}
+					if sub.Item("导出 CSV 数据").Chosen() {
+						st.CtxLastAction = "导出 CSV 数据"
+					}
+				})
 				if m.Item("标记为基准模板").Chosen() {
 					st.CtxLastAction = "标记为基准模板"
 				}

@@ -12,9 +12,9 @@
 |---|---|---|---|
 | 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText`；调色板色复用具名函数 |
 | 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
-| 间距 | `Spacing4/8/12/16/24/32/48`，或 `t.Space(n)`（n 是单位倍数；`Theme.Spacing=4`，`t.Space(1/2/3/4/6/8/12)` 对应 `4/8/12/16/24/32/48`） | `Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
-| 图标 | `IconSm/IconMd/IconLg`（随 `EffectiveScale()` 与字号联动）；主导航/工具栏按钮用 `IconButtonPlain`，仅行内微操用 `IconButtonCompact` | 主导航栏滥用 `IconButtonCompact` 或写死 `Size(12, 12)` | `.Size(float32(tokens.IconMd), float32(tokens.IconMd))` |
-| 圆角 | `ControlRadius`（控件）/`PanelRadius`（面板）/`DialogRadius`（对话框） | `Radius(3)`、`Radius(5)`、`Radius(7)` | `.Radius(float32(tokens.ControlRadius))` |
+| 间距 | `Spacing4/8/12/16/24/32/48`（紧凑/默认/舒展三档与缩放后一律按 `scaleGridToken` 对齐 4px 栅格），或 `t.Space(n)` | `Padding(2)`、`Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
+| 图标 | `IconSm=16 / IconMd=18 / IconLg=20` 与 `IconBoxSize=24`（偶数光学尺度 + 24×24 透明光学外框）；行内/列表/卡片图标优先走 `kit.IconBox` | 写死 `Size(18, 18)` 或宽窄图标裸排错位 | `kit.IconBox(c, tok, icon, tok.Text)`、`.Size(float32(tok.IconMd), float32(tok.IconMd))` |
+| 圆角 | 四档：`ControlRadius(6)`（控件）/ `PanelRadius(12)`（面板/卡片）/ `DialogRadius(14)`（弹窗）/ `PillRadius(999)`（胶囊/圆形/指示条） | `Radius(3)`、`Radius(5)`、`Radius(18)`、`Radius(20)` | `.Radius(float32(tok.ControlRadius))`、`.Radius(float32(tok.PillRadius))` |
 | 控件高度 | `ButtonHeight/InputHeight/RowHeight` | `Height(28)`、`MinHeight(33)` | `.Height(float32(tokens.ButtonHeight))` |
 
 颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的具名调色板函数（如孔板分组色、多维分类色与孔角色色）中；已有同语义调色板时必须复用，不得散落在渲染代码里。
@@ -47,7 +47,7 @@
 
 ## 3. 圆角
 
-三档，不做第四种：控件 `ControlRadius`(6)、面板 `PanelRadius`(10)、对话框 `DialogRadius`(12)。同类容器全项目一致。嵌套圆角保持内小外大，不要出现内外同值或内大外小。连续圆角在性能允许时优先；性能不允许时在本文记录例外，不在代码里各写各的。
+四档统一取值（与 `internal/theme/theme.go` 单一来源保持一致），不做第五种：控件 `ControlRadius`(6)、面板 `PanelRadius`(12)、对话框 `DialogRadius`(14)、胶囊/圆形/细指示条 `PillRadius`(999)。同类容器全项目一致。嵌套圆角保持内小外大，不要出现内外同值或内大外小。连续圆角在性能允许时优先；性能不允许时在本文记录例外，不在代码里各写各的。
 
 ## 4. 组件语义
 
@@ -232,8 +232,8 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 |---|---|---|
 | 交互态与投影 Token | `internal/theme/theme.go` (`Tokens`) | 统一 `ElementHover/Active/Selected`、`GhostHover/Active/Selected`、`BorderFocused/Selected/Disabled`、`TextPlaceholder/Disabled`、`DropTargetBg/Border` 及暗色 `TopHighlight`（Zed 顶边 `1px` 内高光）。调用点禁止硬编码阴影或 `components.ContextMenu` |
 | 四层物理高度 | `internal/uikit/kit/elevation.go` (`Elevation`) | `ElevationCanvas` → `ElevationSurface`（悬浮工具条）→ `ElevationPopup`（右键菜单/浮层、`top + 1px` 暗色内高光 + 柔阴影）→ `ElevationModal`（命令面板/搜索/设置弹窗） |
-| 光标锚定右键菜单 | `internal/uikit/kit/context_menu.go` (`kit.ContextMenu` / `kit.Menu`) | 统一定位到 `1×1` 右键点击坐标，内部自包含 `OverlayPortal` 与键盘/外部点击关闭；`shell` / `asterdoc` / `tools` 禁止直接调用 `components.ContextMenu` |
-| 按键胶囊 / 徽标 / 列表行 / 空态与横幅 | `internal/uikit/kit/{keycap,badge,list_item,empty_banner}.go` | `kit.Keycap` 渲染键盘组合键（命令面板与工具提示）；`kit.Badge` 强制 `.AlignSelf(ui.Center)` 保障行内光学居中；`kit.ListItem` 统一文件树/命令面板/搜索行高与左侧 `2px` Accent 选中标；`kit.EmptyState` / `kit.InlineBanner` / `kit.SectionHeader` 统一空态与提示条；`kit.RenderComponentGallery` 在「设置 → 外观与布局 → UI 组件画廊」中提供统一预览与交互验证 |
+| 光标锚定右键菜单与安全三角区子菜单 | `internal/uikit/kit/context_menu.go` (`kit.ContextMenu` / `kit.Menu.Submenu`) | 统一定位到 `1×1` 右键点击坐标，内部自包含 `OverlayPortal` 与移动端长按触觉 `Sheet`；桌面端 `Submenu` 内置 `120ms` 开启延时、`260ms` 关闭延时及 `pointInSafeTriangle` 指针走廊防误触；`shell` / `asterdoc` / `tools` 禁止直接调用 `components.ContextMenu` |
+| 图标光学框 / 按键胶囊 / 徽标 / 列表行 / 空态与横幅 | `internal/uikit/kit/{icon_box,keycap,badge,list_item,empty_banner}.go` | `kit.IconBox` 固定 `24×24` (`IconBoxSize`) 透明外框居中绘制 `18px` 图标，保证竖排对齐；`kit.Keycap` 渲染键盘组合键；`kit.Badge` 强制 `.AlignSelf(ui.Center)`；`kit.ListItem` 统一文件树/命令面板/搜索行高；`kit.EmptyState` / `kit.InlineBanner` / `kit.SectionHeader` 统一空态与自适应折行标题栏；`kit.RenderComponentGallery` 已抽离至独立开发预览程序 `prototypes/mygo-run/cmd/storybook`（不再内置于正式主软件界面中） |
 | 3 档界面密度 | `internal/theme/theme.go` (`UiDensity`) | 支持 `compact`（紧凑 `0.85x`）/ `default`（默认 `1.0x`）/ `comfortable`（宽松 `1.15x`），持久化于 `.asterlab/config.json`，通过设置中心实时切换 |
 | 暗色模式附图柔光 + `onevra` 数值输入 | `asterdoc/{widget_figure,widget_serial_dilution}.go` | Obsidian 风格暗色正文图片 `0.86` 柔光减刺眼、悬停回升 `1.0`；倍比稀释等精确数值步进使用 `onevra/components.NumberInput` 与 `HoldToConfirm` |
 | 储藏室 · 动物房与实验动物矢量贴纸 | `internal/uikit/labsticker/animals.go` + `internal/tools/vivarium.go` + `pantry_store.go` | 在 `储藏室` 顶部与试剂耗材平级隔离为 `[ 试剂耗材 \| 动物房 ]`，基于 **IACUC + ARRIVE 2.0 + GB 14925-2023 SPF** 设计笼卡与动物台账表单（伦理批件、品系/基因型、♂/♀ 存栏、自动周龄、体征称重、SPF 设施/房/架/笼、单笼密度合规预警、健康福祉记录），数据以 `type: "vivarium"` 写入同一 `pantry.jsonl`；内置 8 枚无 `<text>` 纯矢量实验室动物贴纸（小白鼠、C57黑鼠、裸鼠、SD大鼠、新西兰兔、比格犬、豚鼠、斑马鱼） |
@@ -252,7 +252,7 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 乐观撤销提示队列 (`ToastQueue`) | `internal/uikit/kit/toast.go` + `shell/shell.go` | 右下角非阻塞浮层队列（最多叠放 3 条、自动过期清理、不覆盖背景点击），支持 `撤销` 回调（动物房删除笼卡支持一键撤销恢复） |
 | 侧滑详情检查器 (`SidePeek`) | `internal/uikit/kit/side_peek.go` + `tools/vivarium.go` | 动物房点击笼卡或台账笼号优先于右侧滑出 `SidePeek`，保留左侧全局笼架/台账视野，支持无缝跳转完整模态弹窗或触发 Rerun 风格右抽屉检查器 (`RenderVivariumInspector`) |
 | 多条件组合筛选栏 (`FilterBar`) | `internal/uikit/kit/filter_bar.go` + `tools/vivarium.go` | 支持快捷预设视图 + `+ 筛选` 多维度组合胶囊（可点 `×` 单独移除条件，用于动物房设施/状态/物种/密度告警多维过滤） |
-| 全站 UI 组件画廊 (Full Storybook) | `internal/uikit/kit/gallery.go` + `shell/storybook.go` + `storybook_sections.go` | 通过 `kit.StorySection` 无环注入覆盖 **6 大板块**（1. 全局 Token/色板/字体/海拔/动效沙盒；2. 基础控件 + 6 大 UI 引擎；3. 孔板/平皿/管架/全量试剂与 8 种动物贴纸；4. 全局 Shell 壳层；5. AsterML v2 文档模块；6. 动物房与边界压测），顶部支持实时切换浅/深色、三色盘、三档密度与 `520dp` 窄屏边界 |
+| 全站 UI 组件画廊 (Standalone Storybook) | `prototypes/mygo-run/cmd/storybook` + `internal/storybook` + `internal/uikit/kit/gallery.go` + `internal/shell/storybook.go` + `scripts/open-storybook.ps1` | 独立桌面预览工具（不内置于发行版主软件，可通过 `scripts/open-storybook.ps1` 或本地编译的 `.gitignore` 产物 `prototypes/mygo-run/AsterLab-Storybook.exe` 随时单独打开）。通过 `kit.StorySection` 覆盖全部 **8 大板块**（1. 全局 Token/色板/字体/海拔/动效；2. 基础控件 + 6 大 UI 引擎；3. 孔板/平皿/管架/全量试剂与 8 种动物贴纸；4. 全局 Shell 壳层；5. AsterML v2 文档模块；6. 动物房与边界压测；7. 边注/@引用/实验管家；8. 移动端 402dp iOS 规范），支持实时切换浅/深色、三色盘、三档密度、`520dp` 窄屏与 `402dp` iPhone 预览 |
 
 ---
 
@@ -266,3 +266,15 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | 试剂独立生命周期与流水引擎 | `internal/reagent/engine.go` + `internal/tools/pantry_shelf.go` | 独立维护 `RemainingQty`、`QtyUnit`、`LowStockThreshold`、`RestockBy`、`StockLedger`（入库 `in`/领用 `out` 原子流水扣减与自动余量同步）；基于开瓶日期计算开瓶后失效日期，并与批次效期联合投射「双效期 × 低库存补货」日历事件 |
 | 动物房独立福祉、里程碑与分笼引擎 | `internal/vivarium/engine.go` + `internal/tools/vivarium.go` | 独立维护 `ArrivedOn`、`QuarantineDays`（自动推算检疫解除日）、`IACUCExpiresOn` 与 `Milestones`（`dosing`/`weigh`/`harvest`）；遵循 **GB 14925-2023 + ARRIVE 人道终点** 评估体重较基线下降 ≥15% 预警 / ≥20% 紧急停验；支持 `SplitVivariumCage` 一键从母笼拆笼分出子代/组别并继承品系、设施、IACUC 批件 |
 | 三域联动日历与 7 日抽屉摘要 | `internal/shell/{calendar,right_drawer}.go` + `vault_host.go` | 日历顶部提供 `[ 全部三域 \| 实验 \| 试剂效期与采购 \| 动物入栏与收样 ]` 分层胶囊；月/周视图同屏叠加并支持点击胶囊直达 `OpenPantryByID` / `OpenVivariumCageByID`；单日弹出层与右键菜单支持分组查看、内联 `✓ 完成` 勾选动物收样节点及按日期快捷新增入库/入栏 |
+
+---
+
+## 15. AI UI 洁癖与渲染态验收铁律（2026-11-26）
+
+为防止 AI/人类改动界面时退回「外框套内框、满屏解释文字、魔术数字漂移、只看单测不看真机渲染」，以下 5 条作为全仓库统一执行基线（并同步写进根目录 `AGENTS.md`）：
+
+1. **禁大框套小框与列表套娃**：除独立浮层/科学结构模块外，同一平面只保留单层分组容器（`tok.Surface` + `Border(1, tok.Border)` + `PanelRadius` + `Clip()`），内部条目用 `1px` `tok.BorderSubtle` 发丝线与 4px 倍数留白分隔（禁止 20 行设置每行各画独立边框卡片，禁止分组卡片内再套带边框子行）。
+2. **克制文案与 90/10 中性色比**：90% 黑白灰中性纸面（主字 `#18181b` / 次字 `#71717a`）+ 10% 单一 `Accent`（一屏唯一 Primary CTA）；能通过对齐、分组和空白距离分清层级的位置，严禁叠加标语、副标题与操作说明句。
+3. **严格 4px 栅格与 24×24 光学图标框**：所有三档密度（`compact` 4/8/12/20/24/40、`default` 8/12/16/24/32/48、`comfortable` 12/16/20/28/36/56）及缩放后一律通过 `scaleGridToken` 对齐 4px 栅格；通用图标采用 `16/18/20` 偶数尺寸并经 `kit.IconBox` 居中放入 `24×24` 透明外框。
+4. **按意图显隐次要控件与菜单安全三角区**：次要操作按钮随悬停/聚焦/按意图出现；桌面多级右键菜单通过 `kit.ContextMenu.Submenu` 自动获得 `120ms` 开启延时、`260ms` 关闭延时与 `pointInSafeTriangle` 指针防误触走廊；移动端采用 Obsidian 风格全屏页面（两级设置页 + `取消 | 标题 | 保存` 顶栏）与触觉底部 `Sheet`。
+5. **CI 自动门禁 + 真实视觉截图闭环**：`scripts/ci/check_ui_hygiene.py` 对活跃包（`internal/shell`、`internal/asterdoc`、`internal/tools`、`internal/uikit/kit`、`experiment_page.go`、`vault_host.go`、`update_host.go`）强制 **0 容忍**字面颜色/字号/非零字面 Padding/字面圆角/`components.ContextMenu`/sub-12px `Rem`，并对历史旧包实施 **基线棘轮**（只减不增）；所有 UI 改动除跑门禁与单测外，必须导出或打开真实视口截图（桌面与 `402×874` 移动视口）肉眼确认零截断、零溢出、零遮挡后方可提交。

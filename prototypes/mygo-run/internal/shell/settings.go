@@ -119,6 +119,24 @@ func (s *Shell) HotkeyDisplay(id string) string {
 }
 
 func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
+	if s.IsMobileLayout(c) {
+		extra := s.mobileExtra()
+		if !s.VaultSettingsOpen {
+			extra.mobileSettingsLastOpen = false
+			extra.mobileSettingsDetail = false
+			return
+		}
+		s.ensureSettingsDefaults()
+		if !extra.mobileSettingsLastOpen {
+			extra.mobileSettingsLastOpen = true
+			extra.mobileSettingsDetail = strings.TrimSpace(s.SettingsView.Category) != ""
+		}
+		tok := theme.GetTokens(c.Theme())
+		ui.Overlay(c, func() {
+			s.renderMobileSettingsPage(c, tok, extra)
+		})
+		return
+	}
 	if !s.VaultSettingsOpen {
 		return
 	}
@@ -160,11 +178,279 @@ func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
 			})
 		})
 	})
-	if s.ComponentGalleryOpen {
-		s.VaultSettingsOpen = false
-	} else {
-		s.VaultSettingsOpen = open
+	s.VaultSettingsOpen = open
+}
+
+func (s *Shell) renderMobileSettingsPage(c *ui.Context, tok theme.Tokens, extra *mobileExtraState) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	cats := s.obsidianSettingsCategories(c)
+	query := strings.TrimSpace(s.SettingsView.Query)
+	searching := query != ""
+
+	selected := -1
+	for i, cat := range cats {
+		if cat.ID == s.SettingsView.Category && cat.Placeholder == nil {
+			selected = i
+			break
+		}
 	}
+	if selected < 0 && len(cats) > 0 && extra.mobileSettingsDetail {
+		for i, cat := range cats {
+			if cat.Placeholder == nil {
+				selected = i
+				s.SettingsView.Category = cat.ID
+				break
+			}
+		}
+	}
+
+	pageTitle := "设置"
+	if extra.mobileSettingsDetail && !searching && selected >= 0 && selected < len(cats) {
+		pageTitle = cats[selected].Title
+	}
+
+	ui.Column(c.Key("mb-settings-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		// Obsidian Mobile Top Navigation Bar (edge-to-edge full-screen page)
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			if extra.mobileSettingsDetail || searching {
+				backBtn := ui.ButtonBase(c.Key("mb-set-back")).Label("返回设置").
+					Padding(t.Space(1), t.Space(2)).Radius(float32(tok.ControlRadius)).
+					Background(ui.Transparent).MinHeight(t.Space(9)).Center().
+					OnClick(func() {
+						mygo.Haptics.Selection()
+						extra.mobileSettingsDetail = false
+						s.SettingsView.Category = ""
+						s.SettingsView.Query = ""
+					})
+				backBtn.Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+						ui.Icon(c, lucide.ChevronLeft()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+						ui.Text(c, "设置").FontSize(float32(tok.TextBody)).TextColor(tok.Accent).SingleLine()
+					})
+				})
+			} else {
+				ui.Icon(c, lucide.Settings()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+			}
+
+			components.Text(c, pageTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+
+			doneBtn := components.Button(c.Key("mb-set-close"), "完成", components.ButtonGhost).Label("关闭设置").Shrink(0)
+			if doneBtn.Clicked() {
+				s.VaultSettingsOpen = false
+				extra.mobileSettingsLastOpen = false
+				extra.mobileSettingsDetail = false
+			}
+		})
+
+		// Search field on Level 1 Home or while actively filtering
+		if !extra.mobileSettingsDetail || searching {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).
+				Background(tok.Surface).Children(func() {
+				components.TextBox(c.Key("mb-set-search"), &s.SettingsView.Query, components.TextBoxOptions{
+					LeadingIcon: lucide.Search(),
+				}).Placeholder("搜索设置…").FillWidth()
+			})
+		}
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		if searching {
+			s.renderMobileSettingsResultsList(c, tok, cats, selected, true, topSafe, rightSafe, bottomSafe, leftSafe)
+			return
+		}
+
+		if extra.mobileSettingsDetail && selected >= 0 && selected < len(cats) {
+			s.renderMobileSettingsResultsList(c, tok, cats, selected, false, topSafe, rightSafe, bottomSafe, leftSafe)
+			return
+		}
+
+		// Level 1: Obsidian Mobile Grouped Settings Home
+		ui.Scroll(c.Key("mb-set-home-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(5)).Children(func() {
+				var workspaceCats, systemCats []components.SettingsCategory
+				for _, cat := range cats {
+					if cat.Placeholder != nil {
+						continue
+					}
+					if cat.ID == "about" {
+						systemCats = append(systemCats, cat)
+					} else {
+						workspaceCats = append(workspaceCats, cat)
+					}
+				}
+
+				renderGroup := func(groupTitle string, list []components.SettingsCategory) {
+					if len(list) == 0 {
+						return
+					}
+					ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+						components.Text(c, groupTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+							Padding(0, t.Space(1))
+						ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+							Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+							for i, cat := range list {
+								cat := cat
+								if i > 0 {
+									ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+								}
+								row := ui.ButtonBase(c.Key("mb-set-cat-"+cat.ID)).Label(cat.Title).
+									FillWidth().MinHeight(float32(tok.Spacing48)+t.Space(1)).
+									Padding(t.Space(3), t.Space(4)).
+									Background(tok.Surface).Justify(ui.Start).
+									OnClick(func() {
+										mygo.Haptics.Selection()
+										s.SettingsView.Category = cat.ID
+										s.SettingsView.Query = ""
+										extra.mobileSettingsDetail = true
+									})
+								theme.ApplyTactilePress(row)
+								row.Children(func() {
+									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+										if cat.Icon != nil {
+											kit.IconBox(c, tok, cat.Icon, tok.Accent)
+										}
+										ui.Text(c, cat.Title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+											Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+										if hint := s.mobileSettingsCategoryHint(cat.ID); hint != "" {
+											ui.Text(c, hint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+												SingleLine().Ellipsis("…")
+										}
+										ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+									})
+								})
+							}
+						})
+					})
+				}
+
+				renderGroup("工作区", workspaceCats)
+				renderGroup("系统", systemCats)
+			})
+		})
+	})
+	})
+}
+
+func (s *Shell) mobileSettingsCategoryHint(catID string) string {
+	switch catID {
+	case "files":
+		p := strings.TrimRight(strings.TrimSpace(s.VaultPathInput), `/\`)
+		if p == "" {
+			return ""
+		}
+		if idx := strings.LastIndexAny(p, `/\`); idx >= 0 && idx+1 < len(p) {
+			return p[idx+1:]
+		}
+		return p
+	case "sync":
+		if strings.TrimSpace(s.SyncSettings.Endpoint) != "" {
+			if st := strings.TrimSpace(s.SyncState.LastSyncText); st != "" {
+				return st
+			}
+			return "WebDAV"
+		}
+		return "未配置"
+	case "appearance":
+		switch s.ThemeSource {
+		case "dark":
+			return "深色"
+		case "light":
+			return "浅色"
+		default:
+			return "跟随系统"
+		}
+	case "about":
+		return "AsterLab"
+	default:
+		return ""
+	}
+}
+
+func (s *Shell) renderMobileSettingsResultsList(
+	c *ui.Context,
+	tok theme.Tokens,
+	cats []components.SettingsCategory,
+	selected int,
+	searching bool,
+	topSafe, rightSafe, bottomSafe, leftSafe float32,
+) {
+	t := c.Theme()
+	_ = topSafe
+	results := components.SearchSettings(cats, s.SettingsView.Query)
+	scrollKey := "mb-set-scroll-search"
+	if !searching && selected >= 0 && selected < len(cats) {
+		scrollKey = "mb-set-scroll-" + cats[selected].ID
+	}
+	ui.Scroll(c.Key(scrollKey)).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+		ui.Column(c).FillWidth().
+			Padding(t.Space(3), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+			Gap(t.Space(3)).Children(func() {
+			count, lastCat, lastGroup := 0, -1, -1
+			for _, res := range results {
+				if !searching && res.Category != selected {
+					continue
+				}
+				cat := cats[res.Category]
+				grp := cat.Groups[res.Group]
+				it := grp.Items[res.Item]
+				if lastCat != res.Category && searching {
+					components.Text(c, cat.Title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
+				}
+				if (lastCat != res.Category || lastGroup != res.Group) && (grp.Title != "" || grp.Actions != nil) {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Padding(t.Space(1), 0, 0, 0).Children(func() {
+						components.Text(c, grp.Title).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+						if grp.Actions != nil {
+							grp.Actions(c)
+						}
+					})
+				}
+				lastCat, lastGroup = res.Category, res.Group
+				count++
+				itemCard := ui.Column(c.Key("mb-set-it-"+cat.ID+"-"+grp.ID+"-"+it.ID)).FillWidth().Gap(t.Space(2))
+				if it.ID != "mobile-toolbar-customize" {
+					itemCard.Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+						Background(tok.Elevated).Border(1, tok.Border)
+				}
+				itemCard.Children(func() {
+					if it.Content != nil {
+						it.Content(c)
+						return
+					}
+					if it.Title != "" || it.Description != "" || it.DescriptionContent != nil {
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							if it.Title != "" {
+								components.Text(c, it.Title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+							}
+							switch {
+							case it.DescriptionContent != nil:
+								ui.RichText(c).FillWidth().TextColor(tok.TextMuted).FontSize(float32(tok.TextMeta)).Wrap().Children(func() {
+									it.DescriptionContent(c)
+								})
+							case it.Description != "":
+								components.Text(c, it.Description).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							}
+						})
+					}
+					if it.Build != nil {
+						it.Build(c)
+					}
+				})
+			}
+			if count == 0 {
+				kit.EmptyState(c, tok, lucide.Search(), "无匹配设置项", "尝试更换关键词或清空搜索词查看全部设置。", "清空搜索", func() {
+					s.SettingsView.Query = ""
+				})
+			}
+		})
+	})
 }
 
 func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsCategory {
@@ -202,6 +488,31 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Keywords: []string{"vault", "path", "目录", "路径", "切换"},
 						Stacked:  true,
 						Build: func(c *ui.Context) {
+							if s.IsMobileLayout(c) {
+								t := c.Theme()
+								ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+									components.TextBox(c, &s.VaultPathInput, components.TextBoxOptions{}).
+										Placeholder("选择本地实验库目录").FillWidth()
+									ui.Row(c).FillWidth().Wrap().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+										if s.OnPickVaultPath != nil && components.Button(c, "浏览…", components.ButtonOutline).Clicked() {
+											if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
+												s.VaultPathInput = picked
+												if s.OnSwitchVaultPath != nil {
+													s.OnSwitchVaultPath(picked)
+												}
+											}
+										}
+										if components.Button(c, "切换", components.ButtonSecondary).Clicked() && s.OnSwitchVaultPath != nil {
+											s.OnSwitchVaultPath(strings.TrimSpace(s.VaultPathInput))
+											s.VaultSettingsOpen = false
+										}
+										if s.OnRevealInExplorer != nil && components.Button(c, "打开目录", components.ButtonOutline).Clicked() {
+											s.OnRevealInExplorer("")
+										}
+									})
+								})
+								return
+							}
 							ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
 								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
 									components.TextBox(c, &s.VaultPathInput, components.TextBoxOptions{}).
@@ -265,9 +576,15 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 									return v
 								}
 							}
-							sel.Trigger.MinWidth(c.Theme().Space(36)).Shrink(0).Children(func() {
-								components.Text(c, labelFor(s.DefaultProjectDir)).SingleLine()
-							})
+							if s.IsMobileLayout(c) {
+								sel.Trigger.FillWidth().Children(func() {
+									components.Text(c, labelFor(s.DefaultProjectDir)).SingleLine().Ellipsis("…")
+								})
+							} else {
+								sel.Trigger.MinWidth(c.Theme().Space(36)).Shrink(0).Children(func() {
+									components.Text(c, labelFor(s.DefaultProjectDir)).SingleLine().Ellipsis("…")
+								})
+							}
 							sel.Popup(func(panel ui.Element) {
 								for _, ch := range choices {
 									ch := ch
@@ -297,6 +614,13 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								components.Text(c, "空").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Shrink(0)
 								return
 							}
+							isMobile := s.IsMobileLayout(c)
+							rowPad := float32(tok.Spacing4)
+							rowBg := tok.Elevated
+							if isMobile {
+								rowPad = float32(tok.Spacing8)
+								rowBg = tok.Surface
+							}
 							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 								limit := len(s.TrashItems)
 								if limit > 8 {
@@ -305,8 +629,8 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								for i := 0; i < limit; i++ {
 									it := s.TrashItems[i]
 									ui.Row(c.Key("trash-it-"+it.TrashName)).FillWidth().AlignItems(ui.Center).
-										Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-										Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
+										Padding(rowPad, float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(rowBg).Gap(float32(tok.Spacing8)).Children(func() {
 										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 											components.Text(c, it.OrigRel).FontSize(float32(tok.TextBody)).TextColor(tok.Text).SingleLine().Ellipsis("…")
 											components.Text(c, it.DeletedAt.Format("2006-01-02 15:04")).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
@@ -334,6 +658,13 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								components.Text(c, "暂无快照").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Shrink(0)
 								return
 							}
+							isMobile := s.IsMobileLayout(c)
+							rowPad := float32(tok.Spacing4)
+							rowBg := tok.Elevated
+							if isMobile {
+								rowPad = float32(tok.Spacing8)
+								rowBg = tok.Surface
+							}
 							ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
 								limit := len(s.CurrentSnapshots)
 								if limit > 8 {
@@ -342,8 +673,8 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								for i := 0; i < limit; i++ {
 									sn := s.CurrentSnapshots[i]
 									ui.Row(c.Key("snap-"+sn.ID)).FillWidth().AlignItems(ui.Center).
-										Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-										Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
+										Padding(rowPad, float32(tok.Spacing8)).
+										Radius(float32(tok.ControlRadius)).Background(rowBg).Gap(float32(tok.Spacing8)).Children(func() {
 										ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 											components.Text(c, sn.CreatedAt.Format("2006-01-02 15:04:05")).FontSize(float32(tok.TextBody)).TextColor(tok.Text).FontFeatures("tnum")
 											components.Text(c, fmt.Sprintf("%d B · %s", sn.Size, sn.RelPath)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…").FontFeatures("tnum")
@@ -447,35 +778,48 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 				},
 			},
 			components.SettingsItem{
-				ID:          "mobile-toolbar-customize",
-				Title:       "自定义移动端编辑工具栏",
-				Description: "调整键盘上方工具栏按钮的显示与排列顺序",
-				Keywords:    []string{"toolbar", "customize", "order", "visible", "工具栏", "排序", "显隐", "移动端"},
-				Stacked:     true,
+				ID:       "mobile-toolbar-customize",
+				Title:    "自定义移动端编辑工具栏",
+				Keywords: []string{"toolbar", "customize", "order", "visible", "工具栏", "排序", "显隐", "移动端"},
+				Stacked:  true,
 				Build: func(c *ui.Context) {
 					specs := s.MobileToolbarOrderedSpecs()
 					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-							components.Text(c, fmt.Sprintf("共 %d 项操作，可开关显隐并上下排序", len(specs))).
-								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+							components.Text(c, fmt.Sprintf("共 %d 项", len(specs))).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Grow(1).MinWidth(0)
 							if components.Button(c, "恢复默认工具栏", components.ButtonGhost).Clicked() {
 								mygo.Haptics.Selection()
 								s.ResetMobileToolbarConfig()
 							}
 						})
-						ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+							Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+							isMobile := s.IsMobileLayout(c)
 							for idx, spec := range specs {
 								idx := idx
 								spec := spec
 								vis := s.IsMobileToolbarActionVisible(spec.ID)
+								if idx > 0 {
+									ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+								}
 								ui.Row(c.Key("mb-tb-cfg-"+spec.ID)).FillWidth().AlignItems(ui.Center).
-									Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-									Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+									Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+									Background(tok.Surface).
 									Gap(float32(tok.Spacing8)).Children(func() {
-									ui.Icon(c, spec.Icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
-									components.Text(c, spec.Label).FontSize(float32(tok.TextData)).TextColor(tok.Text).
-										SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
-									components.Badge(c, spec.Group, components.BadgeOptions{Tone: components.BadgeNeutral})
+									kit.IconBox(c, tok, spec.Icon, tok.Text)
+									if isMobile {
+										ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+											components.Text(c, spec.Label).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+												SingleLine().Ellipsis("…")
+											components.Text(c, spec.Group).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+												SingleLine()
+										})
+									} else {
+										components.Text(c, spec.Label).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+											SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+										components.Badge(c, spec.Group, components.BadgeOptions{Tone: components.BadgeNeutral})
+									}
 									upBtn := components.IconButton(c.Key("mb-tb-up-"+spec.ID), lucide.ChevronUp(), "上移 "+spec.Label, components.IconButtonCompact).
 										Disabled(idx == 0)
 									if upBtn.Clicked() {
@@ -712,7 +1056,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Build: func(c *ui.Context) {
 							// Avoid components.Tabs inside Settings Dialog (Onevra Tabs.Draw panics on Dialog Exit transition).
 							// Keep Shrink(0) on container and buttons so right-hand segmented pills never clip text (FB-103901).
-							ui.Row(c).Shrink(0).AlignItems(ui.Center).Padding(2).Radius(float32(tok.ControlRadius)).
+							ui.Row(c).Shrink(0).AlignItems(ui.Center).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
 								Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
 								for _, item := range []struct{ key, lbl string }{{"edit", "编辑态"}, {"read", "阅读态"}} {
 									item := item
@@ -817,6 +1161,16 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Keywords:    []string{"hotkey", "shortcut", spec.Action, spec.Group, spec.Default},
 						Build: func(c *ui.Context) {
 							cur := s.HotkeyDisplay(spec.ID)
+							if s.IsMobileLayout(c) {
+								ui.Box(c).FillWidth().Children(func() {
+									components.TextBox(c, &cur, components.TextBoxOptions{}).Placeholder(spec.Default).FillWidth()
+								})
+								if strings.TrimSpace(cur) != s.Hotkeys[spec.ID] && strings.TrimSpace(cur) != "" {
+									s.Hotkeys[spec.ID] = strings.TrimSpace(cur)
+									s.notifySettingsChanged()
+								}
+								return
+							}
 							ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 								ui.Box(c).Width(c.Theme().Space(32)).Children(func() {
 									components.TextBox(c, &cur, components.TextBoxOptions{}).Placeholder(spec.Default)
@@ -960,9 +1314,6 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 								}
 								if components.Button(c, "反馈问题 / 建议", components.ButtonPrimary).Clicked() {
 									s.FeedbackOpen = true
-								}
-								if components.Button(c, "UI 组件画廊", components.ButtonGhost).Clicked() {
-									s.ComponentGalleryOpen = true
 								}
 							})
 						},

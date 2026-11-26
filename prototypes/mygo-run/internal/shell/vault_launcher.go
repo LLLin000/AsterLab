@@ -118,6 +118,24 @@ func defaultSuggestedVaultParent() string {
 // renderVaultLauncherDialog renders the Obsidian-style Vault Launcher & Switcher modal.
 // Always mounts its Dialog host cleanly across open/closed frames so exit transitions stay safe.
 func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
+	if s.VaultLauncherOpen {
+		if strings.TrimSpace(s.VaultLauncherName) == "" {
+			s.VaultLauncherName = "AsterLab"
+		}
+		if strings.TrimSpace(s.VaultLauncherParent) == "" {
+			s.VaultLauncherParent = defaultSuggestedVaultParent()
+		}
+	}
+	if s.IsMobileLayout(c) {
+		if !s.VaultLauncherOpen {
+			return
+		}
+		tok := theme.GetTokens(c.Theme())
+		ui.Overlay(c, func() {
+			s.renderMobileVaultLauncherPage(c, tok)
+		})
+		return
+	}
 	if !s.VaultLauncherOpen {
 		ui.Box(c.Key("vault-launcher-dlg-host")).Children(func() {
 			components.Dialog(c.Key("vault-launcher-dlg"), &s.VaultLauncherOpen, components.DialogOptions{
@@ -125,12 +143,6 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 			}, nil)
 		})
 		return
-	}
-	if strings.TrimSpace(s.VaultLauncherName) == "" {
-		s.VaultLauncherName = "AsterLab"
-	}
-	if strings.TrimSpace(s.VaultLauncherParent) == "" {
-		s.VaultLauncherParent = defaultSuggestedVaultParent()
 	}
 
 	tok := theme.GetTokens(c.Theme())
@@ -331,4 +343,165 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 		})
 	})
 	s.VaultLauncherOpen = open
+}
+
+func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
+	ui.Overlay(c, func() {
+		t := c.Theme()
+		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	ui.Column(c.Key("mb-vl-root")).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+		ui.Row(c).FillWidth().
+			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+			MinHeight(t.Space(12)+topSafe).
+			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+			ui.Icon(c, theme.LogoParsedSmall()).Size(float32(tok.Spacing24), float32(tok.Spacing24)).TextColor(tok.Accent)
+			ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
+				components.Text(c, "选择你的实验库目录").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+				components.Text(c, "AsterLab · 本地优先实验工作台").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
+			if components.Button(c.Key("mb-vl-close"), "完成", components.ButtonGhost).Label("关闭").Shrink(0).Clicked() {
+				s.VaultLauncherOpen = false
+			}
+		})
+		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+		ui.Scroll(c.Key("mb-vl-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+				Gap(t.Space(3)).Children(func() {
+				// 1. Create New Vault Card (single column, full width)
+				ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+					Background(tok.Elevated).Border(1, tok.Accent.Alpha(0.45)).Gap(t.Space(2)).Children(func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						kit.IconBox(c, tok, lucide.FolderPlus(), tok.Accent)
+						components.Text(c, "新建本地实验库").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+						components.Badge(c, "推荐", components.BadgeOptions{Tone: components.BadgeAccent})
+					})
+
+					ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+						components.Text(c, "实验库名称").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						components.TextBox(c.Key("mb-vl-name"), &s.VaultLauncherName, components.TextBoxOptions{}).
+							Placeholder("AsterLab").FillWidth()
+					})
+
+					ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+						components.Text(c, "存放位置").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								components.TextBox(c.Key("mb-vl-parent"), &s.VaultLauncherParent, components.TextBoxOptions{}).
+									Placeholder("Documents 目录").FillWidth()
+							})
+							if s.OnPickVaultPath != nil && components.Button(c.Key("mb-vl-browse"), "浏览…", components.ButtonSecondary).Shrink(0).Clicked() {
+								if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
+									s.VaultLauncherParent = picked
+								}
+							}
+						})
+					})
+
+					previewPath := filepath.Join(strings.TrimSpace(s.VaultLauncherParent), strings.TrimSpace(s.VaultLauncherName))
+					if strings.TrimSpace(s.VaultLauncherParent) != "" && strings.TrimSpace(s.VaultLauncherName) != "" {
+						components.Text(c, "将创建目录："+previewPath).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+							SingleLine().Ellipsis("…")
+					}
+
+					components.Checkbox(c.Key("mb-vl-seed-demo"), &s.VaultLauncherSeedDemo, "放入新手指南与示范实验 (CCK-8 / CFU)")
+					if components.Button(c.Key("mb-vl-create"), "创建并打开", components.ButtonPrimary).FillWidth().Clicked() {
+						name := strings.TrimSpace(s.VaultLauncherName)
+						parent := strings.TrimSpace(s.VaultLauncherParent)
+						if name == "" || parent == "" {
+							s.VaultLauncherErr = "请先填写实验库名称和存放位置"
+						} else if s.OnCreateVault != nil {
+							if err := s.OnCreateVault(filepath.Join(parent, name), s.VaultLauncherSeedDemo); err != nil {
+								s.VaultLauncherErr = err.Error()
+							} else {
+								s.VaultLauncherErr = ""
+								s.VaultLauncherOpen = false
+							}
+						}
+					}
+				})
+
+				// 2. Recent Vaults Grouped List (single container + hairline dividers, zero box-in-box)
+				ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+					components.Text(c, "最近打开的实验库").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+						Padding(0, t.Space(1))
+					if len(s.RecentVaults) == 0 {
+						components.Text(c, "暂无其他实验库").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+							Padding(0, t.Space(1))
+					} else {
+						ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+							Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+							for i, rv := range s.RecentVaults {
+								rv := rv
+								if i > 0 {
+									ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+								}
+								bg := tok.Surface
+								if rv.Active {
+									bg = tok.AccentSoftBg
+								}
+								ui.Row(c.Key("mb-rv-"+rv.Path)).FillWidth().Padding(t.Space(3)).
+									Background(bg).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+									pick := ui.ButtonBase(c.Key("mb-rv-open-"+rv.Path)).Label("打开 "+rv.Name).
+										Grow(1).MinWidth(0).Justify(ui.Start).OnClick(func() {
+										if s.OnSwitchVaultPath != nil {
+											s.OnSwitchVaultPath(rv.Path)
+											s.VaultLauncherOpen = false
+										}
+									})
+									pick.Children(func() {
+										ui.Column(c).FillWidth().Gap(2).Children(func() {
+											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+												components.Text(c, rv.Name).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+													SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+												if rv.Active {
+													components.Badge(c, "当前", components.BadgeOptions{Tone: components.BadgeAccent})
+												} else if rv.Sandbox {
+													components.Badge(c, "临时", components.BadgeOptions{Tone: components.BadgeWarning})
+												}
+											})
+											components.Text(c, rv.Path).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+												SingleLine().Ellipsis("…").MinWidth(0)
+										})
+									})
+									if !rv.Active && s.OnRemoveRecentVault != nil {
+										if components.IconButton(c.Key("mb-rv-rm-"+rv.Path), lucide.X(), "从列表移除", components.IconButtonCompact).Clicked() {
+											s.OnRemoveRecentVault(rv.Path)
+										}
+									}
+								})
+							}
+						})
+					}
+				})
+
+				// 3. Existing directory & Sandbox fallback
+				ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
+					Background(tok.Surface).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
+					components.Text(c, "其他入口").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
+					if s.OnPickVaultPath != nil && components.Button(c.Key("mb-vl-open-existing"), "打开已有文件夹…", components.ButtonSecondary).FillWidth().Clicked() {
+						if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
+							if s.OnSwitchVaultPath != nil {
+								s.OnSwitchVaultPath(picked)
+								s.VaultLauncherErr = ""
+								s.VaultLauncherOpen = false
+							}
+						}
+					}
+					if components.Button(c.Key("mb-vl-sandbox"), "进入临时体验库", components.ButtonGhost).FillWidth().Clicked() {
+						if s.OnOpenSandboxVault != nil {
+							s.OnOpenSandboxVault()
+						}
+						s.VaultLauncherOpen = false
+					}
+				})
+
+				if s.VaultLauncherErr != "" {
+					kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, s.VaultLauncherErr, "", nil)
+				}
+			})
+		})
+	})
+	})
 }

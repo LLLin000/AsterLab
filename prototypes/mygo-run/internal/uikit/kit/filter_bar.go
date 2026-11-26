@@ -122,19 +122,29 @@ func FilterBar(c *ui.Context, key any, tok theme.Tokens, st *FilterBarState, fie
 		return
 	}
 	t := c.Theme()
+	vw, _ := c.Size()
+	narrow := isMobileContextViewport(c)
 
 	ui.Column(c.Key(key)).FillWidth().Gap(t.Space(2)).Children(func() {
 		ui.Row(c).FillWidth().Wrap().Padding(t.Space(2), t.Space(3)).
 			Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
 			AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			ui.Box(c).Width(float32(tok.Spacing48) * 5.2).Children(func() {
+			searchBox := ui.Box(c)
+			if narrow {
+				searchBox.FillWidth()
+			} else {
+				searchBox.Width(float32(tok.Spacing48) * 5.2)
+			}
+			searchBox.Children(func() {
 				components.TextBox(c, &st.Query, components.TextBoxOptions{
 					LeadingIcon: lucide.Search(),
-				}).Placeholder(searchPlaceholder)
+				}).Placeholder(searchPlaceholder).FillWidth()
 			})
 
 			if len(savedViews) > 0 {
-				ui.Box(c).Width(1).Height(t.Space(4)).Background(tok.BorderStrong)
+				if !narrow {
+					ui.Box(c).Width(1).Height(t.Space(4)).Background(tok.BorderStrong)
+				}
 				for _, sv := range savedViews {
 					sv := sv
 					active := st.SavedViewID == sv.ID || (st.SavedViewID == "" && len(sv.Filters) == 0 && len(st.Active) == 0)
@@ -157,7 +167,11 @@ func FilterBar(c *ui.Context, key any, tok theme.Tokens, st *FilterBarState, fie
 					}
 				}
 				components.Popover(c, addBtn, &st.pickerOpen, func(panel ui.Element) {
-					panel.Column().Width(float32(tok.Spacing48)*6.8).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing8))
+					popW := float32(tok.Spacing48) * 6.8
+					if vw > 0 && popW > vw-float32(tok.Spacing32) {
+						popW = max(float32(tok.Spacing48)*5, vw-float32(tok.Spacing32))
+					}
+					panel.Column().Width(popW).Padding(float32(tok.Spacing8)).Gap(float32(tok.Spacing8))
 					ApplyElevation(panel, tok, ElevationFloating)
 					panel.Children(func() {
 						ui.Text(c, "组合条件筛选").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)

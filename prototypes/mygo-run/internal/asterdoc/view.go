@@ -744,7 +744,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 							ui.Row(c.Key("step-body:"+sn.ID)).FillWidth().
 								Padding(0, 0, 0, railLeftPad).
 								AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
-								ui.Box(c).Width(railW).Radius(1).Background(railColor).Shrink(0)
+								ui.Box(c).Width(railW).Radius(float32(tok.PillRadius)).Background(railColor).Shrink(0)
 								ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing8)).Children(func() {
 									nestedW := colW - float32(tok.Spacing24)
 									if nestedW < 0 {
@@ -1019,7 +1019,7 @@ func (v *View) renderSidenoteRail(c *ui.Context, tok theme.Tokens, fnDoc *Footno
 
 			noteBox.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Stretch).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Box(c).Width(2).Radius(1).Background(hairCol).Shrink(0)
+					ui.Box(c).Width(2).Radius(float32(tok.PillRadius)).Background(hairCol).Shrink(0)
 					ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
 						if collapsed && !isEditing {
 							cBtn := ui.ButtonBase(c.Key("sn-expand:"+fn.ID)).FillWidth().
@@ -2604,6 +2604,71 @@ func (v *View) GenericModuleEditor(c *ui.Context, moduleID string, data map[stri
 			if input.Type == "quantity" && draft[input.Name+"__unit"] == nil {
 				empty := ""
 				draft[input.Name+"__unit"] = &empty
+			}
+			if v.MobileCompact {
+				ui.Column(c).FillWidth().Gap(t.Space(1)).Padding(t.Space(1), 0).Children(func() {
+					ui.Text(c, genericPortLabel(input.Name)).FontSize(float32(tok.TextData)).Bold().TextColor(t.TextMuted)
+					switch input.Type {
+					case "string", "reference", "artifact":
+						if input.Type == "artifact" {
+							ui.Text(c, "结构化列表（在步骤工作台或源码中编辑）").FontSize(float32(tok.TextMeta)).TextColor(t.TextMuted)
+						} else {
+							ui.TextInput(c, draft[input.Name]).Label(input.Name).FillWidth()
+						}
+					case "enum":
+						ui.Select(c, draft[input.Name], input.Values)
+					case "bool", "boolean":
+						if bools[input.Name] == nil {
+							b := false
+							bools[input.Name] = &b
+						}
+						ui.Checkbox(c, bools[input.Name], "")
+					case "int", "integer", "number", "decimal":
+						kb := ui.KeyboardDecimal
+						if input.Type == "int" || input.Type == "integer" {
+							kb = ui.KeyboardNumber
+						}
+						ui.DecimalInput(c, draft[input.Name], "", "", "1").Keyboard(kb)
+					case "quantity":
+						ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+								ui.DecimalInput(c, draft[input.Name], "", "", "1").Label(input.Name).Keyboard(ui.KeyboardDecimal)
+							})
+							ui.Box(c).Width(float32(tok.Spacing48)*1.8).Shrink(0).Children(func() {
+								ui.TextInput(c, draft[input.Name+"__unit"]).Label(input.Name + " unit").FillWidth()
+							})
+						})
+					case "string[]":
+						lists := v.moduleLists[moduleID]
+						if lists == nil {
+							lists = map[string][]string{}
+							v.moduleLists[moduleID] = lists
+						}
+						items := lists[input.Name]
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							remove := -1
+							for i := range items {
+								i := i
+								ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
+									ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+										ui.TextInput(c, &items[i]).Label(fmt.Sprintf("%s[%d]", input.Name, i)).FillWidth()
+									})
+									if ui.Button(c, "删除").Clicked() {
+										remove = i
+									}
+								})
+							}
+							if remove >= 0 {
+								items = append(items[:remove], items[remove+1:]...)
+							}
+							if ui.Button(c, "+ 添加一项").Clicked() {
+								items = append(items, "")
+							}
+							lists[input.Name] = items
+						})
+					}
+				})
+				continue
 			}
 			ui.Row(c).FillWidth().Gap(t.Space(1)).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, genericPortLabel(input.Name)).FontSize(float32(tok.TextData)).Bold().TextColor(t.TextMuted).Width(172)
