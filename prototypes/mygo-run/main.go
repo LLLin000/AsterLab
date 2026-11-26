@@ -5071,8 +5071,8 @@ func main() {
 			a.renderVaultNewExperimentDialog(c)
 			a.renderImportDialog(c)
 			a.renderPhotoRouteSheet(c)
-			a.renderLabGalleryOverlay(c)
 			a.renderSciCameraOverlay(c)
+			a.renderLabGalleryOverlay(c)
 			a.renderDevInspectorOverlay(c)
 		},
 		IsExternalModalOpen: func() bool {

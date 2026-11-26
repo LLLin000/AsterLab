@@ -157,6 +157,11 @@ type WBPreset struct {
 	Tint     float64
 }
 
+// DefaultISOPresets returns discrete standard ISO stops aligned with mobile sensor hardware.
+func DefaultISOPresets() []float64 {
+	return []float64{50, 100, 200, 400, 800, 1600}
+}
+
 // DefaultWBPresets returns lab lighting presets (standard 5000K D50 benchtop, 5500K, 6500K hood).
 func DefaultWBPresets() []WBPreset {
 	return []WBPreset{

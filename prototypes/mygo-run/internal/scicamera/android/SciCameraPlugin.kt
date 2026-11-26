@@ -9,6 +9,7 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Build
 import android.provider.MediaStore
+import android.view.MotionEvent
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -100,6 +101,21 @@ class SciCameraPlugin : MyGoPlugin {
             v.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             val c = Cam(v, context.applicationContext)
             cams[id] = c
+            v.setOnTouchListener { view, event ->
+                if (event.action == MotionEvent.ACTION_UP) {
+                    view.performClick()
+                    val cam = c.camera
+                    if (cam != null && view.width > 0 && view.height > 0) {
+                        val pt = v.meteringPointFactory.createPoint(event.x, event.y)
+                        val flags = FocusMeteringAction.FLAG_AF or (if (!c.exposureLocked) FocusMeteringAction.FLAG_AE else 0)
+                        val action = FocusMeteringAction.Builder(pt, flags)
+                            .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                            .build()
+                        cam.cameraControl.startFocusAndMetering(action)
+                    }
+                }
+                true
+            }
             c.startSensors()
             startCamera(c, args.optBoolean("front"))
             v

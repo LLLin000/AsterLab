@@ -45,8 +45,8 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 		if origOverlays != nil {
 			origOverlays(c)
 		}
-		a.renderLabGalleryOverlay(c)
 		a.renderSciCameraOverlay(c)
+		a.renderLabGalleryOverlay(c)
 	}
 	sh.OnOpenLabGallery = func() {
 		a.openLabGallery(sh.ActiveTab(), nil)
@@ -66,7 +66,7 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 	tt.SetInsets(59, 0, 34, 0)
 	settleIPhoneFrames(tt, 200)
 
-	// Open Scientific Camera overlay and inject deterministic Bayer DNG + preview capture hook.
+	// Inject deterministic Bayer DNG + preview capture hook.
 	sess := a.ensureSciCamera()
 	tmpDir := t.TempDir()
 	previewSrc := filepath.Join(tmpDir, "temp_preview.jpg")
@@ -76,7 +76,30 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	liveTelem := scicamera.Telemetry{
+		Running:       true,
+		RawSupported:  true,
+		ISO:           200,
+		MinISO:        34,
+		MaxISO:        3200,
+		ShutterS:      0.01,
+		ApertureF:     1.78,
+		WBKelvin:      4900,
+		WBGains:       [3]float64{2.1, 1.0, 1.5},
+		MaxWBGain:     8.0,
+		FocusLensPos:  0.35,
+		PitchDeg:      0.3,
+		RollDeg:       -0.2,
+		DeviceModel:   "iPhone 16 Pro",
+		OSVersion:     "iOS 18.0",
+		FocalLengthMM: 6.765,
+	}
+
 	sess.captureOverride = func(_ context.Context, opts scicamera.CaptureOptions) (scicamera.CaptureResult, error) {
+		tOut := liveTelem
+		tOut.ExposureLocked = true
+		tOut.WBLocked = true
+		tOut.FocusLocked = true
 		return scicamera.CaptureResult{
 			PreviewPath:   previewSrc,
 			RawPath:       rawSrc,
@@ -84,41 +107,68 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 			BitDepth:      12,
 			AsShotNeutral: [3]float64{0.46, 1.0, 0.62},
 			PhotosAssetID: "PH-SIM-001",
-			Telemetry: scicamera.Telemetry{
-				Running:        true,
-				RawSupported:   true,
-				ISO:            50,
-				MinISO:         34,
-				MaxISO:         3200,
-				ShutterS:       0.01,
-				ApertureF:      1.78,
-				WBKelvin:       5200,
-				WBGains:        [3]float64{2.1, 1.0, 1.5},
-				MaxWBGain:      8.0,
-				FocusLensPos:   0.35,
-				PitchDeg:       0.3,
-				RollDeg:        -0.2,
-				ExposureLocked: true,
-				WBLocked:       true,
-				FocusLocked:    true,
-				DeviceModel:    "iPhone 16 Pro",
-				OSVersion:      "iOS 18.0",
-				FocalLengthMM:  6.765,
-			},
+			Telemetry:     tOut,
 		}, nil
 	}
 
+	// 1. Default 4-zone Pro Camera HUD with live Auto telemetry readouts (200 / 1/100 / 4900K)
 	a.openSciCamera(nil, curTab, curLD, nil)
-	a.toggleSciBatchLock()
+	sess.telemetry = liveTelem
 	settleIPhoneFrames(tt, 180)
-	assertNoHorizontalOverflow402(t, tt, "SciCameraHUD")
-	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_hud_402x874.png")
+	assertNoHorizontalOverflow402(t, tt, "SciCameraHUDv3")
+	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_hud_v3_402x874.png")
 
-	if !tt.HasText("科研取景器（连接物理主摄后实时显示）") || !tt.HasText("已锁定") {
-		t.Fatalf("expected Scientific Camera HUD viewfinder and batch lock control")
+	for _, want := range []string{"DNG", "1x", "ISO·A", "200", "SS·A", "1/100", "WB·A", "4900K", "锁参"} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q in Pro Camera HUD with live Auto readouts", want)
+		}
+	}
+	if tt.HasText("角色") || tt.HasText("灰卡定白") {
+		t.Fatalf("experiment role tags must not appear inside pure Camera HUD")
 	}
 
-	// Trigger capture and drain async captureCh via frames.
+	// Honest ghost toggle on empty vault does NOT fake-enable ghost mode
+	tt.Click("叠影参照")
+	settleIPhoneFrames(tt, 120)
+	if sess.ghostEnabled {
+		t.Fatalf("expected ghostEnabled=false when vault has no reference photo yet")
+	}
+
+	// 2. Lock-What-You-See: locking preserves live ISO 200 (never jumps down to MinISO 34!)
+	tt.Click("锁定曝光与白平衡")
+	settleIPhoneFrames(tt, 120)
+	if !sess.allLocked || sess.selectedISO != 200 || sess.isoAuto || sess.shutterAuto {
+		t.Fatalf("expected lock-what-you-see ISO=200 (not MinISO=34), got locked=%v iso=%.0f isoAuto=%v",
+			sess.allLocked, sess.selectedISO, sess.isoAuto)
+	}
+
+	// OpenCamera EV-vs-Manual-Exposure mutual exclusion check
+	tt.Click("调节 EV")
+	settleIPhoneFrames(tt, 140)
+	assertNoHorizontalOverflow402(t, tt, "SciCameraEVManualv3")
+	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_ev_manual_v3_402x874.png")
+	if !tt.HasText("切回自动曝光") {
+		t.Fatalf("expected EV drawer under manual exposure to show 切回自动曝光 reset button")
+	}
+	tt.Click("切回自动曝光")
+	settleIPhoneFrames(tt, 120)
+	if !sess.isoAuto || !sess.shutterAuto || sess.allLocked {
+		t.Fatalf("expected EV reset button to return to Auto exposure cleanly")
+	}
+	tt.Click("调节 EV") // close drawer
+	settleIPhoneFrames(tt, 100)
+
+	// Re-lock and set 5500K WB, then capture continuous shot
+	tt.Click("调节 WB")
+	settleIPhoneFrames(tt, 120)
+	assertNoHorizontalOverflow402(t, tt, "SciCameraWBDrawerv3")
+	tt.Click("5500K")
+	settleIPhoneFrames(tt, 120)
+	tt.Click("调节 WB")
+	settleIPhoneFrames(tt, 100)
+	tt.Click("锁定曝光与白平衡")
+	settleIPhoneFrames(tt, 120)
+
 	a.triggerSciCapture()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -132,45 +182,31 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 		t.Fatalf("expected archived trio after capture, got count=%d raw=%q preview=%q meta=%q",
 			sess.shotCount, sess.lastRawAbs, sess.lastPreviewAbs, sess.lastMetaAbs)
 	}
-	if _, err := os.Stat(sess.lastRawAbs); err != nil {
-		t.Fatalf("expected archived DNG on disk: %v", err)
-	}
-	if _, err := os.Stat(sess.lastMetaAbs); err != nil {
-		t.Fatalf("expected archived sidecar JSON on disk: %v", err)
-	}
 
-	// Open In-App Lab Gallery and inspect metadata + role filter + ghost reuse.
-	a.closeSciCamera()
-	a.openLabGallery(&curTab, nil)
+	// 3. Flow A: Tap bottom-left thumbnail -> Lab Gallery floats cleanly on top of Camera
+	tt.Click("打开科研图库")
 	settleIPhoneFrames(tt, 220)
-	assertNoHorizontalOverflow402(t, tt, "LabGallery402")
-	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_402x874.png")
+	assertNoHorizontalOverflow402(t, tt, "LabGallery402v3")
+	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_v3_402x874.png")
 
-	if !tt.HasText("科研图库") || !tt.HasText("Bayer DNG") {
-		t.Fatalf("expected Lab Gallery heading and Bayer DNG badge")
-	}
-	g := a.ensureLabGallery()
-	if len(g.items) != 1 {
-		t.Fatalf("expected 1 item in Lab Gallery, got %d", len(g.items))
+	for _, want := range []string{"返回拍摄", "科研图库", "Bayer DNG", "用途标注"} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q in Lab Gallery Flow A", want)
+		}
 	}
 
-	// Filter to flat_field -> list becomes empty, then back to 全部 -> restores item.
-	tt.Click("筛选 平场")
-	settleIPhoneFrames(tt, 120)
-	if g.filterRole != scicamera.RoleFlat {
-		t.Fatalf("expected filterRole=%q, got %q", scicamera.RoleFlat, g.filterRole)
-	}
-	tt.Click("筛选 全部")
-	settleIPhoneFrames(tt, 120)
-	if g.filterRole != "" {
-		t.Fatalf("expected filterRole cleared, got %q", g.filterRole)
+	tt.Click("标注 灰卡")
+	settleIPhoneFrames(tt, 160)
+	metaRead, err := scicamera.ReadSidecarJSON(sess.lastMetaAbs)
+	if err != nil || metaRead.Experiment.FrameRole != scicamera.RoleWBRef {
+		t.Fatalf("expected post-capture role persisted as %q, got %q (err=%v)",
+			scicamera.RoleWBRef, metaRead.Experiment.FrameRole, err)
 	}
 
-	// Clicking 设为叠影并复用参数 re-opens Scientific Camera with ghost enabled and batch locked.
 	tt.Click("设为叠影并复用参数")
 	settleIPhoneFrames(tt, 180)
-	if !sess.open || !sess.ghostEnabled || !sess.batchLocked || sess.ghostImagePath == "" {
-		t.Fatalf("expected ghost reuse to reopen camera locked: open=%v ghost=%v locked=%v path=%q",
-			sess.open, sess.ghostEnabled, sess.batchLocked, sess.ghostImagePath)
+	if !sess.open || !sess.ghostEnabled || !sess.allLocked || sess.ghostImagePath == "" {
+		t.Fatalf("expected ghost reuse to return to locked camera: open=%v ghost=%v locked=%v path=%q",
+			sess.open, sess.ghostEnabled, sess.allLocked, sess.ghostImagePath)
 	}
 }

@@ -17,6 +17,9 @@ private final class SciPreviewView: UIView, AVCapturePhotoCaptureDelegate {
     private let stateLock = NSLock()
     private let deviceModel = UIDevice.current.model
     private let osVersion = UIDevice.current.systemVersion
+    private var tapRecognizer: UITapGestureRecognizer?
+    private let focusReticle = CAShapeLayer()
+    private var reticleToken: Int = 0
     private var pitchDeg: Double = 0
     private var rollDeg: Double = 0
     private var yawDeg: Double = 0
@@ -33,7 +36,23 @@ private final class SciPreviewView: UIView, AVCapturePhotoCaptureDelegate {
     func start(front: Bool) {
         if let pv = layer as? AVCaptureVideoPreviewLayer {
             pv.session = session
-            pv.videoGravity = .resizeAspectFill
+            pv.videoGravity = .resizeAspect
+        }
+        isUserInteractionEnabled = true
+        if tapRecognizer == nil {
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handlePreviewTap(_:)))
+            addGestureRecognizer(tap)
+            tapRecognizer = tap
+        }
+        if focusReticle.superlayer == nil {
+            let box = CGRect(x: 0, y: 0, width: 68, height: 68)
+            focusReticle.bounds = box
+            focusReticle.path = UIBezierPath(roundedRect: box, cornerRadius: 8).cgPath
+            focusReticle.strokeColor = UIColor.systemYellow.cgColor
+            focusReticle.fillColor = UIColor.clear.cgColor
+            focusReticle.lineWidth = 1.5
+            focusReticle.opacity = 0
+            layer.addSublayer(focusReticle)
         }
         startMotion()
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
@@ -96,6 +115,55 @@ private final class SciPreviewView: UIView, AVCapturePhotoCaptureDelegate {
     private func stopMotion() {
         if motionManager.isDeviceMotionActive {
             motionManager.stopDeviceMotionUpdates()
+        }
+    }
+
+    @objc private func handlePreviewTap(_ gr: UITapGestureRecognizer) {
+        let pt = gr.location(in: self)
+        showFocusReticle(at: pt)
+        guard let pv = layer as? AVCaptureVideoPreviewLayer else { return }
+        let devPt = pv.captureDevicePointConverted(fromLayerPoint: pt)
+        sessionQueue.async { [weak self] in
+            guard let self = self, let dev = self.device else { return }
+            do {
+                try dev.lockForConfiguration()
+                defer { dev.unlockForConfiguration() }
+                if dev.isFocusPointOfInterestSupported && dev.isFocusModeSupported(.autoFocus) {
+                    dev.focusPointOfInterest = devPt
+                    dev.focusMode = .autoFocus
+                }
+                // Apple AVCam guard: only shift AE target if exposure is not manually locked/custom.
+                if dev.exposureMode != .custom && dev.exposureMode != .locked,
+                   dev.isExposurePointOfInterestSupported && dev.isExposureModeSupported(.autoExpose) {
+                    dev.exposurePointOfInterest = devPt
+                    dev.exposureMode = .autoExpose
+                }
+            } catch {
+                NSLog("scicamera tap-to-focus error: %@", error.localizedDescription)
+            }
+        }
+    }
+
+    private func showFocusReticle(at pt: CGPoint) {
+        reticleToken += 1
+        let token = reticleToken
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        focusReticle.position = pt
+        focusReticle.opacity = 1
+        focusReticle.transform = CATransform3DMakeScale(1.25, 1.25, 1)
+        CATransaction.commit()
+
+        let scale = CABasicAnimation(keyPath: "transform")
+        scale.fromValue = NSValue(caTransform3D: CATransform3DMakeScale(1.25, 1.25, 1))
+        scale.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        scale.duration = 0.18
+        focusReticle.transform = CATransform3DIdentity
+        focusReticle.add(scale, forKey: "reticleScale")
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            guard let self = self, self.reticleToken == token else { return }
+            self.focusReticle.opacity = 0
         }
     }
 

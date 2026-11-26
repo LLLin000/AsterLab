@@ -53,25 +53,40 @@ type sciCameraSession struct {
 	batchRawPaths  []string
 	batchFiles     []string
 
-	captureRaw       bool
-	saveToPhotos     bool
-	albumName        string
-	ghostEnabled     bool
-	ghostImagePath   string
-	frameRole        string // sample | flat_field | wb_reference | scale_bar_ref
-	batchLocked      bool
+	// Low-frequency body configuration
+	captureRaw   bool
+	saveToPhotos bool
+	albumName    string
+	flickerHz    int // 50 | 60
+	gridEnabled  bool
+	ghostEnabled bool
+	ghostImagePath string
+	settingsOpen bool
+
+	// Optical manual controls (ISO / SS / EV / WB / MF + AE/AWB/AF lock)
+	activeParam      string // "" | "iso" | "ss" | "ev" | "wb" | "mf"
+	isoAuto          bool
+	selectedISO      float64
+	shutterAuto      bool
+	selectedShutterS float64
+	evBias           float64
+	wbMode           string // "auto" | "lock_current" | "kelvin"
+	selectedWBKelvin float64
+	focusAuto        bool
+	focusLocked      bool
+	focusLensPos     float64
+	allLocked        bool
+
 	refPitchDeg      float64
 	refRollDeg       float64
 	hasRefPose       bool
 	flatFieldAssetID string
 	batchRefAssetID  string
 
-	activeDrawer     string // "" | "shutter" | "wb" | "role"
-	selectedShutterS float64
-	wbMode           string
-	selectedWBKelvin float64
-	busy             bool
-	statusNote       string
+	busy       bool
+	toastText  string
+	toastUntil time.Time
+	flashUntil time.Time
 
 	telemetry  scicamera.Telemetry
 	lastPollAt time.Time
@@ -85,6 +100,7 @@ type sciCameraSession struct {
 
 type labGalleryState struct {
 	open       bool
+	fromCamera bool
 	filterRole string // "" | sample | flat_field | wb_reference | scale_bar_ref
 	items      []scicamera.GalleryItem
 	selectedID string
@@ -100,13 +116,19 @@ type labGalleryState struct {
 func (a *app) ensureSciCamera() *sciCameraSession {
 	if a.sciCam == nil {
 		a.sciCam = &sciCameraSession{
-			captureRaw:   true,
-			saveToPhotos: true,
-			albumName:    "AsterLab",
-			frameRole:    scicamera.RoleSample,
-			wbMode:       "auto",
-			captureCh:    make(chan sciCaptureEvent, 2),
-			telemCh:      make(chan sciTelemetryEvent, 4),
+			captureRaw:       true,
+			saveToPhotos:     true,
+			albumName:        "AsterLab",
+			flickerHz:        50,
+			gridEnabled:      true,
+			isoAuto:          true,
+			shutterAuto:      true,
+			wbMode:           "auto",
+			selectedWBKelvin: 5200,
+			focusAuto:        true,
+			focusLensPos:     0.50,
+			captureCh:        make(chan sciCaptureEvent, 2),
+			telemCh:          make(chan sciTelemetryEvent, 4),
 		}
 	}
 	return a.sciCam
@@ -158,7 +180,7 @@ func (g *labGalleryState) cachedThumb(path string) ui.ImageSource {
 	return img
 }
 
-func (a *app) openSciCamera(c *ui.Context, curTab shell.WorkspaceTab, curLD *vault.LiveDocument, applyDoc func(string)) {
+func (a *app) openSciCamera(c *ui.Context, curTab shell.WorkspaceTab, _ *vault.LiveDocument, applyDoc func(string)) {
 	sess := a.ensureSciCamera()
 	if sess.cam != nil {
 		sess.cam.Destroy()
@@ -168,30 +190,39 @@ func (a *app) openSciCamera(c *ui.Context, curTab shell.WorkspaceTab, curLD *vau
 	sess.camInitFailed = false
 	sess.tabPath = curTab.FilePath
 	sess.applyDoc = applyDoc
-	sess.dateYMD = ""
+	sess.dateYMD = time.Now().Format("2006-01-02")
 	sess.expTag = scicamera.SanitizeExpTag(strings.TrimSuffix(filepath.Base(curTab.FilePath), filepath.Ext(curTab.FilePath)))
 	if curTab.Title != "" {
 		if t := scicamera.SanitizeExpTag(curTab.Title); t != "LAB" {
 			sess.expTag = t
 		}
 	}
-	if sess.dateYMD == "" {
-		sess.dateYMD = time.Now().Format("2006-01-02")
-	}
 	sess.batchID = fmt.Sprintf("batch-%s-%s", strings.ReplaceAll(sess.dateYMD, "-", ""), time.Now().Format("150405"))
 	sess.shotCount = 0
 	sess.batchRawPaths = nil
 	sess.batchFiles = nil
-	sess.activeDrawer = ""
+	sess.activeParam = ""
+	sess.settingsOpen = false
 	sess.busy = false
-	sess.statusNote = "1x 物理主摄就绪 · 建议先用灰卡定白后锁参"
+	sess.toastText = ""
 	sess.lastPollAt = time.Time{}
+
+	// Preload latest vault photo as default ghost candidate if none set yet.
+	if sess.ghostImagePath == "" && a.vault != nil {
+		g := a.ensureLabGallery()
+		if g.dirty {
+			a.refreshLabGallery()
+		}
+		if len(g.items) > 0 {
+			sess.ghostImagePath = g.items[0].PreviewAbs
+		}
+	}
 
 	if isMobileRuntime() && a.shell != nil && a.shell.MyGoWindow() != nil && sess.captureOverride == nil {
 		cam, err := scicamera.New(a.shell.MyGoWindow(), scicamera.Options{})
 		if err != nil {
 			sess.camInitFailed = true
-			sess.statusNote = "原生取景器启动失败：" + err.Error()
+			sess.setToast("相机启动失败: " + err.Error())
 		} else {
 			sess.cam = cam
 		}
@@ -199,6 +230,11 @@ func (a *app) openSciCamera(c *ui.Context, curTab shell.WorkspaceTab, curLD *vau
 	if c != nil {
 		c.Invalidate()
 	}
+}
+
+func (s *sciCameraSession) setToast(msg string) {
+	s.toastText = msg
+	s.toastUntil = time.Now().Add(2200 * time.Millisecond)
 }
 
 func (a *app) closeSciCamera() {
@@ -212,17 +248,24 @@ func (a *app) closeSciCamera() {
 	}
 	a.sciCam.busy = false
 	a.sciCam.polling = false
+	a.sciCam.settingsOpen = false
+	a.sciCam.activeParam = ""
 }
 
 func (a *app) openLabGallery(curTab *shell.WorkspaceTab, applyDoc func(string)) {
 	g := a.ensureLabGallery()
 	g.open = true
+	g.fromCamera = a.sciCam != nil && a.sciCam.open
 	g.dirty = true
 	if curTab != nil && curTab.Kind == shell.TabFile {
 		g.tabPath = curTab.FilePath
+	} else if a.sciCam != nil && a.sciCam.tabPath != "" {
+		g.tabPath = a.sciCam.tabPath
 	}
 	if applyDoc != nil {
 		g.applyDoc = applyDoc
+	} else if a.sciCam != nil && a.sciCam.applyDoc != nil {
+		g.applyDoc = a.sciCam.applyDoc
 	}
 	a.refreshLabGallery()
 }
@@ -236,8 +279,17 @@ func (a *app) refreshLabGallery() {
 	}
 	g.items = scicamera.ScanLabGallery(a.vault.AssetsDir())
 	g.dirty = false
-	if g.selectedID == "" && len(g.items) > 0 {
-		g.selectedID = g.items[0].LabPhotoID
+	if len(g.items) > 0 {
+		found := false
+		for _, it := range g.items {
+			if it.LabPhotoID == g.selectedID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			g.selectedID = g.items[0].LabPhotoID
+		}
 	}
 }
 
@@ -246,13 +298,12 @@ func (a *app) pollSciCamera(c *ui.Context) {
 	if sess == nil || !sess.open {
 		return
 	}
-	// Drain completed captures.
 	for {
 		select {
 		case ev := <-sess.captureCh:
 			sess.busy = false
 			if ev.err != nil {
-				sess.statusNote = "拍摄失败：" + ev.err.Error()
+				sess.setToast("拍摄失败: " + ev.err.Error())
 				mygo.Haptics.Warning()
 			} else {
 				a.handleSciCaptureSuccess(c, ev.res)
@@ -281,7 +332,7 @@ doneDrain:
 			}
 		}()
 	}
-	if sess.cam != nil {
+	if sess.cam != nil || (sess.toastText != "" && time.Now().Before(sess.toastUntil)) || time.Now().Before(sess.flashUntil) {
 		c.After(220 * time.Millisecond)
 	}
 }
@@ -305,27 +356,57 @@ func (a *app) applySciControl(req scicamera.ControlRequest) {
 	}()
 }
 
+func (a *app) syncManualExposureControl(sess *sciCameraSession) {
+	if sess.isoAuto && sess.shutterAuto {
+		lock := false
+		a.applySciControl(scicamera.ControlRequest{ExposureLocked: &lock})
+		return
+	}
+	lock := true
+	req := scicamera.ControlRequest{ExposureLocked: &lock}
+	if !sess.isoAuto && sess.selectedISO > 0 {
+		req.ISO = sess.selectedISO
+	}
+	if !sess.shutterAuto && sess.selectedShutterS > 0 {
+		req.ShutterS = sess.selectedShutterS
+	}
+	a.applySciControl(req)
+}
+
 func (a *app) toggleSciBatchLock() {
 	sess := a.sciCam
 	if sess == nil {
 		return
 	}
-	sess.batchLocked = !sess.batchLocked
-	if sess.batchLocked {
+	sess.allLocked = !sess.allLocked
+	if sess.allLocked {
 		lock := true
+		// Lock-what-you-see: capture actual metered ISO + shutter without jumping down to MinISO.
+		if sess.isoAuto && sess.telemetry.ISO > 0 {
+			sess.isoAuto = false
+			sess.selectedISO = sess.telemetry.ISO
+		}
+		if sess.shutterAuto && sess.telemetry.ShutterS > 0 {
+			sess.shutterAuto = false
+			sess.selectedShutterS = sess.telemetry.ShutterS
+		}
 		req := scicamera.ControlRequest{
 			ExposureLocked: &lock,
+			ISO:            sess.selectedISO,
+			ShutterS:       sess.selectedShutterS,
 			FocusMode:      "lock_current",
 		}
-		if sess.telemetry.MinISO > 0 {
-			req.ISO = sess.telemetry.MinISO
-		}
-		if sess.selectedShutterS > 0 {
-			req.ShutterS = sess.selectedShutterS
+		sess.focusAuto = false
+		sess.focusLocked = true
+		if sess.telemetry.FocusLensPos > 0 {
+			sess.focusLensPos = sess.telemetry.FocusLensPos
 		}
 		if sess.wbMode == "auto" {
 			req.WBMode = "lock_current"
 			sess.wbMode = "lock_current"
+			if sess.telemetry.WBKelvin > 0 {
+				sess.selectedWBKelvin = sess.telemetry.WBKelvin
+			}
 		}
 		a.applySciControl(req)
 		if sess.telemetry.Running {
@@ -333,19 +414,25 @@ func (a *app) toggleSciBatchLock() {
 			sess.refRollDeg = sess.telemetry.RollDeg
 			sess.hasRefPose = true
 		}
-		sess.statusNote = "已锁死本批光学参数与机位倾角基准"
+		sess.setToast("已锁定 AE / AWB / AF")
 		mygo.Haptics.Success()
 		return
 	}
 	lock := false
+	sess.isoAuto = true
+	sess.shutterAuto = true
 	sess.wbMode = "auto"
-	sess.selectedShutterS = 0
+	sess.focusAuto = true
+	sess.focusLocked = false
+	sess.evBias = 0
+	ev := 0.0
 	a.applySciControl(scicamera.ControlRequest{
 		ExposureLocked: &lock,
+		EVBias:         &ev,
 		WBMode:         "auto",
 		FocusMode:      "auto",
 	})
-	sess.statusNote = "已解锁参数，恢复自动测光与对白"
+	sess.setToast("已恢复自动参数")
 	mygo.Haptics.Selection()
 }
 
@@ -355,10 +442,10 @@ func (a *app) triggerSciCapture() {
 		return
 	}
 	if sess.cam == nil && sess.captureOverride == nil {
-		sess.statusNote = "当前环境无物理相机，可使用右上角相册导入"
+		sess.setToast("当前无物理相机")
 		return
 	}
-	labID := scicamera.NextLabPhotoID(a.vault.AssetsDir(), sess.dateYMD, sess.expTag, sess.frameRole)
+	labID := scicamera.NextLabPhotoID(a.vault.AssetsDir(), sess.dateYMD, sess.expTag, scicamera.RoleSample)
 	opts := scicamera.CaptureOptions{
 		CaptureRaw:   sess.captureRaw,
 		SaveToPhotos: sess.saveToPhotos,
@@ -366,7 +453,7 @@ func (a *app) triggerSciCapture() {
 		LabPhotoID:   labID,
 	}
 	sess.busy = true
-	sess.statusNote = "正在捕获 " + labID + "…"
+	sess.flashUntil = time.Now().Add(140 * time.Millisecond)
 	mygo.Haptics.Light()
 
 	cam := sess.cam
@@ -390,9 +477,9 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 	if sess == nil || a.vault == nil {
 		return
 	}
-	labID := scicamera.NextLabPhotoID(a.vault.AssetsDir(), sess.dateYMD, sess.expTag, sess.frameRole)
+	labID := scicamera.NextLabPhotoID(a.vault.AssetsDir(), sess.dateYMD, sess.expTag, scicamera.RoleSample)
 	expMode := "auto"
-	if res.Telemetry.ExposureLocked || sess.batchLocked {
+	if res.Telemetry.ExposureLocked || !sess.isoAuto || !sess.shutterAuto || sess.allLocked {
 		expMode = "locked"
 	}
 	wbMode := sess.wbMode
@@ -400,7 +487,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 		wbMode = "auto"
 	}
 	focusMode := "auto"
-	if res.Telemetry.FocusLocked || sess.batchLocked {
+	if res.Telemetry.FocusLocked || !sess.focusAuto || sess.allLocked {
 		focusMode = "locked"
 	}
 	bitDepth := res.BitDepth
@@ -421,6 +508,11 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 		sess.hasRefPose = true
 	}
 
+	flickerHz := sess.flickerHz
+	if flickerHz <= 0 {
+		flickerHz = 50
+	}
+
 	meta := scicamera.PhotoMetadata{
 		Schema:        scicamera.MetadataSchema,
 		LabPhotoID:    labID,
@@ -438,7 +530,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 			ShutterS:           res.Telemetry.ShutterS,
 			ApertureF:          res.Telemetry.ApertureF,
 			EVBias:             res.Telemetry.EVBias,
-			FlickerGridHz:      50,
+			FlickerGridHz:      flickerHz,
 			ExposureMode:       expMode,
 			WBMode:             wbMode,
 			WBKelvinEst:        res.Telemetry.WBKelvin,
@@ -464,7 +556,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 		Experiment: scicamera.ExperimentInfo{
 			ExperimentID:      sess.expTag,
 			BatchID:           sess.batchID,
-			FrameRole:         sess.frameRole,
+			FrameRole:         scicamera.RoleSample,
 			BatchRefAssetID:   sess.batchRefAssetID,
 			CapturedAt:        time.Now().Format(time.RFC3339),
 			NonDestructiveOps: []string{},
@@ -473,7 +565,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 
 	archived, err := scicamera.SaveCapturedTrio(a.vault.AssetsDir(), labID, res.PreviewPath, res.RawPath, meta)
 	if err != nil {
-		sess.statusNote = "归档原片失败：" + err.Error()
+		sess.setToast("归档原片失败: " + err.Error())
 		return
 	}
 	_, _ = a.generateAssetPreviewSidecar(archived.PreviewRel)
@@ -488,6 +580,10 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 	sess.lastPreviewAbs = archived.PreviewAbs
 	sess.lastRawAbs = archived.RawAbs
 	sess.lastMetaAbs = archived.MetaAbs
+	sess.ghostImagePath = archived.PreviewAbs
+	if sess.batchRefAssetID == "" {
+		sess.batchRefAssetID = archived.LabPhotoID
+	}
 	if archived.RawAbs != "" {
 		sess.batchRawPaths = append(sess.batchRawPaths, archived.RawAbs)
 	}
@@ -497,25 +593,15 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 	if archived.MetaAbs != "" {
 		sess.batchFiles = append(sess.batchFiles, archived.MetaAbs)
 	}
-	if sess.frameRole == scicamera.RoleFlat {
-		sess.flatFieldAssetID = archived.LabPhotoID
-	} else if sess.batchRefAssetID == "" {
-		sess.batchRefAssetID = archived.LabPhotoID
-		sess.ghostImagePath = archived.PreviewAbs
-	}
-	if sess.ghostImagePath == "" {
-		sess.ghostImagePath = archived.PreviewAbs
-	}
 
-	rawTag := "JPG"
+	tag := "已拍 JPG"
 	if archived.RawAbs != "" {
-		rawTag = "Bayer DNG + JPG"
+		tag = "已存 DNG"
 	}
-	photosNote := ""
 	if res.PhotosAssetID != "" {
-		photosNote = " · 已同步系统相册"
+		tag += " · 相册"
 	}
-	sess.statusNote = fmt.Sprintf("已编号归档 %s（%s%s）", archived.LabPhotoID, rawTag, photosNote)
+	sess.setToast(tag + " (" + archived.LabPhotoID + ")")
 	mygo.Haptics.Success()
 	if c != nil {
 		c.Invalidate()
@@ -525,7 +611,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 func (a *app) shareLabFiles(c *ui.Context, files []string, label string) {
 	var clean []string
 	for _, f := range files {
-		if strings.TrimSpace(f) == "" {
+		if f == "" {
 			continue
 		}
 		if _, err := os.Stat(f); err == nil {
@@ -570,12 +656,12 @@ func (a *app) routeArchivedPhotoIntoDoc(c *ui.Context, relAsset, rawAbs, labID s
 	sess := a.sciCam
 	tabPath := ""
 	var applyDoc func(string)
-	if sess != nil && sess.tabPath != "" {
-		tabPath = sess.tabPath
-		applyDoc = sess.applyDoc
-	} else if a.labGallery != nil && a.labGallery.tabPath != "" {
+	if a.labGallery != nil && a.labGallery.tabPath != "" {
 		tabPath = a.labGallery.tabPath
 		applyDoc = a.labGallery.applyDoc
+	} else if sess != nil && sess.tabPath != "" {
+		tabPath = sess.tabPath
+		applyDoc = sess.applyDoc
 	} else if a.shell != nil {
 		if tab := a.shell.ActiveTab(); tab != nil && tab.Kind == shell.TabFile {
 			tabPath = tab.FilePath
@@ -634,16 +720,22 @@ func formatShutterShort(s float64) string {
 	if s <= 0 {
 		return "自动"
 	}
-	den := int(math.Round(1.0 / s))
-	if den > 0 {
-		return fmt.Sprintf("1/%d", den)
+	if s < 0.8 {
+		denom := math.Round(1.0 / s)
+		if denom < 1 {
+			denom = 1
+		}
+		return fmt.Sprintf("1/%.0f", denom)
 	}
-	return fmt.Sprintf("%.2fs", s)
+	return fmt.Sprintf("%.1fs", s)
 }
 
 func (a *app) renderSciCameraOverlay(c *ui.Context) {
 	sess := a.sciCam
 	if sess == nil || !sess.open {
+		return
+	}
+	if a.labGallery != nil && a.labGallery.open {
 		return
 	}
 	a.pollSciCamera(c)
@@ -653,351 +745,448 @@ func (a *app) renderSciCameraOverlay(c *ui.Context) {
 	g := a.ensureLabGallery()
 
 	ui.Overlay(c, func() {
-		root := ui.Box(c.Key("sci-camera-overlay")).Absolute().Fill().Modal().Background(tok.Canvas)
+		root := ui.Column(c.Key("sci-camera-overlay")).Absolute().Fill().Modal().Background(tok.Canvas)
 		root.Children(func() {
-			// 1. Live camera viewfinder layer underneath UI HUD.
-			if sess.cam != nil && sess.cam.View() != nil {
-				ui.WebView(c, sess.cam.View()).Fill()
-			} else {
-				ui.Box(c.Key("sci-cam-sim-viewfinder")).Fill().Center().Background(tok.Canvas).Children(func() {
-					ui.Column(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing32), float32(tok.Spacing32)).TextColor(tok.TextMuted)
-						ui.Text(c, "科研取景器（连接物理主摄后实时显示）").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+			// ============================================================
+			// ZONE 1: TOP UTILITY BAR (Pure low-frequency body configuration)
+			// ============================================================
+			ui.Row(c.Key("sci-cam-topbar")).FillWidth().
+				Padding(safeTop+float32(tok.Spacing4), safeRight+float32(tok.Spacing12), float32(tok.Spacing8), safeLeft+float32(tok.Spacing12)).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Background(tok.Canvas).Children(func() {
+				closeBtn := ui.ButtonBase(c.Key("sci-cam-close")).Size(float32(tok.Spacing32)+float32(tok.Spacing4), float32(tok.Spacing32)+float32(tok.Spacing4)).
+					Radius(float32(tok.PillRadius)).Background(tok.Elevated).Center().Label("关闭相机").
+					OnClick(func() {
+						mygo.Haptics.Selection()
+						a.closeSciCamera()
 					})
-				})
-			}
-
-			// 2. Non-destructive 22% Ghost Overlay from batch reference shot.
-			if sess.ghostEnabled && sess.ghostImagePath != "" {
-				if ghostImg := g.cachedThumb(sess.ghostImagePath); ghostImg != nil {
-					ui.Box(c.Key("sci-cam-ghost-wrap")).Absolute().Fill().PassThrough().Center().Children(func() {
-						ui.Image(c, ghostImg).Fill().Opacity(0.22)
-					})
-				}
-			}
-
-			// 3. Center subtle pose & alignment crosshair HUD (PassThrough so finger taps reach controls cleanly).
-			ui.Box(c.Key("sci-cam-guide")).Absolute().Fill().PassThrough().Center().Children(func() {
-				ui.Column(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						ui.Box(c).Width(float32(tok.Spacing16)).Height(1).Background(tok.BorderStrong)
-						ui.Box(c).Size(float32(tok.Spacing4), float32(tok.Spacing4)).Radius(float32(tok.PillRadius)).Background(tok.Accent)
-						ui.Box(c).Width(float32(tok.Spacing16)).Height(1).Background(tok.BorderStrong)
-					})
-					if sess.hasRefPose && sess.telemetry.Running {
-						dp := sess.telemetry.PitchDeg - sess.refPitchDeg
-						dr := sess.telemetry.RollDeg - sess.refRollDeg
-						poseText := fmt.Sprintf("姿态 Δ %.1f° / %.1f°", dp, dr)
-						poseCol := tok.WarningText
-						if math.Abs(dp) < 2.5 && math.Abs(dr) < 2.5 {
-							poseText = "机位已对齐基准 ✓"
-							poseCol = tok.SuccessText
-						}
-						ui.Box(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-							Radius(float32(tok.PillRadius)).Background(tok.Scrim).Children(func() {
-							ui.Text(c, poseText).FontSize(float32(tok.TextMeta)).TextColor(poseCol).FontFeatures("tnum")
-						})
-					}
-				})
-			})
-
-			// 4. Foreground Halide-inspired minimalist HUD (top narrow pill + bottom tactile dock).
-			ui.Column(c.Key("sci-cam-hud")).Absolute().Fill().
-				Padding(safeTop+float32(tok.Spacing8), safeRight+float32(tok.Spacing12), safeBottom+float32(tok.Spacing12), safeLeft+float32(tok.Spacing12)).
-				Children(func() {
-				// Top Control Capsule + optional compact 1-row dial strip
-				ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-					topBar := ui.Row(c.Key("sci-cam-top-bar")).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
-						Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-						Radius(float32(tok.PillRadius)).
-						Background(tok.Surface.Alpha(0.92)).Border(1, tok.Border)
-					topBar.Children(func() {
-						closeBtn := ui.ButtonBase(c.Key("sci-cam-close")).Size(float32(tok.Spacing32), float32(tok.Spacing32)).
-							Radius(float32(tok.PillRadius)).Center().Label("关闭科研相机").
-							OnClick(func() {
-								mygo.Haptics.Selection()
-								a.closeSciCamera()
-							})
-						theme.ApplyTactilePress(closeBtn)
-						closeBtn.Children(func() {
-							ui.Icon(c, lucide.X()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
-						})
-
-						// Scrollable compact parameter readout pills.
-						ui.ScrollHorizontal(c.Key("sci-cam-pills-scroll")).Scrollbars(false).Grow(1).MinWidth(0).Children(func() {
-							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-								hudChip := func(key, lbl string, active bool, onTap func()) {
-									bg := tok.Elevated
-									fg := tok.Text
-									if active {
-										bg = tok.AccentSoftBg
-										fg = tok.Accent
-									}
-									b := ui.ButtonBase(c.Key("sci-chip-"+key)).
-										Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
-										Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
-										Background(bg).Center().Label(lbl).OnClick(onTap)
-									theme.ApplyTactilePress(b)
-									b.Children(func() {
-										ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
-									})
-								}
-
-								rawLbl := "DNG"
-								if !sess.captureRaw {
-									rawLbl = "JPG"
-								}
-								hudChip("raw", rawLbl, sess.captureRaw, func() {
-									sess.captureRaw = !sess.captureRaw
-									mygo.Haptics.Selection()
-								})
-
-								shutterLbl := "快门 " + formatShutterShort(sess.selectedShutterS)
-								if sess.selectedShutterS == 0 && sess.telemetry.ShutterS > 0 {
-									shutterLbl = "快门 " + formatShutterShort(sess.telemetry.ShutterS)
-								}
-								hudChip("shutter", shutterLbl, sess.activeDrawer == "shutter", func() {
-									if sess.activeDrawer == "shutter" {
-										sess.activeDrawer = ""
-									} else {
-										sess.activeDrawer = "shutter"
-									}
-								})
-
-								wbLbl := "WB 自动"
-								switch sess.wbMode {
-								case "lock_current":
-									wbLbl = "WB 已锁定"
-								case "kelvin":
-									wbLbl = fmt.Sprintf("%.0fK", sess.selectedWBKelvin)
-								}
-								hudChip("wb", wbLbl, sess.activeDrawer == "wb", func() {
-									if sess.activeDrawer == "wb" {
-										sess.activeDrawer = ""
-									} else {
-										sess.activeDrawer = "wb"
-									}
-								})
-
-								hudChip("role", "角色 "+scicamera.RoleLabel(sess.frameRole), sess.activeDrawer == "role", func() {
-									if sess.activeDrawer == "role" {
-										sess.activeDrawer = ""
-									} else {
-										sess.activeDrawer = "role"
-									}
-								})
-
-								photosLbl := "同步相册"
-								if !sess.saveToPhotos {
-									photosLbl = "仅存库内"
-								}
-								hudChip("photos", photosLbl, sess.saveToPhotos, func() {
-									sess.saveToPhotos = !sess.saveToPhotos
-									mygo.Haptics.Selection()
-								})
-
-								hudChip("ghost", "叠影", sess.ghostEnabled, func() {
-									sess.ghostEnabled = !sess.ghostEnabled
-									mygo.Haptics.Selection()
-								})
-							})
-						})
-
-						// Fallback system album picker button
-						pickBtn := ui.ButtonBase(c.Key("sci-cam-pick")).Size(float32(tok.Spacing32), float32(tok.Spacing32)).
-							Radius(float32(tok.PillRadius)).Center().Label("从相册导入").
-							OnClick(func() {
-								mygo.Haptics.Selection()
-								a.pickFromAlbumInSciCamera(c)
-							})
-						theme.ApplyTactilePress(pickBtn)
-						pickBtn.Children(func() {
-							ui.Icon(c, lucide.ImagePlus()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
-						})
-					})
-
-					// Single-row compact drawer under top capsule (opens only for the clicked parameter)
-					if sess.activeDrawer != "" {
-						strip := ui.ScrollHorizontal(c.Key("sci-cam-substrip")).Scrollbars(false).FillWidth()
-						strip.Children(func() {
-							ui.Row(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-								Radius(float32(tok.PanelRadius)).Background(tok.Surface.Alpha(0.95)).
-								Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
-								subBtn := func(key, lbl string, sel bool, onTap func()) {
-									bg := tok.Elevated
-									fg := tok.Text
-									if sel {
-										bg = tok.Accent
-										fg = tok.AccentText
-									}
-									b := ui.ButtonBase(c.Key("sci-sub-"+key)).Height(float32(tok.Spacing32)).
-										Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-										Background(bg).Center().Label(lbl).OnClick(onTap)
-									b.Children(func() {
-										ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-									})
-								}
-
-								switch sess.activeDrawer {
-								case "shutter":
-									for _, sp := range scicamera.AntiFlickerShutterPresets(50) {
-										sp := sp
-										selected := (sp.AutoMode && sess.selectedShutterS == 0) || (!sp.AutoMode && math.Abs(sess.selectedShutterS-sp.Seconds) < 0.0002)
-										subBtn("sh-"+sp.Label, sp.Label, selected, func() {
-											sess.activeDrawer = ""
-											if sp.AutoMode {
-												sess.selectedShutterS = 0
-												lock := false
-												a.applySciControl(scicamera.ControlRequest{ExposureLocked: &lock})
-											} else {
-												sess.selectedShutterS = sp.Seconds
-												lock := true
-												iso := sess.telemetry.MinISO
-												if iso <= 0 {
-													iso = 50
-												}
-												a.applySciControl(scicamera.ControlRequest{ExposureLocked: &lock, ISO: iso, ShutterS: sp.Seconds})
-											}
-										})
-									}
-								case "wb":
-									for _, wp := range scicamera.DefaultWBPresets() {
-										wp := wp
-										selected := sess.wbMode == wp.Mode && (wp.Mode != "kelvin" || math.Abs(sess.selectedWBKelvin-wp.Kelvin) < 1)
-										subBtn("wb-"+wp.Label, wp.Label, selected, func() {
-											sess.activeDrawer = ""
-											sess.wbMode = wp.Mode
-											sess.selectedWBKelvin = wp.Kelvin
-											a.applySciControl(scicamera.ControlRequest{WBMode: wp.Mode, WBKelvin: wp.Kelvin, WBTint: wp.Tint})
-										})
-									}
-								case "role":
-									for _, rp := range []struct{ id, lbl string }{
-										{scicamera.RoleSample, "样本 (SMP)"},
-										{scicamera.RoleWBRef, "灰卡定白 (REF)"},
-										{scicamera.RoleFlat, "空拍平场 (FLT)"},
-										{scicamera.RoleScaleRef, "比例尺 (SCL)"},
-									} {
-										rp := rp
-										subBtn("role-"+rp.id, rp.lbl, sess.frameRole == rp.id, func() {
-											sess.frameRole = rp.id
-											sess.activeDrawer = ""
-										})
-									}
-								}
-							})
-						})
-					}
+				theme.ApplyTactilePress(closeBtn)
+				closeBtn.Children(func() {
+					ui.Icon(c, lucide.X()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
 				})
 
 				ui.Spacer(c)
 
-				// Status telemetry pill just above bottom dock
-				if sess.statusNote != "" {
-					ui.Row(c).FillWidth().Justify(ui.Center).Padding(0, 0, float32(tok.Spacing8), 0).Children(func() {
-						ui.Box(c).Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
-							Radius(float32(tok.PillRadius)).Background(tok.Surface.Alpha(0.92)).Border(1, tok.Border).Children(func() {
-							ui.Text(c, sess.statusNote).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+				// Pure format toggle: DNG vs JPG (honest fallback if hardware does not support Bayer RAW)
+				rawAvail := !sess.telemetry.Running || sess.telemetry.RawSupported
+				fmtLbl := "DNG"
+				fmtBg := tok.AccentSoftBg
+				fmtFg := tok.Accent
+				if !sess.captureRaw || !rawAvail {
+					fmtLbl = "JPG"
+					fmtBg = tok.Elevated
+					fmtFg = tok.TextMuted
+				}
+				fmtBtn := ui.ButtonBase(c.Key("sci-cam-fmt")).Height(float32(tok.Spacing32)+float32(tok.Spacing4)).
+					Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
+					Background(fmtBg).Center().Label("切换格式").
+					OnClick(func() {
+						if !rawAvail {
+							sess.captureRaw = false
+							sess.setToast("当前设备仅支持 JPG 格式")
+							mygo.Haptics.Warning()
+							return
+						}
+						sess.captureRaw = !sess.captureRaw
+						mygo.Haptics.Selection()
+					})
+				theme.ApplyTactilePress(fmtBtn)
+				fmtBtn.Children(func() {
+					ui.Text(c, fmtLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fmtFg).SingleLine()
+				})
+
+				// Grid & Level toggle
+				topIconBtn := func(key, label string, icon *ui.SVG, active bool, onTap func()) {
+					bg := tok.Elevated
+					fg := tok.TextMuted
+					if active {
+						bg = tok.AccentSoftBg
+						fg = tok.Accent
+					}
+					b := ui.ButtonBase(c.Key(key)).Size(float32(tok.Spacing32)+float32(tok.Spacing4), float32(tok.Spacing32)+float32(tok.Spacing4)).
+						Radius(float32(tok.PillRadius)).Background(bg).Center().Label(label).OnClick(onTap)
+					theme.ApplyTactilePress(b)
+					b.Children(func() {
+						ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(fg)
+					})
+				}
+
+				topIconBtn("sci-cam-grid", "网格与水平仪", lucide.Grid3x3(), sess.gridEnabled, func() {
+					sess.gridEnabled = !sess.gridEnabled
+					mygo.Haptics.Selection()
+				})
+				topIconBtn("sci-cam-ghost", "叠影参照", lucide.Layers(), sess.ghostEnabled && sess.ghostImagePath != "", func() {
+					if !sess.ghostEnabled {
+						if sess.ghostImagePath == "" && len(g.items) > 0 {
+							sess.ghostImagePath = g.items[0].PreviewAbs
+						}
+						if sess.ghostImagePath == "" {
+							sess.setToast("先拍 1 张照片后可开启叠影参照")
+							mygo.Haptics.Warning()
+							return
+						}
+					}
+					sess.ghostEnabled = !sess.ghostEnabled
+					mygo.Haptics.Selection()
+				})
+				topIconBtn("sci-cam-settings", "相机设置", lucide.Settings(), sess.settingsOpen, func() {
+					sess.settingsOpen = !sess.settingsOpen
+					if sess.settingsOpen {
+						sess.activeParam = ""
+					}
+					mygo.Haptics.Selection()
+				})
+			})
+
+			// ============================================================
+			// ZONE 2: CLEAN 4:3 NATIVE SENSOR VIEWFINDER
+			// ============================================================
+			vfWrap := ui.Box(c.Key("sci-cam-vf-wrap")).FillWidth().Grow(1).Basis(0).MinHeight(0).
+				Center().Clip().Background(tok.Canvas)
+			vfWrap.Children(func() {
+				vf := ui.Box(c.Key("sci-cam-vf")).FillWidth().AspectRatio(0.75).
+					Background(tok.Surface.Alpha(0.25)).Border(1, tok.BorderSubtle).Clip()
+				vf.Children(func() {
+					// Live native viewfinder or headless placeholder
+					if sess.cam != nil && sess.cam.View() != nil {
+						ui.WebView(c, sess.cam.View()).Fill()
+					} else {
+						ui.Box(c.Key("sci-cam-sim-viewfinder")).Fill().Center().Children(func() {
+							ui.Column(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing32), float32(tok.Spacing32)).TextColor(tok.TextMuted)
+								ui.Text(c, "1x 物理主摄取景器").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							})
+						})
+					}
+
+					// Optional 22% Ghost Overlay
+					if sess.ghostEnabled && sess.ghostImagePath != "" {
+						if ghostImg := g.cachedThumb(sess.ghostImagePath); ghostImg != nil {
+							ui.Box(c.Key("sci-cam-ghost-wrap")).Absolute().Fill().PassThrough().Center().Children(func() {
+								ui.Image(c, ghostImg).Fill().Opacity(0.22)
+							})
+						}
+					}
+
+					// Optional 3x3 Rule-of-Thirds Grid & Center Level Horizon
+					if sess.gridEnabled {
+						gridOverlay := ui.Box(c.Key("sci-cam-grid-lines")).Absolute().Fill().PassThrough()
+						gridOverlay.Children(func() {
+							// Vertical thirds
+							ui.Row(c).Absolute().Fill().PassThrough().Children(func() {
+								ui.Box(c).Grow(1).FillHeight()
+								ui.Box(c).Width(1).FillHeight().Background(tok.Text.Alpha(0.16))
+								ui.Box(c).Grow(1).FillHeight()
+								ui.Box(c).Width(1).FillHeight().Background(tok.Text.Alpha(0.16))
+								ui.Box(c).Grow(1).FillHeight()
+							})
+							// Horizontal thirds
+							ui.Column(c).Absolute().Fill().PassThrough().Children(func() {
+								ui.Box(c).Grow(1).FillWidth()
+								ui.Box(c).Height(1).FillWidth().Background(tok.Text.Alpha(0.16))
+								ui.Box(c).Grow(1).FillWidth()
+								ui.Box(c).Height(1).FillWidth().Background(tok.Text.Alpha(0.16))
+								ui.Box(c).Grow(1).FillWidth()
+							})
+							// Subtle center crosshair + live tilt readout only when hardware telemetry runs
+							ui.Box(c).Absolute().Fill().PassThrough().Center().Children(func() {
+								ui.Column(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+									ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+										ui.Box(c).Width(float32(tok.Spacing12)).Height(1).Background(tok.BorderStrong)
+										ui.Box(c).Size(float32(tok.Spacing4), float32(tok.Spacing4)).Radius(float32(tok.PillRadius)).Background(tok.Accent)
+										ui.Box(c).Width(float32(tok.Spacing12)).Height(1).Background(tok.BorderStrong)
+									})
+									if sess.telemetry.Running {
+										dp, dr := sess.telemetry.PitchDeg, sess.telemetry.RollDeg
+										if sess.hasRefPose {
+											dp -= sess.refPitchDeg
+											dr -= sess.refRollDeg
+										}
+										col := tok.TextMuted
+										if math.Abs(dp) < 2.0 && math.Abs(dr) < 2.0 {
+											col = tok.SuccessText
+										}
+										ui.Box(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).Background(tok.Scrim).Children(func() {
+											ui.Text(c, fmt.Sprintf("%+.1f° / %+.1f°", dp, dr)).FontSize(float32(tok.TextMeta)).TextColor(col).FontFeatures("tnum")
+										})
+									}
+								})
+							})
+						})
+					}
+
+					// Minimal "1x" lens badge anchored at bottom center of viewfinder frame
+					ui.Box(c).Absolute().Fill().PassThrough().
+						Padding(0, 0, float32(tok.Spacing8), 0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
+							Background(tok.Scrim).Border(1, tok.BorderSubtle).Children(func() {
+							ui.Text(c, "1x").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).FontFeatures("tnum")
+						})
+					})
+
+					// Transient capture feedback toast (never permanently blocks center composition)
+					if sess.toastText != "" && time.Now().Before(sess.toastUntil) {
+						ui.Box(c).Absolute().Fill().PassThrough().
+							Padding(float32(tok.Spacing12), 0, 0, 0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+								Radius(float32(tok.PillRadius)).Background(tok.Scrim).Border(1, tok.Border).Children(func() {
+								ui.Text(c, sess.toastText).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…")
+							})
+						})
+					}
+
+					// Subtle shutter blink on capture
+					if time.Now().Before(sess.flashUntil) {
+						ui.Box(c).Absolute().Fill().PassThrough().Background(tok.Text.Alpha(0.24))
+					}
+				})
+
+				// Compact Camera Settings drawer anchored at top of viewfinder when gear icon is open
+				if sess.settingsOpen {
+					ui.ButtonBase(c.Key("sci-cam-settings-backdrop")).Absolute().Fill().Label("关闭相机设置").
+						OnClick(func() {
+							sess.settingsOpen = false
+						})
+					ui.Box(c.Key("sci-cam-settings-panel")).Absolute().Fill().PassThrough().
+						Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing12), 0, safeLeft+float32(tok.Spacing12)).
+						AlignItems(ui.End).Justify(ui.Start).Children(func() {
+						ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).
+							Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).
+							Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+								ui.Text(c, "同步保存至系统相册").FontSize(float32(tok.TextMeta)).TextColor(tok.Text).Grow(1).MinWidth(0)
+								lbl := "已开启"
+								bg, fg := tok.Accent, tok.AccentText
+								if !sess.saveToPhotos {
+									lbl = "已关闭"
+									bg, fg = tok.Elevated, tok.TextMuted
+								}
+								b := ui.ButtonBase(c.Key("sci-set-photos")).Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
+									Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
+									Background(bg).Center().Label("切换系统相册同步").
+									OnClick(func() {
+										sess.saveToPhotos = !sess.saveToPhotos
+										mygo.Haptics.Selection()
+									})
+								b.Children(func() {
+									ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+								})
+							})
+							ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								ui.Text(c, "防频闪电网频率").FontSize(float32(tok.TextMeta)).TextColor(tok.Text).Grow(1).MinWidth(0)
+								for _, hz := range []int{50, 60} {
+									hz := hz
+									bg, fg := tok.Elevated, tok.TextMuted
+									if sess.flickerHz == hz {
+										bg, fg = tok.Accent, tok.AccentText
+									}
+									b := ui.ButtonBase(c.Key(fmt.Sprintf("sci-set-hz-%d", hz))).Height(float32(tok.Spacing24)+float32(tok.Spacing4)).
+										Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+										Background(bg).Center().Label(fmt.Sprintf("%dHz", hz)).
+										OnClick(func() {
+											sess.flickerHz = hz
+											mygo.Haptics.Selection()
+										})
+									b.Children(func() {
+										ui.Text(c, fmt.Sprintf("%dHz", hz)).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+									})
+								}
+							})
+						})
+					})
+				}
+			})
+
+			// ============================================================
+			// ZONE 3: OPTICAL PARAMETER DECK (Dial drawer + 5-column readouts)
+			// ============================================================
+			if sess.activeParam != "" {
+				a.renderSciParamDrawer(c, tok, sess)
+			}
+
+			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Row(c.Key("sci-cam-param-bar")).FillWidth().
+				Padding(float32(tok.Spacing4), safeRight+float32(tok.Spacing8), float32(tok.Spacing4), safeLeft+float32(tok.Spacing8)).
+				Background(tok.Canvas).Children(func() {
+				paramCol := func(id, a11yTitle, title, val string, manual bool) {
+					isOpen := sess.activeParam == id
+					titleCol := tok.TextMuted
+					valCol := tok.Text
+					bg := tok.Canvas
+					if manual {
+						valCol = tok.Accent
+					}
+					if isOpen {
+						bg = tok.Elevated
+						titleCol = tok.Accent
+						valCol = tok.Accent
+					}
+					b := ui.ButtonBase(c.Key("sci-param-"+id)).Grow(1).Basis(0).MinWidth(0).
+						Height(float32(tok.Spacing48)).Radius(float32(tok.ControlRadius)).
+						Background(bg).Center().Label("调节 " + a11yTitle).
+						OnClick(func() {
+							sess.settingsOpen = false
+							if sess.activeParam == id {
+								sess.activeParam = ""
+							} else {
+								sess.activeParam = id
+							}
+							mygo.Haptics.Selection()
+						})
+					theme.ApplyTactilePress(b)
+					b.Children(func() {
+						ui.Column(c).AlignItems(ui.Center).Gap(2).Children(func() {
+							ui.Text(c, title).FontSize(float32(tok.TextMeta)).TextColor(titleCol).SingleLine()
+							ui.Text(c, val).FontSize(float32(tok.TextData)).Bold().TextColor(valCol).FontFeatures("tnum").SingleLine().Ellipsis("…")
 						})
 					})
 				}
 
-				// Bottom Tactile Dock: [科研图库 / 导出] | [快门] | [锁参 / 归档]
-				dock := ui.Row(c.Key("sci-cam-dock")).FillWidth().AlignItems(ui.Center).
-					Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-					Radius(float32(tok.PanelRadius)).Background(tok.Surface.Alpha(0.94)).Border(1, tok.Border).
-					Gap(float32(tok.Spacing8))
-				dock.Children(func() {
-					ui.Row(c).Grow(1).MinWidth(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						galBtn := ui.ButtonBase(c.Key("sci-cam-gallery")).Height(float32(tok.Spacing32)+float32(tok.Spacing8)).
-							Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-							Background(tok.Elevated).Center().Label("打开科研图库").
-							OnClick(func() {
-								a.openLabGallery(&shell.WorkspaceTab{Kind: shell.TabFile, FilePath: sess.tabPath}, sess.applyDoc)
-							})
-						theme.ApplyTactilePress(galBtn)
-						galBtn.Children(func() {
-							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-								ui.Icon(c, lucide.Images()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Text)
-								lbl := "图库"
-								if sess.shotCount > 0 {
-									lbl = fmt.Sprintf("图库 %d", sess.shotCount)
-								}
-								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).FontFeatures("tnum").SingleLine()
-							})
-						})
+				manualExp := !sess.isoAuto || !sess.shutterAuto || sess.allLocked
 
-						if len(sess.batchFiles) > 0 {
-							expBtn := ui.ButtonBase(c.Key("sci-cam-export-raw")).Height(float32(tok.Spacing32)+float32(tok.Spacing8)).
-								Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-								Background(tok.Elevated).Center().Label("导出原片").
-								OnClick(func() {
-									files := append([]string(nil), sess.batchRawPaths...)
-									if len(files) == 0 {
-										files = append([]string(nil), sess.batchFiles...)
-									}
-									a.shareLabFiles(c, files, "AsterLab 科研原片 "+sess.batchID)
-								})
-							theme.ApplyTactilePress(expBtn)
-							expBtn.Children(func() {
-								ui.Icon(c, lucide.Share2()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
-							})
-						}
-					})
+				isoTitle := "ISO"
+				isoVal := "自动"
+				if !sess.isoAuto && sess.selectedISO > 0 {
+					isoVal = fmt.Sprintf("%.0f", sess.selectedISO)
+				} else if sess.telemetry.ISO > 0 {
+					if sess.allLocked {
+						isoVal = fmt.Sprintf("%.0f", sess.telemetry.ISO)
+					} else {
+						isoTitle = "ISO·A"
+						isoVal = fmt.Sprintf("%.0f", sess.telemetry.ISO)
+					}
+				}
 
-					// Center Primary Shutter Button
-					shutterSize := float32(tok.Spacing48) + float32(tok.Spacing12)
-					shutterBtn := ui.ButtonBase(c.Key("sci-cam-shutter")).Size(shutterSize, shutterSize).
-						Radius(float32(tok.PillRadius)).Background(tok.Text).Border(3, tok.Accent).
-						Center().Label("拍摄科研照片").Disabled(sess.busy).
+				ssTitle := "SS"
+				ssVal := "自动"
+				if !sess.shutterAuto && sess.selectedShutterS > 0 {
+					ssVal = formatShutterShort(sess.selectedShutterS)
+				} else if sess.telemetry.ShutterS > 0 {
+					if sess.allLocked {
+						ssVal = formatShutterShort(sess.telemetry.ShutterS)
+					} else {
+						ssTitle = "SS·A"
+						ssVal = formatShutterShort(sess.telemetry.ShutterS)
+					}
+				}
+
+				evVal := "0.0"
+				if manualExp {
+					evVal = "—"
+				} else if math.Abs(sess.evBias) >= 0.05 {
+					evVal = fmt.Sprintf("%+.1f", sess.evBias)
+				}
+
+				wbTitle := "WB"
+				wbVal := "AWB"
+				switch sess.wbMode {
+				case "lock_current":
+					if sess.selectedWBKelvin > 0 {
+						wbVal = fmt.Sprintf("%.0fK", sess.selectedWBKelvin)
+					} else {
+						wbVal = "锁定"
+					}
+				case "kelvin":
+					wbVal = fmt.Sprintf("%.0fK", sess.selectedWBKelvin)
+				default:
+					if sess.telemetry.WBKelvin > 0 {
+						wbTitle = "WB·A"
+						wbVal = fmt.Sprintf("%.0fK", sess.telemetry.WBKelvin)
+					}
+				}
+
+				mfVal := "AF"
+				if !sess.focusAuto {
+					mfVal = fmt.Sprintf("%.2f", sess.focusLensPos)
+				} else if sess.focusLocked {
+					if sess.telemetry.FocusLensPos > 0 {
+						mfVal = fmt.Sprintf("%.2f", sess.telemetry.FocusLensPos)
+					} else {
+						mfVal = "锁定"
+					}
+				}
+
+				paramCol("iso", "ISO", isoTitle, isoVal, !sess.isoAuto || sess.allLocked)
+				paramCol("ss", "SS", ssTitle, ssVal, !sess.shutterAuto || sess.allLocked)
+				paramCol("ev", "EV", "EV", evVal, !manualExp && math.Abs(sess.evBias) >= 0.05)
+				paramCol("wb", "WB", wbTitle, wbVal, sess.wbMode != "auto")
+				paramCol("mf", "MF", "MF", mfVal, !sess.focusAuto || sess.focusLocked)
+			})
+
+			// ============================================================
+			// ZONE 4: BOTTOM SHUTTER DECK ([Thumbnail] | [Shutter] | [LOCK])
+			// ============================================================
+			ui.Row(c.Key("sci-cam-dock")).FillWidth().AlignItems(ui.Center).
+				Padding(float32(tok.Spacing12), safeRight+float32(tok.Spacing16), safeBottom+float32(tok.Spacing12), safeLeft+float32(tok.Spacing16)).
+				Background(tok.Canvas).Children(func() {
+				// Left slot: Latest shot thumbnail -> opens Lab Gallery (Flow A)
+				ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.Start).AlignItems(ui.Center).Children(func() {
+					thumbPath := sess.lastPreviewAbs
+					if thumbPath == "" && len(g.items) > 0 {
+						thumbPath = g.items[0].PreviewAbs
+					}
+					galBtn := ui.ButtonBase(c.Key("sci-cam-gallery")).
+						Size(float32(tok.Spacing48), float32(tok.Spacing48)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
+						Border(1, tok.Border).Clip().Center().Label("打开科研图库").
 						OnClick(func() {
-							a.triggerSciCapture()
+							mygo.Haptics.Selection()
+							a.openLabGallery(&shell.WorkspaceTab{Kind: shell.TabFile, FilePath: sess.tabPath}, sess.applyDoc)
 						})
-					theme.ApplyTactilePress(shutterBtn)
-					shutterBtn.Children(func() {
-						ui.Icon(c, lucide.Camera()).Size(float32(tok.IconLg), float32(tok.IconLg)).TextColor(tok.Canvas)
-					})
-
-					ui.Row(c).Grow(1).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-						lockBg := tok.Elevated
-						lockFg := tok.Text
-						lockLbl := "锁参"
-						if sess.batchLocked {
-							lockBg = tok.Accent
-							lockFg = tok.AccentText
-							lockLbl = "已锁定"
+					theme.ApplyTactilePress(galBtn)
+					galBtn.Children(func() {
+						if img := g.cachedThumb(thumbPath); img != nil {
+							ui.Image(c, img).Fill()
+						} else {
+							ui.Icon(c, lucide.Images()).Size(float32(tok.IconLg), float32(tok.IconLg)).TextColor(tok.TextMuted)
 						}
-						lockBtn := ui.ButtonBase(c.Key("sci-cam-lock")).Height(float32(tok.Spacing32)+float32(tok.Spacing8)).
-							Padding(0, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-							Background(lockBg).Center().Label("锁定本批拍摄参数").
-							OnClick(func() { a.toggleSciBatchLock() })
-						theme.ApplyTactilePress(lockBtn)
-						lockBtn.Children(func() {
-							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-								ui.Icon(c, lucide.Lock()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(lockFg)
-								ui.Text(c, lockLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(lockFg).SingleLine()
-							})
-						})
-
-						if sess.lastPreviewRel != "" {
-							doneBtn := ui.ButtonBase(c.Key("sci-cam-route-done")).Height(float32(tok.Spacing32)+float32(tok.Spacing8)).
-								Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-								Background(tok.Success).Center().Label("归档入实验").
-								OnClick(func() {
-									rel := sess.lastPreviewRel
-									rawAbs := sess.lastRawAbs
-									labID := ""
-									if sess.batchRefAssetID != "" {
-										labID = sess.batchRefAssetID
-									}
-									a.closeSciCamera()
-									a.routeArchivedPhotoIntoDoc(c, rel, rawAbs, labID)
+						if sess.shotCount > 0 {
+							ui.Box(c).Absolute().Fill().PassThrough().Justify(ui.End).AlignItems(ui.End).
+								Padding(float32(tok.Spacing4) * 0.5).Children(func() {
+								ui.Box(c).Padding(0, float32(tok.Spacing4)).Radius(float32(tok.PillRadius)).
+									Background(tok.Accent).Children(func() {
+									ui.Text(c, fmt.Sprintf("%d", sess.shotCount)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.AccentText).FontFeatures("tnum")
 								})
-							theme.ApplyTactilePress(doneBtn)
-							doneBtn.Children(func() {
-								ui.Text(c, "归档").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.AccentText).SingleLine()
 							})
 						}
+					})
+				})
+
+				// Center slot: Classic double-ring shutter release
+				shutterSize := float32(tok.Spacing48) + float32(tok.Spacing16)
+				shutterRing := ui.ButtonBase(c.Key("sci-cam-shutter")).Size(shutterSize, shutterSize).
+					Radius(float32(tok.PillRadius)).Background(tok.Canvas).Border(2, tok.Text).
+					Padding(float32(tok.Spacing4)).Center().Label("拍摄").Disabled(sess.busy).
+					OnClick(func() {
+						a.triggerSciCapture()
+					})
+				theme.ApplyTactilePress(shutterRing)
+				shutterRing.Children(func() {
+					innerBg := tok.Text
+					if sess.busy {
+						innerBg = tok.TextMuted
+					}
+					ui.Box(c).Fill().Radius(float32(tok.PillRadius)).Background(innerBg)
+				})
+
+				// Right slot: Compact physical AE / AWB / AF Lock button
+				ui.Row(c).Grow(1).Basis(0).MinWidth(0).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+					lockBg, lockFg := tok.Elevated, tok.Text
+					lockLbl := "锁参"
+					if sess.allLocked {
+						lockBg, lockFg = tok.Accent, tok.AccentText
+						lockLbl = "已锁定"
+					}
+					lockBtn := ui.ButtonBase(c.Key("sci-cam-lock")).Height(float32(tok.Spacing48)).
+						Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+						Background(lockBg).Center().Label("锁定曝光与白平衡").
+						OnClick(func() { a.toggleSciBatchLock() })
+					theme.ApplyTactilePress(lockBtn)
+					lockBtn.Children(func() {
+						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							ui.Icon(c, lucide.Lock()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(lockFg)
+							ui.Text(c, lockLbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(lockFg).SingleLine()
+						})
 					})
 				})
 			})
@@ -1005,7 +1194,190 @@ func (a *app) renderSciCameraOverlay(c *ui.Context) {
 	})
 }
 
-func (a *app) pickFromAlbumInSciCamera(c *ui.Context) {
+func (a *app) renderSciParamDrawer(c *ui.Context, tok theme.Tokens, sess *sciCameraSession) {
+	ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+	ui.Column(c.Key("sci-cam-param-drawer")).FillWidth().
+		Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+		Background(tok.Surface).Gap(float32(tok.Spacing8)).Children(func() {
+		chipBtn := func(key, lbl string, sel bool, onTap func()) {
+			bg, fg := tok.Elevated, tok.Text
+			if sel {
+				bg, fg = tok.Accent, tok.AccentText
+			}
+			b := ui.ButtonBase(c.Key("sci-sub-"+key)).Height(float32(tok.Spacing32)).
+				Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+				Background(bg).Center().Label(lbl).OnClick(onTap)
+			theme.ApplyTactilePress(b)
+			b.Children(func() {
+				ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
+			})
+		}
+
+		fitChipBtn := func(key, lbl string, sel bool, onTap func()) {
+			bg, fg := tok.Elevated, tok.Text
+			if sel {
+				bg, fg = tok.Accent, tok.AccentText
+			}
+			b := ui.ButtonBase(c.Key("sci-sub-"+key)).Grow(1).Basis(0).MinWidth(0).
+				Height(float32(tok.Spacing32)).Padding(0, float32(tok.Spacing4)).
+				Radius(float32(tok.ControlRadius)).Background(bg).Center().Label(lbl).OnClick(onTap)
+			theme.ApplyTactilePress(b)
+			b.Children(func() {
+				ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
+			})
+		}
+
+		switch sess.activeParam {
+		case "iso":
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				fitChipBtn("iso-auto", "自动", sess.isoAuto, func() {
+					sess.isoAuto = true
+					sess.selectedISO = 0
+					a.syncManualExposureControl(sess)
+					mygo.Haptics.Selection()
+				})
+				for _, v := range scicamera.DefaultISOPresets() {
+					v := v
+					sel := !sess.isoAuto && math.Abs(sess.selectedISO-v) < 1
+					fitChipBtn(fmt.Sprintf("iso-%.0f", v), fmt.Sprintf("%.0f", v), sel, func() {
+						sess.isoAuto = false
+						sess.selectedISO = v
+						a.syncManualExposureControl(sess)
+						mygo.Haptics.Selection()
+					})
+				}
+			})
+
+		case "ss":
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				fitChipBtn("ss-auto", "自动", sess.shutterAuto, func() {
+					sess.shutterAuto = true
+					sess.selectedShutterS = 0
+					a.syncManualExposureControl(sess)
+					mygo.Haptics.Selection()
+				})
+				for _, sp := range scicamera.AntiFlickerShutterPresets(sess.flickerHz) {
+					if sp.AutoMode {
+						continue
+					}
+					sp := sp
+					sel := !sess.shutterAuto && math.Abs(sess.selectedShutterS-sp.Seconds) < 0.0002
+					lbl := strings.TrimSuffix(sp.Label, "s")
+					fitChipBtn("ss-"+sp.Label, lbl, sel, func() {
+						sess.shutterAuto = false
+						sess.selectedShutterS = sp.Seconds
+						a.syncManualExposureControl(sess)
+						mygo.Haptics.Selection()
+					})
+				}
+			})
+
+		case "ev":
+			if !sess.isoAuto || !sess.shutterAuto || sess.allLocked {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "手动曝光下 EV 不生效，请调 ISO / SS").
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					resetBtn := ui.ButtonBase(c.Key("sci-ev-to-auto")).Height(float32(tok.Spacing32)).
+						Padding(0, float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+						Background(tok.Accent).Center().Label("切回自动曝光").
+						OnClick(func() {
+							sess.isoAuto = true
+							sess.shutterAuto = true
+							sess.selectedISO = 0
+							sess.selectedShutterS = 0
+							sess.allLocked = false
+							lock := false
+							a.applySciControl(scicamera.ControlRequest{ExposureLocked: &lock})
+							mygo.Haptics.Selection()
+						})
+					theme.ApplyTactilePress(resetBtn)
+					resetBtn.Children(func() {
+						ui.Text(c, "切回自动曝光").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.AccentText).SingleLine()
+					})
+				})
+				break
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				chipBtn("ev-reset", "0.0", math.Abs(sess.evBias) < 0.05, func() {
+					sess.evBias = 0
+					ev := 0.0
+					a.applySciControl(scicamera.ControlRequest{EVBias: &ev})
+					mygo.Haptics.Selection()
+				})
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					s := components.Slider(c, &sess.evBias, -2.0, 2.0, components.SliderOptions{Step: 0.1})
+					s.Label("曝光补偿 EV").FillWidth()
+					if s.Changed() {
+						ev := sess.evBias
+						a.applySciControl(scicamera.ControlRequest{EVBias: &ev})
+					}
+				})
+				ui.Text(c, fmt.Sprintf("%+.1f", sess.evBias)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+			})
+
+		case "wb":
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				for _, wp := range scicamera.DefaultWBPresets() {
+					wp := wp
+					lbl := wp.Label
+					if lbl == "定白锁定" {
+						lbl = "锁定"
+					}
+					sel := sess.wbMode == wp.Mode && (wp.Mode != "kelvin" || math.Abs(sess.selectedWBKelvin-wp.Kelvin) < 50)
+					fitChipBtn("wb-"+wp.Label, lbl, sel, func() {
+						sess.wbMode = wp.Mode
+						if wp.Kelvin > 0 {
+							sess.selectedWBKelvin = wp.Kelvin
+						}
+						a.applySciControl(scicamera.ControlRequest{WBMode: wp.Mode, WBKelvin: wp.Kelvin, WBTint: wp.Tint})
+						mygo.Haptics.Selection()
+					})
+				}
+			})
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "2800K").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					s := components.Slider(c, &sess.selectedWBKelvin, 2800, 7500, components.SliderOptions{Step: 100})
+					s.Label("色温滑块").FillWidth()
+					if s.Changed() {
+						sess.wbMode = "kelvin"
+						a.applySciControl(scicamera.ControlRequest{WBMode: "kelvin", WBKelvin: sess.selectedWBKelvin})
+					}
+				})
+				ui.Text(c, fmt.Sprintf("%.0fK", sess.selectedWBKelvin)).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").SingleLine()
+			})
+
+		case "mf":
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				chipBtn("mf-auto", "AF", sess.focusAuto && !sess.focusLocked, func() {
+					sess.focusAuto = true
+					sess.focusLocked = false
+					a.applySciControl(scicamera.ControlRequest{FocusMode: "auto"})
+					mygo.Haptics.Selection()
+				})
+				chipBtn("mf-lock", "锁定", sess.focusLocked && sess.focusAuto, func() {
+					sess.focusAuto = true
+					sess.focusLocked = true
+					a.applySciControl(scicamera.ControlRequest{FocusMode: "lock_current"})
+					mygo.Haptics.Selection()
+				})
+				ui.Text(c, "近").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+				ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+					s := components.Slider(c, &sess.focusLensPos, 0.0, 1.0, components.SliderOptions{Step: 0.02})
+					s.Label("手动对焦 MF").FillWidth()
+					if s.Changed() {
+						sess.focusAuto = false
+						sess.focusLocked = true
+						a.applySciControl(scicamera.ControlRequest{FocusMode: "lens_pos", FocusLensPos: sess.focusLensPos})
+					}
+				})
+				ui.Text(c, "∞").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			})
+		}
+	})
+}
+
+func (a *app) pickFromAlbumInLabGallery(c *ui.Context) {
 	if a.vault == nil {
 		return
 	}
@@ -1019,6 +1391,9 @@ func (a *app) pickFromAlbumInSciCamera(c *ui.Context) {
 		return
 	}
 	_, _ = a.generateAssetPreviewSidecar(rel)
+	if a.labGallery != nil {
+		a.labGallery.open = false
+	}
 	a.closeSciCamera()
 	a.routeArchivedPhotoIntoDoc(c, rel, "", "")
 }
@@ -1059,12 +1434,26 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 			ui.Row(c).FillWidth().
 				Padding(safeTop+float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Background(tok.Surface).Children(func() {
-				kit.IconBox(c, tok, lucide.Images(), tok.Accent)
+				if g.fromCamera {
+					if components.Button(c.Key("gal-back-cam"), "返回拍摄", components.ButtonGhost).Clicked() {
+						g.open = false
+					}
+				} else {
+					kit.IconBox(c, tok, lucide.Images(), tok.Accent)
+				}
 				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 					components.Text(c, "科研图库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine()
-					components.Text(c, fmt.Sprintf("%d 组原片记录 · DNG", len(g.items))).
+					components.Text(c, fmt.Sprintf("%d 组原片 · DNG", len(g.items))).
 						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Ellipsis("…")
 				})
+				if !g.fromCamera {
+					pickBtn := ui.ButtonBase(c.Key("gal-import-album")).Size(float32(tok.Spacing32)+float32(tok.Spacing4), float32(tok.Spacing32)+float32(tok.Spacing4)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Center().Label("从相册导入").
+						OnClick(func() { a.pickFromAlbumInLabGallery(c) })
+					pickBtn.Children(func() {
+						ui.Icon(c, lucide.ImagePlus()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
+					})
+				}
 				if len(g.items) > 0 {
 					if components.Button(c.Key("gal-export-all"), "全部导出", components.ButtonSecondary).Clicked() {
 						var allRaw []string
@@ -1078,8 +1467,15 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 						a.shareLabFiles(c, allRaw, "AsterLab 科研原片批导出")
 					}
 				}
-				if components.Button(c.Key("gal-close"), "关闭", components.ButtonGhost).Clicked() {
+				closeLabel := "关闭"
+				if g.fromCamera {
+					closeLabel = "完成"
+				}
+				if components.Button(c.Key("gal-close"), closeLabel, components.ButtonGhost).Clicked() {
 					g.open = false
+					if g.fromCamera {
+						a.closeSciCamera()
+					}
 				}
 			})
 			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
@@ -1096,11 +1492,9 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 						{scicamera.RoleScaleRef, "标尺"},
 					} {
 						f := f
-						bg := tok.Elevated
-						fg := tok.Text
+						bg, fg := tok.Elevated, tok.Text
 						if g.filterRole == f.id {
-							bg = tok.Accent
-							fg = tok.AccentText
+							bg, fg = tok.Accent, tok.AccentText
 						}
 						b := ui.ButtonBase(c.Key("gal-flt-"+f.id)).Height(float32(tok.Spacing32)).
 							Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
@@ -1124,7 +1518,7 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 							Background(tok.Elevated).Center().Gap(float32(tok.Spacing8)).Children(func() {
 							ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing32), float32(tok.Spacing32)).TextColor(tok.TextMuted)
 							components.Text(c, "暂无带编号的科研原片").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
-							components.Text(c, "使用科研相机拍摄后，会自动以规范编号保存 DNG 原片与 5 层光学元数据。").
+							components.Text(c, "拍摄后会自动以规范编号保存 Bayer DNG 与 5 层光学元数据。").
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						})
 						return
@@ -1157,9 +1551,41 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 								it.Meta.Geometry.IMURollDeg,
 							)
 							components.Text(c, expSpec).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+
+							// Post-capture purpose/role annotation belongs here in Gallery, never in Camera HUD.
+							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Wrap().Children(func() {
+								components.Text(c, "用途标注").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+								for _, rp := range []struct{ id, lbl string }{
+									{scicamera.RoleSample, "样本"},
+									{scicamera.RoleWBRef, "灰卡"},
+									{scicamera.RoleFlat, "平场"},
+									{scicamera.RoleScaleRef, "标尺"},
+								} {
+									rp := rp
+									bg, fg := tok.Surface, tok.TextMuted
+									if it.Meta.Experiment.FrameRole == rp.id {
+										bg, fg = tok.AccentSoftBg, tok.Accent
+									}
+									tb := ui.ButtonBase(c.Key("gal-tag-"+rp.id)).Height(float32(tok.Spacing24)).
+										Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
+										Background(bg).Center().Label("标注 " + rp.lbl).
+										OnClick(func() {
+											it.Meta.Experiment.FrameRole = rp.id
+											metaPath := filepath.Join(filepath.Dir(it.PreviewAbs), it.LabPhotoID+".asterphoto.json")
+											if err := scicamera.WriteSidecarJSON(metaPath, it.Meta); err == nil {
+												g.dirty = true
+											}
+										})
+									tb.Children(func() {
+										ui.Text(c, rp.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+									})
+								}
+							})
+
 							ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
 								if it.PreviewRel != "" && components.Button(c.Key("gal-act-insert"), "插入当前实验", components.ButtonPrimary).Clicked() {
 									g.open = false
+									a.closeSciCamera()
 									a.routeArchivedPhotoIntoDoc(c, it.PreviewRel, it.RawAbs, it.LabPhotoID)
 								}
 								if components.Button(c.Key("gal-act-export"), "导出原片 (.DNG)", components.ButtonSecondary).Clicked() {
@@ -1178,40 +1604,43 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 								}
 								if components.Button(c.Key("gal-act-ghost"), "设为叠影并复用参数", components.ButtonGhost).Clicked() {
 									sess := a.ensureSciCamera()
+									g.open = false
+									if a.shell != nil {
+										if tab := a.shell.ActiveTab(); tab != nil && !sess.open {
+											a.openSciCamera(c, *tab, nil, g.applyDoc)
+										}
+									}
 									sess.ghostEnabled = true
 									sess.ghostImagePath = it.PreviewAbs
 									sess.refPitchDeg = it.Meta.Geometry.IMUPitchDeg
 									sess.refRollDeg = it.Meta.Geometry.IMURollDeg
 									sess.hasRefPose = true
+									sess.isoAuto = false
+									sess.selectedISO = it.Meta.Exposure.ISO
+									sess.shutterAuto = false
 									sess.selectedShutterS = it.Meta.Exposure.ShutterS
+									sess.wbMode = "kelvin"
 									sess.selectedWBKelvin = it.Meta.Exposure.WBKelvinEst
-									g.open = false
-									if a.shell != nil {
-										if tab := a.shell.ActiveTab(); tab != nil {
-											a.openSciCamera(c, *tab, nil, g.applyDoc)
-											sess.ghostEnabled = true
-											sess.ghostImagePath = it.PreviewAbs
-											sess.selectedShutterS = it.Meta.Exposure.ShutterS
-											sess.selectedWBKelvin = it.Meta.Exposure.WBKelvinEst
-											sess.batchLocked = true
-											lock := true
-											a.applySciControl(scicamera.ControlRequest{
-												ExposureLocked: &lock,
-												ISO:            it.Meta.Exposure.ISO,
-												ShutterS:       it.Meta.Exposure.ShutterS,
-												WBMode:         "kelvin",
-												WBKelvin:       it.Meta.Exposure.WBKelvinEst,
-												FocusMode:      "lens_pos",
-												FocusLensPos:   it.Meta.Geometry.FocusLensPosition,
-											})
-										}
-									}
+									sess.focusAuto = false
+									sess.focusLocked = true
+									sess.focusLensPos = it.Meta.Geometry.FocusLensPosition
+									sess.allLocked = true
+									lock := true
+									a.applySciControl(scicamera.ControlRequest{
+										ExposureLocked: &lock,
+										ISO:            it.Meta.Exposure.ISO,
+										ShutterS:       it.Meta.Exposure.ShutterS,
+										WBMode:         "kelvin",
+										WBKelvin:       it.Meta.Exposure.WBKelvinEst,
+										FocusMode:      "lens_pos",
+										FocusLensPos:   it.Meta.Geometry.FocusLensPosition,
+									})
 								}
 							})
 						})
 					}
 
-					// Compact grouped list of all matching lab shots (zero box-in-box!)
+					// Compact grouped list of all matching lab shots (zero box-in-box)
 					ui.Column(c.Key("gal-list-box")).FillWidth().Radius(float32(tok.PanelRadius)).
 						Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
 						for i, it := range filtered {
