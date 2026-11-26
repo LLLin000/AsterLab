@@ -140,6 +140,72 @@ jobs:
           if-no-files-found: error
           path: prototypes/mygo-run/dist/ios-simulator/*.app
 
+  build-ios-unsigned:
+    name: build-ios-unsigned
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+
+      - name: Build unsigned arm64 .ipa for sideload / self-signing
+        working-directory: prototypes/mygo-run
+        run: |
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-unsigned-src"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+
+          python3 - <<'PY' "$PATCHED/cmd/mygo/ios.go"
+          import pathlib, sys
+          p = pathlib.Path(sys.argv[1])
+          src = p.read_text(encoding="utf-8")
+          repls = [
+              (
+                  "\tvar prof *profile\n\tif !simulator {",
+                  "\tunsigned := !simulator && os.Getenv(\"MYGO_IOS_UNSIGNED\") == \"1\"\n\tvar prof *profile\n\tif !simulator && !unsigned {",
+              ),
+              (
+                  "\t\tif simulator {\n\t\t\terr = signForSimulator(bundle)",
+                  "\t\tif simulator || unsigned {\n\t\t\terr = signForSimulator(bundle)",
+              ),
+              (
+                  "\t\tartifact = filepath.Join(stage, c.slug()+\"-\"+c.Version+\".ipa\")",
+                  "\t\tsuffix := \"\"\n\t\tif unsigned {\n\t\t\tsuffix = \"-unsigned\"\n\t\t}\n\t\tartifact = filepath.Join(stage, c.slug()+\"-\"+c.Version+suffix+\".ipa\")",
+              ),
+          ]
+          for old, new in repls:
+              assert old in src, f"Missing target snippet: {old!r}"
+              src = src.replace(old, new, 1)
+          p.write_text(src, encoding="utf-8")
+          PY
+
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-unsigned" ./cmd/mygo)
+          MYGO_IOS_UNSIGNED=1 "$RUNNER_TEMP/mygo-unsigned" build -platform ios
+          ls -lh dist/ios-arm64/*-unsigned.ipa
+
+          rm -rf "$RUNNER_TEMP/ipa-check"
+          unzip -q dist/ios-arm64/*-unsigned.ipa "Payload/*.app/*" -d "$RUNNER_TEMP/ipa-check"
+          BIN="$(find "$RUNNER_TEMP/ipa-check/Payload" -maxdepth 2 -type f -name "AsterLab" | head -n 1)"
+          file "$BIN"
+          otool -l "$BIN" | grep -A3 LC_BUILD_VERSION | head -n 8
+
+      - name: Upload unsigned iOS .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-ios-unsigned-${{ github.sha }}
+          if-no-files-found: error
+          path: prototypes/mygo-run/dist/ios-arm64/*-unsigned.ipa
+
   build-ios-signed:
     name: build-ios-signed
     runs-on: macos-latest
