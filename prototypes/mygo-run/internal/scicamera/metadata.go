@@ -68,6 +68,7 @@ type GeometryInfo struct {
 	PhysicalCameraID  string   `json:"physical_camera_id,omitempty"`
 	FocalLengthMM     float64  `json:"focal_length_mm,omitempty"`
 	FocalLength35mmEq float64  `json:"focal_length_35mm_eq,omitempty"`
+	DigitalZoomFactor float64  `json:"digital_zoom_factor,omitempty"`
 	FocusMode         string   `json:"focus_mode"`
 	FocusLensPosition float64  `json:"focus_lens_position"`
 	IMUPitchDeg       float64  `json:"imu_pitch_deg"`

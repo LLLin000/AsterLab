@@ -13,7 +13,7 @@ type Options struct {
 	Front bool `json:"front"`
 }
 
-// ControlRequest updates hardware exposure, white balance, and focus parameters on mobile devices.
+// ControlRequest updates hardware exposure, white balance, focus, zoom, torch, and level on mobile devices.
 type ControlRequest struct {
 	ExposureLocked *bool       `json:"exposureLocked,omitempty"`
 	ISO            float64     `json:"iso,omitempty"`
@@ -27,40 +27,50 @@ type ControlRequest struct {
 	FocusX         float64     `json:"focusX,omitempty"`
 	FocusY         float64     `json:"focusY,omitempty"`
 	FocusLensPos   float64     `json:"focusLensPos,omitempty"`
+	ZoomFactor     float64     `json:"zoomFactor,omitempty"`
+	TorchEnabled   *bool       `json:"torchEnabled,omitempty"`
+	LevelEnabled   *bool       `json:"levelEnabled,omitempty"`
 }
 
 // Telemetry reflects live physical sensor & IMU state returned by iOS/Android camera plugins.
 type Telemetry struct {
-	Running        bool       `json:"running"`
-	RawSupported   bool       `json:"rawSupported"`
-	ISO            float64    `json:"iso"`
-	MinISO         float64    `json:"minISO"`
-	MaxISO         float64    `json:"maxISO"`
-	ShutterS       float64    `json:"shutterS"`
-	ApertureF      float64    `json:"apertureF"`
-	EVBias         float64    `json:"evBias"`
-	WBKelvin       float64    `json:"wbKelvin"`
-	WBTint         float64    `json:"wbTint"`
-	WBGains        [3]float64 `json:"wbGains"`
-	MaxWBGain      float64    `json:"maxWBGain"`
-	FocusLensPos   float64    `json:"focusLensPos"`
-	PitchDeg       float64    `json:"pitchDeg"`
-	RollDeg        float64    `json:"rollDeg"`
-	YawDeg         float64    `json:"yawDeg"`
-	ExposureLocked bool       `json:"exposureLocked"`
-	WBLocked       bool       `json:"wbLocked"`
-	FocusLocked    bool       `json:"focusLocked"`
-	DeviceModel    string     `json:"deviceModel"`
-	OSVersion      string     `json:"osVersion"`
-	FocalLengthMM  float64    `json:"focalLengthMM"`
+	Running         bool       `json:"running"`
+	RawSupported    bool       `json:"rawSupported"`
+	ISO             float64    `json:"iso"`
+	MinISO          float64    `json:"minISO"`
+	MaxISO          float64    `json:"maxISO"`
+	ShutterS        float64    `json:"shutterS"`
+	ApertureF       float64    `json:"apertureF"`
+	EVBias          float64    `json:"evBias"`
+	WBKelvin        float64    `json:"wbKelvin"`
+	WBTint          float64    `json:"wbTint"`
+	WBGains         [3]float64 `json:"wbGains"`
+	MaxWBGain       float64    `json:"maxWBGain"`
+	FocusLensPos    float64    `json:"focusLensPos"`
+	PitchDeg        float64    `json:"pitchDeg"`
+	RollDeg         float64    `json:"rollDeg"`
+	YawDeg          float64    `json:"yawDeg"`
+	ExposureLocked  bool       `json:"exposureLocked"`
+	WBLocked        bool       `json:"wbLocked"`
+	FocusLocked     bool       `json:"focusLocked"`
+	ZoomFactor      float64    `json:"zoomFactor"`
+	MinZoom         float64    `json:"minZoom"`
+	MaxZoom         float64    `json:"maxZoom"`
+	TorchOn         bool       `json:"torchOn"`
+	TorchAvailable  bool       `json:"torchAvailable"`
+	AEAFLockedByTap bool       `json:"aeafLockedByTap"`
+	DeviceModel     string     `json:"deviceModel"`
+	OSVersion       string     `json:"osVersion"`
+	FocalLengthMM   float64    `json:"focalLengthMM"`
 }
 
 // CaptureOptions configures a single scientific capture invocation.
 type CaptureOptions struct {
-	CaptureRaw   bool   `json:"captureRaw"`
-	SaveToPhotos bool   `json:"saveToPhotos"`
-	AlbumName    string `json:"albumName,omitempty"`
-	LabPhotoID   string `json:"labPhotoID,omitempty"`
+	CaptureRaw    bool   `json:"captureRaw"`
+	CaptureFormat string `json:"captureFormat,omitempty"` // "dng+jpg" | "dng" | "jpg"
+	SaveToPhotos  bool   `json:"saveToPhotos"`
+	AlbumName     string `json:"albumName,omitempty"`
+	LabPhotoID    string `json:"labPhotoID,omitempty"`
 }
 
 // CaptureResult holds temporary file outputs returned by the native plugin before Vault archival.
@@ -135,11 +145,20 @@ func (c *Camera) Configure(ctx context.Context, req ControlRequest) (Telemetry, 
 	if req.FocusLensPos > 0 {
 		args["focusLensPos"] = req.FocusLensPos
 	}
+	if req.ZoomFactor > 0 {
+		args["zoomFactor"] = req.ZoomFactor
+	}
+	if req.TorchEnabled != nil {
+		args["torchEnabled"] = *req.TorchEnabled
+	}
+	if req.LevelEnabled != nil {
+		args["levelEnabled"] = *req.LevelEnabled
+	}
 	err := mygo.Native(pluginID).Call(ctx, "configure", args, &out)
 	return out, err
 }
 
-// Telemetry reads the current hardware exposure, white balance, focus, and IMU orientation.
+// Telemetry reads the current hardware exposure, white balance, focus, zoom, and IMU orientation.
 func (c *Camera) Telemetry(ctx context.Context) (Telemetry, error) {
 	var out Telemetry
 	if c == nil || c.view == nil {
@@ -156,11 +175,12 @@ func (c *Camera) Capture(ctx context.Context, opts CaptureOptions) (CaptureResul
 		return out, nil
 	}
 	args := map[string]any{
-		"id":           c.view.ID,
-		"captureRaw":   opts.CaptureRaw,
-		"saveToPhotos": opts.SaveToPhotos,
-		"albumName":    opts.AlbumName,
-		"labPhotoID":   opts.LabPhotoID,
+		"id":            c.view.ID,
+		"captureRaw":    opts.CaptureRaw,
+		"captureFormat": opts.CaptureFormat,
+		"saveToPhotos":  opts.SaveToPhotos,
+		"albumName":     opts.AlbumName,
+		"labPhotoID":    opts.LabPhotoID,
 	}
 	err := mygo.Native(pluginID).Call(ctx, "capture", args, &out)
 	return out, err

@@ -10,6 +10,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.provider.MediaStore
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -40,6 +41,8 @@ class SciCameraPlugin : MyGoPlugin {
         var exposureLocked = false
         var focusLocked = false
         var wbLocked = false
+        var zoomFactor = 1.0
+        var torchOn = false
 
         private val sensorMgr = ctx.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
         private val accel = sensorMgr?.getDefaultSensor(Sensor.TYPE_GRAVITY)
@@ -67,6 +70,12 @@ class SciCameraPlugin : MyGoPlugin {
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
         fun telemetryJson(): JSONObject {
+            val zState = camera?.cameraInfo?.zoomState?.value
+            val minZ = (zState?.minZoomRatio ?: 1.0f).toDouble()
+            val maxZ = minOf((zState?.maxZoomRatio ?: 6.0f).toDouble(), 6.0)
+            val curZ = (zState?.zoomRatio?.toDouble() ?: zoomFactor)
+            val hasFlash = camera?.cameraInfo?.hasFlashUnit() ?: false
+
             val out = JSONObject()
             out.put("running", bound)
             out.put("rawSupported", false)
@@ -87,6 +96,11 @@ class SciCameraPlugin : MyGoPlugin {
             out.put("exposureLocked", exposureLocked)
             out.put("wbLocked", wbLocked)
             out.put("focusLocked", focusLocked)
+            out.put("zoomFactor", curZ)
+            out.put("minZoom", minZ)
+            out.put("maxZoom", maxZ)
+            out.put("torchAvailable", hasFlash)
+            out.put("torchOn", torchOn)
             out.put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
             out.put("osVersion", "Android ${Build.VERSION.RELEASE}")
             return out
@@ -101,8 +115,23 @@ class SciCameraPlugin : MyGoPlugin {
             v.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             val c = Cam(v, context.applicationContext)
             cams[id] = c
+
+            val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    val cam = c.camera ?: return false
+                    val zState = cam.cameraInfo.zoomState.value
+                    val maxZ = minOf((zState?.maxZoomRatio ?: 6.0f), 6.0f)
+                    val curZ = zState?.zoomRatio ?: c.zoomFactor.toFloat()
+                    val nextZ = (curZ * detector.scaleFactor).coerceIn(1.0f, maxZ)
+                    c.zoomFactor = nextZ.toDouble()
+                    cam.cameraControl.setZoomRatio(nextZ)
+                    return true
+                }
+            })
+
             v.setOnTouchListener { view, event ->
-                if (event.action == MotionEvent.ACTION_UP) {
+                scaleDetector.onTouchEvent(event)
+                if (event.actionMasked == MotionEvent.ACTION_UP && !scaleDetector.isInProgress) {
                     view.performClick()
                     val cam = c.camera
                     if (cam != null && view.width > 0 && view.height > 0) {
@@ -196,6 +225,21 @@ class SciCameraPlugin : MyGoPlugin {
                             .setAutoCancelDuration(3, TimeUnit.SECONDS)
                             .build()
                         cam.cameraControl.startFocusAndMetering(action)
+                    }
+                    if (args.has("zoomFactor")) {
+                        val z = args.optDouble("zoomFactor", 1.0)
+                        if (z > 0) {
+                            val zState = cam.cameraInfo.zoomState.value
+                            val maxZ = minOf((zState?.maxZoomRatio ?: 6.0f).toDouble(), 6.0)
+                            val clamped = z.coerceIn(1.0, maxZ)
+                            c.zoomFactor = clamped
+                            cam.cameraControl.setZoomRatio(clamped.toFloat())
+                        }
+                    }
+                    if (args.has("torchEnabled")) {
+                        val on = args.optBoolean("torchEnabled", false)
+                        c.torchOn = on
+                        cam.cameraControl.enableTorch(on)
                     }
                 }
                 if (args.has("exposureLocked")) c.exposureLocked = args.optBoolean("exposureLocked")
