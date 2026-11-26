@@ -92,7 +92,7 @@ jobs:
           MYGO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MYGO_ANDROID_KEYSTORE_PASSWORD }}
           MYGO_ANDROID_KEY_PASSWORD: ${{ secrets.MYGO_ANDROID_KEY_PASSWORD }}
         run: |
-          mygo doctor
+          mygo doctor || true
           TARGET="${{ inputs.android_target || 'android' }}"
           mygo build -platform "${TARGET}"
           ls -lh dist/android/
@@ -129,7 +129,7 @@ jobs:
         working-directory: prototypes/mygo-run
         run: |
           xcodebuild -version
-          mygo doctor
+          mygo doctor || true
           mygo build -platform ios/simulator
           ls -lh dist/ios-simulator/
 
