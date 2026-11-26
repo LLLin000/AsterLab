@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -91,119 +93,156 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 
 					chkPtr := v.ensureWidgetBool("chk:" + moduleID + ":" + cid)
 					*chkPtr = checkedVal
+					flashKey := fmt.Sprintf("chk-flash:%s:%s", moduleID, cid)
+					swipeKey := fmt.Sprintf("chk-swipe:%s:%d:%s", moduleID, idx, cid)
+					isLabSwipe := v.MobileCompact && interactiveLive && (v.LabMode || v.Mode == ModeRun)
 
-					row := ui.Row(c.Key(fmt.Sprintf("live-chk:%s:%d:%s", moduleID, idx, cid))).FillWidth().
-						Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing4)).
-						Radius(float32(tok.ControlRadius)).
-						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
-						Transition(theme.AccordionTransition())
-					rowHover := row.Hovered()
-					targetRowBg := ui.Transparent
-					if rowHover {
-						targetRowBg = tok.Surface.Alpha(0.7)
-					}
-					row.Background(row.AnimateColor("chk-rbg", targetRowBg, theme.MotionMicroFade))
-					targetTxtCol := tok.Text
-					if *chkPtr {
-						targetTxtCol = tok.TextMuted
-					}
-					animTxtCol := row.AnimateColor("chk-fg", targetTxtCol, theme.MotionMicroFade)
-					row.Children(func() {
-						if interactiveLive {
-							if components.Checkbox(c, chkPtr, "").Changed() {
-								next := cloneRowsSlice(items)
-								if idx < len(next) {
-									next[idx]["done"] = *chkPtr
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-								}
-								if v.CheckedItems == nil {
-									v.CheckedItems = map[string]bool{}
-								}
-								v.CheckedItems[cid] = *chkPtr
-								if v.OnToggleCheck != nil {
-									v.OnToggleCheck(v.StepID, cid, *chkPtr)
-								}
-							}
-						} else {
-							mark := "☐"
-							if *chkPtr {
-								mark = "☑"
-							}
-							ui.Text(c, mark).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+					renderRowContent := func() {
+						row := ui.Row(c.Key(fmt.Sprintf("live-chk:%s:%d:%s", moduleID, idx, cid))).FillWidth().
+							Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing4)).
+							Radius(float32(tok.ControlRadius)).
+							AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+							Transition(theme.AccordionTransition())
+						if v.MobileCompact {
+							row.MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
+								Label("检查项：" + label)
 						}
+						rowHover := row.Hovered()
+						targetRowBg := ui.Transparent
+						if isLabSwipe {
+							targetRowBg = tok.Surface
+						}
+						if v.isSwipeFlashActive(c, flashKey) {
+							targetRowBg = tok.SuccessBg
+						} else if rowHover {
+							targetRowBg = tok.Surface.Alpha(0.7)
+						}
+						row.Background(row.AnimateColor("chk-rbg", targetRowBg, theme.MotionMicroFade))
+						targetTxtCol := tok.Text
+						if *chkPtr {
+							targetTxtCol = tok.TextMuted
+						}
+						animTxtCol := row.AnimateColor("chk-fg", targetTxtCol, theme.MotionMicroFade)
+						row.Children(func() {
+							if interactiveLive {
+								if components.Checkbox(c, chkPtr, "").Changed() {
+									v.applyChecklistItemState(moduleID, items, idx, cid, *chkPtr)
+								}
+							} else {
+								mark := "☐"
+								if *chkPtr {
+									mark = "☑"
+								}
+								ui.Text(c, mark).FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
+							}
 
-						if editableDesign {
-							lblDraft := v.ensureWidgetDraft("chk_lbl:"+moduleID+":"+cid, label)
-							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-								ti := BorderlessTextInput(c, tok, lblDraft, float32(tok.TextBody), false, "输入检查项内容，按 Enter 新增下一项…").
-									TextColor(animTxtCol)
-								ti.OnTextKey(func(k ui.TextKey) bool {
-									if k.Key == ui.KeyBackspace && strings.TrimSpace(k.Text()) == "" && len(items) > 1 {
-										next := removeSliceIndex(items, idx)
+							if editableDesign {
+								lblDraft := v.ensureWidgetDraft("chk_lbl:"+moduleID+":"+cid, label)
+								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+									ti := BorderlessTextInput(c, tok, lblDraft, float32(tok.TextBody), false, "输入检查项内容，按 Enter 新增下一项…").
+										TextColor(animTxtCol)
+									ti.OnTextKey(func(k ui.TextKey) bool {
+										if k.Key == ui.KeyBackspace && strings.TrimSpace(k.Text()) == "" && len(items) > 1 {
+											next := removeSliceIndex(items, idx)
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+											return true
+										}
+										return false
+									})
+									if ti.Submitted() {
+										next := cloneRowsSlice(items)
+										if idx < len(next) {
+											next[idx]["label"] = strings.TrimSpace(*lblDraft)
+										}
+										newItem := map[string]any{
+											"id":    fmt.Sprintf("chk-%d", len(next)+1),
+											"label": "",
+											"done":  false,
+										}
+										if idx+1 <= len(next) {
+											tail := append([]map[string]any{newItem}, next[idx+1:]...)
+											next = append(next[:idx+1], tail...)
+										} else {
+											next = append(next, newItem)
+										}
 										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-										return true
+									} else if !ti.Focused() && strings.TrimSpace(*lblDraft) != strings.TrimSpace(label) {
+										next := cloneRowsSlice(items)
+										if idx < len(next) {
+											next[idx]["label"] = strings.TrimSpace(*lblDraft)
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										}
 									}
-									return false
 								})
-								if ti.Submitted() {
-									next := cloneRowsSlice(items)
-									if idx < len(next) {
-										next[idx]["label"] = strings.TrimSpace(*lblDraft)
-									}
-									newItem := map[string]any{
-										"id":    fmt.Sprintf("chk-%d", len(next)+1),
-										"label": "",
-										"done":  false,
-									}
-									if idx+1 <= len(next) {
-										tail := append([]map[string]any{newItem}, next[idx+1:]...)
-										next = append(next[:idx+1], tail...)
-									} else {
-										next = append(next, newItem)
-									}
-									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-								} else if !ti.Focused() && strings.TrimSpace(*lblDraft) != strings.TrimSpace(label) {
-									next := cloneRowsSlice(items)
-									if idx < len(next) {
-										next[idx]["label"] = strings.TrimSpace(*lblDraft)
-										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-									}
-								}
-							})
-						} else {
-							ui.Box(c).FillWidth().Children(func() {
-								ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(animTxtCol)
-							})
-						}
-
-						if req {
-							ui.Text(c, "必检").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Warning).Shrink(0)
-						}
-						if editableDesign {
-							actOp := float32(0)
-							if rowHover || v.MobileCompact {
-								actOp = 1
+							} else {
+								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+									ui.Text(c, label).FontSize(float32(tok.TextBody)).TextColor(animTxtCol)
+								})
 							}
-							actWrap := ui.Row(c.Key("chk-acts:"+moduleID+":"+cid)).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
-							actWrap.Opacity(actWrap.AnimateTo("caop", actOp, theme.MotionMicroFade)).Children(func() {
-								reqTip := map[bool]string{true: "取消必检", false: "设为必检"}[req]
-								if components.IconButton(c, lucide.ShieldCheck(), reqTip, components.IconButtonCompact).Clicked() {
-									next := cloneRowsSlice(items)
-									if idx < len(next) {
-										next[idx]["required"] = !req
-										next[idx]["blocking"] = !req
-										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-									}
+
+							if req {
+								ui.Text(c, "必检").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Warning).Shrink(0)
+							}
+							if editableDesign {
+								actOp := float32(0)
+								if rowHover || v.MobileCompact {
+									actOp = 1
 								}
-								if len(items) > 1 {
-									if components.IconButton(c, lucide.X(), "删除检查项", components.IconButtonCompact).Clicked() {
-										next := removeSliceIndex(items, idx)
-										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+								actWrap := ui.Row(c.Key("chk-acts:"+moduleID+":"+cid)).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4))
+								actWrap.Opacity(actWrap.AnimateTo("caop", actOp, theme.MotionMicroFade)).Children(func() {
+									reqTip := map[bool]string{true: "取消必检", false: "设为必检"}[req]
+									if components.IconButton(c, lucide.ShieldCheck(), reqTip, components.IconButtonCompact).Clicked() {
+										next := cloneRowsSlice(items)
+										if idx < len(next) {
+											next[idx]["required"] = !req
+											next[idx]["blocking"] = !req
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										}
 									}
-								}
-							})
+									if len(items) > 1 {
+										if components.IconButton(c, lucide.X(), "删除检查项", components.IconButtonCompact).Clicked() {
+											next := removeSliceIndex(items, idx)
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										}
+									}
+								})
+							}
+						})
+					}
+
+					if isLabSwipe {
+						doneLbl := "完成"
+						if *chkPtr {
+							doneLbl = "撤销"
 						}
-					})
+						timerLbl := "计时"
+						if _, tmData, ok := v.findStepTimerForStep(v.StepID); ok && strings.EqualFold(textValue(tmData, "status"), "running") {
+							timerLbl = "暂停"
+						}
+						mobile.SwipeRow(c.Key(swipeKey), v.ensureSwipeState(swipeKey), mobile.SwipeOptions{
+							Leading: []mobile.SwipeAction{{
+								Label: doneLbl,
+								Color: &tok.Success,
+								OnTap: func() {
+									nextDone := !*chkPtr
+									*chkPtr = nextDone
+									v.applyChecklistItemState(moduleID, items, idx, cid, nextDone)
+									v.recordSwipeFlash(flashKey)
+									mygo.Haptics.Success()
+								},
+							}},
+							Trailing: []mobile.SwipeAction{{
+								Label: timerLbl,
+								Color: &tok.Accent,
+								OnTap: func() {
+									v.ToggleStepTimerForStep(v.StepID)
+									mygo.Haptics.Medium()
+								},
+							}},
+						}, renderRowContent)
+					} else {
+						renderRowContent()
+					}
 				}
 				if editableDesign {
 					ui.Row(c).FillWidth().Justify(ui.Start).Children(func() {
@@ -252,50 +291,90 @@ func (v *View) renderChecklist(c *ui.Context, data map[string]any) {
 					*chkPtr = checkedVal
 				}
 
-				ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
-					Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
-					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-					if interactiveRun && skipReason == "" {
-						if components.Checkbox(c, chkPtr, label).Changed() {
-							if v.CheckedItems == nil {
-								v.CheckedItems = map[string]bool{}
+				flashKey := fmt.Sprintf("chk-run-flash:%s:%s", moduleID, cid)
+				swipeKey := fmt.Sprintf("chk-run-swipe:%s:%d:%s", moduleID, idx, cid)
+				isLabSwipe := v.MobileCompact && interactiveRun && skipReason == ""
+				rowBg := tok.Elevated
+				if v.isSwipeFlashActive(c, flashKey) {
+					rowBg = tok.SuccessBg
+				}
+				renderLegacyRow := func() {
+					chkRow := ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)).Background(rowBg).Border(1, tok.Border).
+						AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+					if v.MobileCompact {
+						chkRow.MinHeight(float32(tok.Spacing48))
+					}
+					chkRow.Children(func() {
+						if interactiveRun && skipReason == "" {
+							if components.Checkbox(c, chkPtr, label).Changed() {
+								v.applyChecklistItemState(moduleID, items, idx, cid, *chkPtr)
 							}
-							v.CheckedItems[cid] = *chkPtr
-							if v.OnToggleCheck != nil {
-								v.OnToggleCheck(v.StepID, cid, *chkPtr)
+						} else {
+							mark := "○ "
+							if *chkPtr {
+								mark = "✓ "
+							}
+							ui.Text(c, mark+label).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+						}
+						ui.Spacer(c)
+						if required {
+							components.Badge(c, "必检", components.BadgeOptions{Tone: components.BadgeWarning})
+						}
+						if skipReason != "" {
+							components.Badge(c, "已豁免 · "+skipReason, components.BadgeOptions{Tone: components.BadgeAccent})
+						} else if allowSkip && interactiveRun && !*chkPtr {
+							btnLabel := "按规则跳过"
+							if skipRule != "" {
+								btnLabel = "按规则跳过（" + skipRule + "）"
+							}
+							if components.Button(c, btnLabel, components.ButtonOutline).Clicked() && v.OnRuleSkip != nil {
+								v.OnRuleSkip(v.StepID, cid, firstNonEmpty(skipRule, "rule_skip"))
+							}
+						} else if allowSkip && !interactiveRun {
+							components.Badge(c, firstNonEmpty(skipRule, "可规则豁免"))
+						}
+						if editableDesign && len(items) > 1 {
+							if components.IconButton(c, lucide.Trash(), "删除检查项", components.IconButtonCompact).Clicked() {
+								next := removeSliceIndex(items, idx)
+								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
 							}
 						}
-					} else {
-						mark := "○ "
-						if *chkPtr {
-							mark = "✓ "
-						}
-						ui.Text(c, mark+label).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+					})
+				}
+				if isLabSwipe {
+					doneLbl := "完成"
+					if *chkPtr {
+						doneLbl = "撤销"
 					}
-					ui.Spacer(c)
-					if required {
-						components.Badge(c, "必检", components.BadgeOptions{Tone: components.BadgeWarning})
+					timerLbl := "计时"
+					if _, tmData, ok := v.findStepTimerForStep(v.StepID); ok && strings.EqualFold(textValue(tmData, "status"), "running") {
+						timerLbl = "暂停"
 					}
-					if skipReason != "" {
-						components.Badge(c, "已豁免 · "+skipReason, components.BadgeOptions{Tone: components.BadgeAccent})
-					} else if allowSkip && interactiveRun && !*chkPtr {
-						btnLabel := "按规则跳过"
-						if skipRule != "" {
-							btnLabel = "按规则跳过（" + skipRule + "）"
-						}
-						if components.Button(c, btnLabel, components.ButtonOutline).Clicked() && v.OnRuleSkip != nil {
-							v.OnRuleSkip(v.StepID, cid, firstNonEmpty(skipRule, "rule_skip"))
-						}
-					} else if allowSkip && !interactiveRun {
-						components.Badge(c, firstNonEmpty(skipRule, "可规则豁免"))
-					}
-					if editableDesign && len(items) > 1 {
-						if components.IconButton(c, lucide.Trash(), "删除检查项", components.IconButtonCompact).Clicked() {
-							next := removeSliceIndex(items, idx)
-							v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-						}
-					}
-				})
+					mobile.SwipeRow(c.Key(swipeKey), v.ensureSwipeState(swipeKey), mobile.SwipeOptions{
+						Leading: []mobile.SwipeAction{{
+							Label: doneLbl,
+							Color: &tok.Success,
+							OnTap: func() {
+								nextDone := !*chkPtr
+								*chkPtr = nextDone
+								v.applyChecklistItemState(moduleID, items, idx, cid, nextDone)
+								v.recordSwipeFlash(flashKey)
+								mygo.Haptics.Success()
+							},
+						}},
+						Trailing: []mobile.SwipeAction{{
+							Label: timerLbl,
+							Color: &tok.Accent,
+							OnTap: func() {
+								v.ToggleStepTimerForStep(v.StepID)
+								mygo.Haptics.Medium()
+							},
+						}},
+					}, renderLegacyRow)
+				} else {
+					renderLegacyRow()
+				}
 			}
 
 			if editableDesign {
@@ -1357,7 +1436,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								if !v.ReadOnly {
 									vKey := fmt.Sprintf("calc_v:%s:%d", moduleID, idx)
 									vBuf := v.ensureWidgetDraft(vKey, valStr)
-									tb := BorderlessTextInput(c, tok, vBuf, float32(tok.TextData), true, "输入数值").FontFeatures("tnum")
+									tb := BorderlessTextInput(c, tok, vBuf, float32(tok.TextData), true, "输入数值").FontFeatures("tnum").Keyboard(ui.KeyboardDecimal)
 									if val, ok := v.syncDraftInput(vKey, valStr, tb, vBuf); ok {
 										next := cloneRowsSlice(rows)
 										if num, err := strconv.ParseFloat(val, 64); err == nil {
@@ -1457,7 +1536,7 @@ func (v *View) renderCalcQtyInput(c *ui.Context, moduleID string, data map[strin
 	buf := v.ensureCalcScratch(moduleID, field, formatNumber(qv))
 	ui.Column(c).Width(float32(tok.Spacing48)*2.5).Gap(float32(tok.Spacing4)).Children(func() {
 		ui.Text(c, label+" ("+qu+")").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		components.TextBox(c, buf, components.TextBoxOptions{})
+		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(ui.KeyboardDecimal)
 	})
 }
 
@@ -1465,9 +1544,13 @@ func (v *View) renderCalcNumInput(c *ui.Context, moduleID, field, label string, 
 	tok := theme.GetTokens(c.Theme())
 	n, _ := numericValue(raw)
 	buf := v.ensureCalcScratch(moduleID, field, formatNumber(n))
+	kb := ui.KeyboardDecimal
+	if field == "steps_count" {
+		kb = ui.KeyboardNumber
+	}
 	ui.Column(c).Width(float32(tok.Spacing48)*2.2).Gap(float32(tok.Spacing4)).Children(func() {
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-		components.TextBox(c, buf, components.TextBoxOptions{})
+		components.TextBox(c, buf, components.TextBoxOptions{}).Keyboard(kb)
 	})
 }
 
@@ -1632,7 +1715,7 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 					}
 					if *tmMode != "stopwatch" && *tmMode != "cycle" {
 						ui.Box(c).Width(float32(tok.Spacing48)*1.5).Children(func() {
-							components.TextBox(c, tmVal, components.TextBoxOptions{}).Placeholder("数值")
+							components.TextBox(c, tmVal, components.TextBoxOptions{}).Placeholder("数值").Keyboard(ui.KeyboardDecimal)
 						})
 						uSel := components.Select(c, tmUnit)
 						uSel.Trigger.Children(func() {
@@ -1650,7 +1733,7 @@ func (v *View) renderTimer(c *ui.Context, data map[string]any) {
 					if *tmMode == "cycle" {
 						ui.Text(c, "轮数").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
 						ui.Box(c).Width(float32(tok.Spacing48)*1.2).Children(func() {
-							components.TextBox(c, tmRounds, components.TextBoxOptions{}).Placeholder("轮数")
+							components.TextBox(c, tmRounds, components.TextBoxOptions{}).Placeholder("轮数").Keyboard(ui.KeyboardNumber)
 						})
 					}
 					ui.Spacer(c)
@@ -1746,79 +1829,95 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 	// Resting state shows ONLY [Play] [08:00] [Title], hiding mode/value/unit/status form noise
 	// inside a lightweight click-on-clock Popover.
 	cfgOpen := ui.Local(c.Root(), "tm-cfg:"+moduleID, func() bool { return false })
-	timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).FillWidth().
-		Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
-		Radius(float32(tok.ControlRadius)).
-		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4))
-	targetClockCol := tok.Text
-	if inlineStatus == "running" {
-		targetClockCol = tok.Accent
-		timerWrap.Background(tok.AccentSoftBg.Alpha(0.55)).Border(1, tok.Accent.Alpha(0.45))
-	} else if inlineStatus == "completed" {
-		targetClockCol = tok.Success
-		timerWrap.Border(1, tok.Success.Alpha(0.45))
-	}
-	clockCol := timerWrap.AnimateColor("tm-col", targetClockCol, theme.MotionSnappy)
-	phases := mapSlice(data["phases"])
-	rounds := int(numOrZero(data["rounds"]))
-	if rounds < 1 {
-		rounds = 1
-	}
-	anchorVal := textValue(data, "anchor")
-	schedWin := textValue(data, "schedule_window")
-	rowHover := timerWrap.Hovered()
+	isLabTimerSwipe := v.MobileCompact && !v.ReadOnly && (v.LabMode || v.Mode == ModeRun)
+	renderTimerBody := func() {
+		timerWrap := ui.Column(c.Key("live-tm:"+moduleID)).FillWidth().
+			Padding(float32(tok.Spacing4)+2, float32(tok.Spacing12)).
+			Radius(float32(tok.ControlRadius)).
+			Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4))
+		if v.MobileCompact {
+			timerWrap.MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Label("计时行：" + title)
+		}
+		targetClockCol := tok.Text
+		if inlineStatus == "running" {
+			targetClockCol = tok.Accent
+			timerWrap.Background(tok.AccentSoftBg.Alpha(0.55)).Border(1, tok.Accent.Alpha(0.45))
+		} else if inlineStatus == "completed" {
+			targetClockCol = tok.Success
+			timerWrap.Border(1, tok.Success.Alpha(0.45))
+		}
+		clockCol := timerWrap.AnimateColor("tm-col", targetClockCol, theme.MotionSnappy)
+		phases := mapSlice(data["phases"])
+		rounds := int(numOrZero(data["rounds"]))
+		if rounds < 1 {
+			rounds = 1
+		}
+		anchorVal := textValue(data, "anchor")
+		schedWin := textValue(data, "schedule_window")
+		rowHover := timerWrap.Hovered()
 
-	timerWrap.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			// 1. Tactile Play / Pause pill on the left
-			if !v.ReadOnly {
-				if inlineStatus != "running" {
-					playBtn := ui.ButtonBase(c.Key("tm-play:"+moduleID)).
-						Size(float32(tok.Spacing24)+2, float32(tok.Spacing24)+2).
-						Radius(float32(tok.Spacing12)+1).Center().
-						Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.28)).
-						Label("启动计时")
-					theme.ApplyTactilePress(playBtn)
-					if playBtn.Hovered() {
-						playBtn.Background(tok.Accent.Alpha(0.20))
-					}
-					playBtn.Children(func() {
-						ui.Icon(c, lucide.Play()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-					})
-					components.Tooltip(c, playBtn, "启动计时")
-					if playBtn.Clicked() {
-						*cfgOpen = false
-						v.emitAnyModuleEdit(moduleID, map[string]any{
-							"status":     "running",
-							"started_at": time.Now().UTC().Format(time.RFC3339),
+		timerWrap.Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				// 1. Tactile Play / Pause pill on the left
+				playBtnSz := float32(tok.Spacing24) + 2
+				if v.MobileCompact {
+					playBtnSz = float32(tok.Spacing48) - float32(tok.Spacing8)
+				}
+				if !v.ReadOnly {
+					if inlineStatus != "running" {
+						playBtn := ui.ButtonBase(c.Key("tm-play:"+moduleID)).
+							Size(playBtnSz, playBtnSz).
+							Radius(playBtnSz/2).Center().
+							Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.28)).
+							Label("启动计时")
+						theme.ApplyTactilePress(playBtn)
+						if playBtn.Hovered() {
+							playBtn.Background(tok.Accent.Alpha(0.20))
+						}
+						playBtn.Children(func() {
+							ui.Icon(c, lucide.Play()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 						})
-						if v.OnTimerAction != nil {
-							v.OnTimerAction(v.StepID, moduleID, "start")
+						components.Tooltip(c, playBtn, "启动计时")
+						if playBtn.Clicked() {
+							*cfgOpen = false
+							v.emitAnyModuleEdit(moduleID, map[string]any{
+								"status":     "running",
+								"started_at": time.Now().UTC().Format(time.RFC3339),
+							})
+							if v.OnTimerAction != nil {
+								v.OnTimerAction(v.StepID, moduleID, "start")
+							}
+							if v.MobileCompact {
+								mygo.Haptics.Medium()
+							}
+						}
+					} else {
+						pauseBtn := ui.ButtonBase(c.Key("tm-pause:"+moduleID)).
+							Size(playBtnSz, playBtnSz).
+							Radius(playBtnSz/2).Center().
+							Background(tok.Accent).Label("暂停计时")
+						pauseBtn.Children(func() {
+							ui.Icon(c, lucide.Pause()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.AccentText)
+						})
+						components.Tooltip(c, pauseBtn, "暂停计时")
+						if pauseBtn.Clicked() {
+							v.emitAnyModuleEdit(moduleID, map[string]any{
+								"status":      "paused",
+								"elapsed_sec": liveElapsed,
+								"started_at":  "",
+							})
+							if v.OnTimerAction != nil {
+								v.OnTimerAction(v.StepID, moduleID, "pause")
+							}
+							if v.MobileCompact {
+								mygo.Haptics.Medium()
+							}
 						}
 					}
 				} else {
-					pauseBtn := ui.ButtonBase(c.Key("tm-pause:"+moduleID)).
-						Size(float32(tok.Spacing24)+2, float32(tok.Spacing24)+2).
-						Radius(float32(tok.Spacing12)+1).Center().
-						Background(tok.Accent).Label("暂停计时")
-					pauseBtn.Children(func() {
-						ui.Icon(c, lucide.Pause()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.AccentText)
-					})
-					components.Tooltip(c, pauseBtn, "暂停计时")
-					if pauseBtn.Clicked() {
-						v.emitAnyModuleEdit(moduleID, map[string]any{
-							"status":      "paused",
-							"elapsed_sec": liveElapsed,
-							"started_at":  "",
-						})
-						if v.OnTimerAction != nil {
-							v.OnTimerAction(v.StepID, moduleID, "pause")
-						}
-					}
+					ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
 				}
-			} else {
-				ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(clockCol)
-			}
 
 			// 2. Crisp tabular readout (clicking opens lightweight configuration Popover when idle & editable)
 			var clockAnchor ui.Element
@@ -1933,7 +2032,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 								ui.Text(c, "时长").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
 								ui.Box(c).Grow(1).Children(func() {
-									tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum")
+									tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum").Keyboard(ui.KeyboardDecimal)
 									if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
 										if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
 											field := "duration"
@@ -2017,7 +2116,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 						ui.Text(c, "循环轮数").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 						rBuf := v.ensureWidgetDraft("tm:"+moduleID+":rounds", strconv.Itoa(rounds))
 						ui.Box(c).Width(float32(tok.Spacing48)*1.1).Children(func() {
-							tb := BorderlessTextInput(c, tok, rBuf, float32(tok.TextMeta), true, "轮数").FontFeatures("tnum")
+							tb := BorderlessTextInput(c, tok, rBuf, float32(tok.TextMeta), true, "轮数").FontFeatures("tnum").Keyboard(ui.KeyboardNumber)
 							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*rBuf) != strconv.Itoa(rounds)) {
 								if rn, err := strconv.Atoi(strings.TrimSpace(*rBuf)); err == nil && rn >= 1 {
 									v.emitAnyModuleEdit(moduleID, map[string]any{"rounds": rn})
@@ -2063,7 +2162,7 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 							})
 							ui.Box(c).Width(float32(tok.Spacing48)*1.0).Children(func() {
 								vBuf := v.ensureWidgetDraft(fmt.Sprintf("tm:%s:ph:%d:v", moduleID, pIdx), formatNumber(pv))
-								tb := BorderlessTextInput(c, tok, vBuf, float32(tok.TextMeta), false, "时长").FontFeatures("tnum").Label(fmt.Sprintf("阶段 %d 时长", pIdx+1))
+								tb := BorderlessTextInput(c, tok, vBuf, float32(tok.TextMeta), false, "时长").FontFeatures("tnum").Label(fmt.Sprintf("阶段 %d 时长", pIdx+1)).Keyboard(ui.KeyboardDecimal)
 								if !tb.Focused() && *vBuf != formatNumber(pv) {
 									*vBuf = formatNumber(pv)
 								}
@@ -2268,7 +2367,60 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 				ui.Text(c, desc).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 			}
 		}
-	})
+		})
+	}
+	if isLabTimerSwipe {
+		swipeKey := "tm-swipe:" + moduleID
+		trailLbl := "开始"
+		if inlineStatus == "running" {
+			trailLbl = "暂停"
+		}
+		mobile.SwipeRow(c.Key(swipeKey), v.ensureSwipeState(swipeKey), mobile.SwipeOptions{
+			Leading: []mobile.SwipeAction{{
+				Label: "完成",
+				Color: &tok.Success,
+				OnTap: func() {
+					v.emitAnyModuleEdit(moduleID, map[string]any{
+						"status":       "completed",
+						"elapsed_sec":  liveElapsed,
+						"started_at":   "",
+						"completed_at": time.Now().UTC().Format(time.RFC3339),
+					})
+					if v.OnTimerAction != nil {
+						v.OnTimerAction(v.StepID, moduleID, "complete")
+					}
+					mygo.Haptics.Success()
+				},
+			}},
+			Trailing: []mobile.SwipeAction{{
+				Label: trailLbl,
+				Color: &tok.Accent,
+				OnTap: func() {
+					if inlineStatus == "running" {
+						v.emitAnyModuleEdit(moduleID, map[string]any{
+							"status":      "paused",
+							"elapsed_sec": liveElapsed,
+							"started_at":  "",
+						})
+						if v.OnTimerAction != nil {
+							v.OnTimerAction(v.StepID, moduleID, "pause")
+						}
+					} else {
+						v.emitAnyModuleEdit(moduleID, map[string]any{
+							"status":     "running",
+							"started_at": time.Now().UTC().Format(time.RFC3339),
+						})
+						if v.OnTimerAction != nil {
+							v.OnTimerAction(v.StepID, moduleID, "start")
+						}
+					}
+					mygo.Haptics.Medium()
+				},
+			}},
+		}, renderTimerBody)
+	} else {
+		renderTimerBody()
+	}
 }
 
 func timerStatusLabel(status string) string {
@@ -2452,7 +2604,7 @@ func (v *View) renderAttachment(c *ui.Context, data map[string]any) {
 				ui.Text(c, "每孔视野").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				sBuf := v.ensureWidgetDraft("att:"+moduleID+":slots", strconv.Itoa(slots))
 				ui.Box(c).Width(float32(tok.Spacing48)*1.0).Children(func() {
-					tb := BorderlessTextInput(c, tok, sBuf, float32(tok.TextMeta), true, "槽位数").FontFeatures("tnum")
+					tb := BorderlessTextInput(c, tok, sBuf, float32(tok.TextMeta), true, "槽位数").FontFeatures("tnum").Keyboard(ui.KeyboardNumber)
 					if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*sBuf) != strconv.Itoa(slots)) {
 						if sn, err := strconv.Atoi(strings.TrimSpace(*sBuf)); err == nil && sn >= 1 {
 							v.emitAnyModuleEdit(moduleID, map[string]any{"slots_per_cell": sn})
@@ -2736,40 +2888,99 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 					if v.UnifiedLive {
 						*donePtr = doneInline || v.CheckedItems[sid] || v.CheckedItems[v.StepID+":"+sid]
 					}
-					ui.Row(c.Key("sf-row:"+moduleID+":"+sid)).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
-						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
-						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Transition(theme.AccordionTransition()).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d.", idx+1)).FontSize(float32(tok.TextMeta)).Bold().
-							TextColor(tok.Accent).FontFeatures("tnum")
-						if (v.UnifiedLive || v.Mode == ModeRun) && !v.ReadOnly {
-							if components.Checkbox(c, donePtr, stitle).Changed() {
-								if v.UnifiedLive {
-									next := cloneRowsSlice(items)
-									if idx < len(next) {
-										next[idx]["done"] = *donePtr
-										v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+					flashKey := fmt.Sprintf("sf-flash:%s:%s", moduleID, sid)
+					swipeKey := fmt.Sprintf("sf-swipe:%s:%d:%s", moduleID, idx, sid)
+					isLabSubSwipe := v.MobileCompact && !v.ReadOnly && (v.LabMode || v.Mode == ModeRun)
+					sfBg := tok.Elevated
+					if v.isSwipeFlashActive(c, flashKey) {
+						sfBg = tok.SuccessBg
+					}
+					renderSubRow := func() {
+						sfRow := ui.Row(c.Key("sf-row:"+moduleID+":"+sid)).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
+							Radius(float32(tok.ControlRadius)).Background(sfBg).Border(1, tok.Border).
+							AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Transition(theme.AccordionTransition())
+						if v.MobileCompact {
+							sfRow.MinHeight(float32(tok.Spacing48))
+						}
+						sfRow.Children(func() {
+							ui.Text(c, fmt.Sprintf("%d.", idx+1)).FontSize(float32(tok.TextMeta)).Bold().
+								TextColor(tok.Accent).FontFeatures("tnum")
+							if (v.UnifiedLive || v.Mode == ModeRun) && !v.ReadOnly {
+								if components.Checkbox(c, donePtr, stitle).Changed() {
+									if v.UnifiedLive {
+										next := cloneRowsSlice(items)
+										if idx < len(next) {
+											next[idx]["done"] = *donePtr
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										}
+									}
+									if v.OnToggleCheck != nil {
+										v.OnToggleCheck(v.StepID, sid, *donePtr)
 									}
 								}
-								if v.OnToggleCheck != nil {
-									v.OnToggleCheck(v.StepID, sid, *donePtr)
+							} else {
+								ui.Text(c, stitle).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+							}
+							if snote != "" {
+								ui.Spacer(c)
+								ui.Text(c, snote).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							} else if editableDesign {
+								ui.Spacer(c)
+							}
+							if editableDesign {
+								if components.IconButton(c, lucide.Trash(), "删除子步骤", components.IconButtonCompact).Clicked() {
+									next := removeSliceIndex(items, idx)
+									v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
 								}
 							}
-						} else {
-							ui.Text(c, stitle).FontSize(float32(tok.TextBody)).TextColor(tok.Text)
+						})
+					}
+					if isLabSubSwipe {
+						doneLbl := "完成"
+						if *donePtr {
+							doneLbl = "撤销"
 						}
-						if snote != "" {
-							ui.Spacer(c)
-							ui.Text(c, snote).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-						} else if editableDesign {
-							ui.Spacer(c)
+						timerLbl := "计时"
+						if _, tmData, ok := v.findStepTimerForStep(v.StepID); ok && strings.EqualFold(textValue(tmData, "status"), "running") {
+							timerLbl = "暂停"
 						}
-						if editableDesign {
-							if components.IconButton(c, lucide.Trash(), "删除子步骤", components.IconButtonCompact).Clicked() {
-								next := removeSliceIndex(items, idx)
-								v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
-							}
-						}
-					})
+						mobile.SwipeRow(c.Key(swipeKey), v.ensureSwipeState(swipeKey), mobile.SwipeOptions{
+							Leading: []mobile.SwipeAction{{
+								Label: doneLbl,
+								Color: &tok.Success,
+								OnTap: func() {
+									nextDone := !*donePtr
+									*donePtr = nextDone
+									if v.UnifiedLive {
+										next := cloneRowsSlice(items)
+										if idx < len(next) {
+											next[idx]["done"] = nextDone
+											v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+										}
+									}
+									if v.CheckedItems == nil {
+										v.CheckedItems = map[string]bool{}
+									}
+									v.CheckedItems[sid] = nextDone
+									if v.OnToggleCheck != nil {
+										v.OnToggleCheck(v.StepID, sid, nextDone)
+									}
+									v.recordSwipeFlash(flashKey)
+									mygo.Haptics.Success()
+								},
+							}},
+							Trailing: []mobile.SwipeAction{{
+								Label: timerLbl,
+								Color: &tok.Accent,
+								OnTap: func() {
+									v.ToggleStepTimerForStep(v.StepID)
+									mygo.Haptics.Medium()
+								},
+							}},
+						}, renderSubRow)
+					} else {
+						renderSubRow()
+					}
 				}
 				if editableDesign {
 					newTitle := v.ensureWidgetDraft("sf:"+moduleID+":new_title", "")
@@ -2813,4 +3024,217 @@ func (v *View) renderSubflow(c *ui.Context, data map[string]any) {
 			})
 		})
 	})
+}
+
+func (v *View) ensureSwipeState(key string) *mobile.SwipeState {
+	if v.swipeStates == nil {
+		v.swipeStates = map[string]*mobile.SwipeState{}
+	}
+	st, ok := v.swipeStates[key]
+	if !ok || st == nil {
+		st = &mobile.SwipeState{}
+		v.swipeStates[key] = st
+	}
+	return st
+}
+
+func (v *View) recordSwipeFlash(key string) {
+	if v.swipeFlashTimers == nil {
+		v.swipeFlashTimers = map[string]time.Time{}
+	}
+	v.swipeFlashTimers[key] = time.Now()
+}
+
+func (v *View) isSwipeFlashActive(c *ui.Context, key string) bool {
+	if v.swipeFlashTimers == nil {
+		return false
+	}
+	ts, ok := v.swipeFlashTimers[key]
+	if !ok || ts.IsZero() {
+		return false
+	}
+	rem := 550*time.Millisecond - time.Since(ts)
+	if rem > 0 {
+		if c != nil {
+			c.After(rem)
+		}
+		return true
+	}
+	delete(v.swipeFlashTimers, key)
+	return false
+}
+
+func (v *View) applyChecklistItemState(moduleID string, items []map[string]any, idx int, cid string, checked bool) {
+	if v.CheckedItems == nil {
+		v.CheckedItems = map[string]bool{}
+	}
+	v.CheckedItems[cid] = checked
+	if idx >= 0 && idx < len(items) {
+		next := cloneRowsSlice(items)
+		next[idx]["done"] = checked
+		v.emitAnyModuleEdit(moduleID, map[string]any{"items": next})
+	}
+	if v.OnToggleCheck != nil {
+		v.OnToggleCheck(v.StepID, cid, checked)
+	}
+}
+
+// ToggleChecklistSwipeDone toggles checklist item idx in checklist module moduleID
+// (used by ModeLab right-swipe action and tests).
+func (v *View) ToggleChecklistSwipeDone(moduleID string, itemIdx int) bool {
+	if v == nil || v.Doc == nil || v.ReadOnly {
+		return false
+	}
+	var chkData map[string]any
+	ownerStepID := v.StepID
+	if m := findModuleByID(v.Doc, moduleID); m != nil && m.Kind == "checklist" {
+		chkData = m.Data
+	} else {
+		for _, sm := range v.Doc.Modules {
+			if sm.Kind != "step" {
+				continue
+			}
+			for _, bm := range mapSlice(sm.Data["blocks"]) {
+				if textValue(bm, "kind") == "checklist" && textValue(bm, "id") == moduleID {
+					chkData = bm
+					ownerStepID = sm.ID
+					break
+				}
+			}
+			if chkData != nil {
+				break
+			}
+		}
+	}
+	if chkData == nil {
+		return false
+	}
+	items := mapSlice(chkData["items"])
+	if itemIdx < 0 || itemIdx >= len(items) {
+		return false
+	}
+	cid := firstNonEmpty(textValue(items[itemIdx], "id"), fmt.Sprintf("chk-%d", itemIdx+1))
+	doneInline, _ := items[itemIdx]["done"].(bool)
+	curDone := doneInline || v.CheckedItems[cid] || v.CheckedItems[ownerStepID+":"+cid]
+	nextDone := !curDone
+	if chkPtr := v.ensureWidgetBool("chk:" + moduleID + ":" + cid); chkPtr != nil {
+		*chkPtr = nextDone
+	}
+	prevStep := v.StepID
+	v.StepID = ownerStepID
+	v.applyChecklistItemState(moduleID, items, itemIdx, cid, nextDone)
+	v.StepID = prevStep
+	v.recordSwipeFlash(fmt.Sprintf("chk-flash:%s:%s", moduleID, cid))
+	if v.MobileCompact {
+		mygo.Haptics.Success()
+	}
+	return true
+}
+
+func (v *View) findStepTimerForStep(stepID string) (moduleID string, data map[string]any, found bool) {
+	if v == nil || v.Doc == nil {
+		return "", nil, false
+	}
+	if stepID != "" {
+		if sm := findModuleByID(v.Doc, stepID); sm != nil && sm.Kind == "step" {
+			for _, bm := range mapSlice(sm.Data["blocks"]) {
+				if textValue(bm, "kind") == "timer" {
+					return textValue(bm, "id"), bm, true
+				}
+			}
+		}
+		if stTree := ParseStepTree(v.Doc.Source, v.Doc); stTree != nil {
+			if sn := stTree.ByID[stepID]; sn != nil {
+				for _, oid := range sn.OwnedModuleIDs {
+					if om := findModuleByID(v.Doc, oid); om != nil && om.Kind == "timer" {
+						return om.ID, om.Data, true
+					}
+				}
+			}
+		}
+	}
+	for _, fm := range flattenAllDocModules(v.Doc) {
+		if fm.Kind == "timer" {
+			return fm.ID, fm.Data, true
+		}
+	}
+	return "", nil, false
+}
+
+// ToggleStepTimerForStep starts or pauses the timer associated with stepID (or the first
+// timer in the document). If no timer exists and OnMobileOpenTimer is set, opens the timer drawer.
+func (v *View) ToggleStepTimerForStep(stepID string) (moduleID, nextStatus string, ok bool) {
+	if v == nil || v.ReadOnly {
+		return "", "", false
+	}
+	tmID, tmData, found := v.findStepTimerForStep(stepID)
+	if !found || tmID == "" {
+		if v.OnMobileOpenTimer != nil {
+			v.OnMobileOpenTimer()
+			return "", "open_drawer", true
+		}
+		return "", "", false
+	}
+	ownerStepID := stepID
+	if ownerStepID == "" && v.Doc != nil {
+		for _, sm := range v.Doc.Modules {
+			if sm.Kind != "step" {
+				continue
+			}
+			for _, bm := range mapSlice(sm.Data["blocks"]) {
+				if textValue(bm, "kind") == "timer" && textValue(bm, "id") == tmID {
+					ownerStepID = sm.ID
+					break
+				}
+			}
+			if ownerStepID != "" {
+				break
+			}
+		}
+	}
+	curStatus := strings.ToLower(strings.TrimSpace(textValue(tmData, "status")))
+	if curStatus == "" {
+		if rt, hasRT := v.TimerStates[tmID]; hasRT && rt.Status != "" {
+			curStatus = strings.ToLower(strings.TrimSpace(rt.Status))
+		} else {
+			curStatus = "idle"
+		}
+	}
+	prevStep := v.StepID
+	if ownerStepID != "" {
+		v.StepID = ownerStepID
+	}
+	defer func() { v.StepID = prevStep }()
+
+	if curStatus == "running" {
+		baseElapsed := int(numOrZero(tmData["elapsed_sec"]))
+		if tStart, err := time.Parse(time.RFC3339, textValue(tmData, "started_at")); err == nil {
+			if delta := int(time.Since(tStart).Seconds()); delta > 0 {
+				baseElapsed += delta
+			}
+		}
+		v.emitAnyModuleEdit(tmID, map[string]any{
+			"status":      "paused",
+			"elapsed_sec": baseElapsed,
+			"started_at":  "",
+		})
+		if v.OnTimerAction != nil {
+			v.OnTimerAction(ownerStepID, tmID, "pause")
+		}
+		if v.MobileCompact {
+			mygo.Haptics.Medium()
+		}
+		return tmID, "paused", true
+	}
+	v.emitAnyModuleEdit(tmID, map[string]any{
+		"status":     "running",
+		"started_at": time.Now().UTC().Format(time.RFC3339),
+	})
+	if v.OnTimerAction != nil {
+		v.OnTimerAction(ownerStepID, tmID, "start")
+	}
+	if v.MobileCompact {
+		mygo.Haptics.Medium()
+	}
+	return tmID, "running", true
 }

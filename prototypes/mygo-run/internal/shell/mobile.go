@@ -1,16 +1,25 @@
 package shell
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
+	"strings"
+	"sync"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
+	"asterlab-mygo-prototype/internal/vault"
 )
 
 const (
@@ -18,7 +27,426 @@ const (
 	mobilePullActionThresh   = float32(56)
 	mobileDrawerWidthMax     = float32(320)
 	mobileEdgeSwipeZoneWidth = float32(18)
+	mobileToolbarConfigFile  = "mobile_toolbar.json"
 )
+
+// MobileToolbarActionSpec describes one customizable button in the mobile edit toolbar.
+type MobileToolbarActionSpec struct {
+	ID             string
+	Group          string
+	Label          string
+	Icon           *ui.SVG
+	Accent         bool
+	DispatchAction string
+}
+
+// MobileToolbarConfig is the persisted JSON payload for mobile edit toolbar ordering and visibility.
+type MobileToolbarConfig struct {
+	MobileToolbarOrder  []string        `json:"mobileToolbarOrder,omitempty"`
+	MobileToolbarHidden map[string]bool `json:"mobileToolbarHidden,omitempty"`
+	PinnedFiles         []string        `json:"pinnedFiles,omitempty"`
+}
+
+type mobileExtraState struct {
+	order           []string
+	hidden          map[string]bool
+	pinnedFiles     map[string]bool
+	pullWasReady    bool
+	loadedVaultPath string
+	explicitConfig  bool
+	calAgenda3Day   bool
+	calAgendaInited bool
+	calStripPage    mobile.PageState
+	calStripInited  bool
+}
+
+var (
+	mobileExtraMu  sync.Mutex
+	mobileExtraMap = map[*Shell]*mobileExtraState{}
+)
+
+func (s *Shell) mobileExtra() *mobileExtraState {
+	mobileExtraMu.Lock()
+	defer mobileExtraMu.Unlock()
+	st, ok := mobileExtraMap[s]
+	if !ok {
+		st = &mobileExtraState{
+			hidden:        map[string]bool{},
+			pinnedFiles:   map[string]bool{},
+			calAgenda3Day: true,
+			calStripPage:  mobile.PageState{Page: 1},
+		}
+		mobileExtraMap[s] = st
+	}
+	return st
+}
+
+// DefaultMobileToolbarSpecs returns the canonical Obsidian-grade mobile edit toolbar actions.
+func DefaultMobileToolbarSpecs() []MobileToolbarActionSpec {
+	return []MobileToolbarActionSpec{
+		// Scientific quick actions
+		{ID: "at_entity", Group: "科研快捷", Label: "插入实体 @", Icon: lucide.AtSign(), Accent: true},
+		{ID: "slash_module", Group: "科研快捷", Label: "插入模块 /", Icon: lucide.Slash(), Accent: true},
+		{ID: "footnote", Group: "科研快捷", Label: "批注 [^]", Icon: lucide.MessageSquareQuote()},
+		{ID: "nl_structure", Group: "科研快捷", Label: "自然语言转结构", Icon: lucide.Sparkles(), Accent: true},
+		{ID: "camera_photo", Group: "科研快捷", Label: "现场拍照", Icon: lucide.Camera()},
+		{ID: "timer", Group: "科研快捷", Label: "快捷计时", Icon: lucide.Timer(), DispatchAction: "open_timer"},
+		{ID: "add_step", Group: "科研快捷", Label: "+步骤", Icon: lucide.ListPlus(), Accent: true},
+		// Formatting & Structure
+		{ID: "undo", Group: "排版与结构", Label: "撤销", Icon: lucide.Undo2()},
+		{ID: "redo", Group: "排版与结构", Label: "重做", Icon: lucide.Redo2()},
+		{ID: "heading", Group: "排版与结构", Label: "标题 H1–H3", Icon: lucide.Heading()},
+		{ID: "bold", Group: "排版与结构", Label: "加粗", Icon: lucide.Bold()},
+		{ID: "checklist", Group: "排版与结构", Label: "待办清单", Icon: lucide.ListChecks()},
+		{ID: "bullet_list", Group: "排版与结构", Label: "无序列表", Icon: lucide.List()},
+		{ID: "indent", Group: "排版与结构", Label: "增加缩进", Icon: lucide.ListIndentIncrease()},
+		{ID: "outdent", Group: "排版与结构", Label: "减少缩进", Icon: lucide.ListIndentDecrease()},
+		{ID: "move_block_up", Group: "排版与结构", Label: "上移块", Icon: lucide.ArrowUp()},
+		{ID: "move_block_down", Group: "排版与结构", Label: "下移块", Icon: lucide.ArrowDown()},
+		{ID: "fold_block", Group: "排版与结构", Label: "折叠块", Icon: lucide.FoldVertical()},
+		// Mobile-native cursor/nav
+		{ID: "cursor_left", Group: "光标与导航", Label: "光标左移", Icon: lucide.ChevronLeft()},
+		{ID: "cursor_right", Group: "光标与导航", Label: "光标右移", Icon: lucide.ChevronRight()},
+		{ID: "hide_keyboard", Group: "光标与导航", Label: "收起键盘", Icon: lucide.KeyboardOff()},
+		{ID: "switch_nav", Group: "光标与导航", Label: "切换底部导航栏", Icon: lucide.LayoutGrid()},
+	}
+}
+
+func normalizeToolbarActionID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "open_timer" {
+		return "timer"
+	}
+	return id
+}
+
+func defaultToolbarSpecMap() map[string]MobileToolbarActionSpec {
+	specs := DefaultMobileToolbarSpecs()
+	m := make(map[string]MobileToolbarActionSpec, len(specs))
+	for _, sp := range specs {
+		m[sp.ID] = sp
+	}
+	return m
+}
+
+func normalizeMobileToolbarOrder(order []string) []string {
+	defaults := DefaultMobileToolbarSpecs()
+	specMap := defaultToolbarSpecMap()
+	seen := make(map[string]bool, len(defaults))
+	out := make([]string, 0, len(defaults))
+	for _, raw := range order {
+		id := normalizeToolbarActionID(raw)
+		if _, ok := specMap[id]; ok && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	for _, sp := range defaults {
+		if !seen[sp.ID] {
+			seen[sp.ID] = true
+			out = append(out, sp.ID)
+		}
+	}
+	return out
+}
+
+func (s *Shell) ensureToolbarConfigLoaded() {
+	st := s.mobileExtra()
+	vaultRoot := strings.TrimSpace(s.VaultPathInput)
+	if vaultRoot != "" && st.loadedVaultPath != vaultRoot && !st.explicitConfig {
+		_ = s.LoadMobileToolbarConfig()
+	}
+}
+
+func (s *Shell) mobileToolbarConfigPath() string {
+	root := strings.TrimSpace(s.VaultPathInput)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, vault.SystemDirName, mobileToolbarConfigFile)
+}
+
+// SaveMobileToolbarConfig persists the shell's mobile toolbar order, hidden actions,
+// and pinned file paths into `<VaultRoot>/.asterlab/mobile_toolbar.json`.
+func (s *Shell) SaveMobileToolbarConfig() error {
+	p := s.mobileToolbarConfigPath()
+	if p == "" {
+		return nil
+	}
+	st := s.mobileExtra()
+	order := normalizeMobileToolbarOrder(st.order)
+	hidden := map[string]bool{}
+	for k, v := range st.hidden {
+		if v {
+			hidden[normalizeToolbarActionID(k)] = true
+		}
+	}
+	var pinned []string
+	for k, v := range st.pinnedFiles {
+		if v && k != "" {
+			pinned = append(pinned, k)
+		}
+	}
+	sort.Strings(pinned)
+	payload := MobileToolbarConfig{
+		MobileToolbarOrder:  order,
+		MobileToolbarHidden: hidden,
+		PinnedFiles:         pinned,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return os.WriteFile(p, data, 0o644)
+	}
+	return nil
+}
+
+// LoadMobileToolbarConfig reloads mobile toolbar ordering, visibility, and pinned file state from disk.
+func (s *Shell) LoadMobileToolbarConfig() error {
+	p := s.mobileToolbarConfigPath()
+	if p == "" {
+		return nil
+	}
+	st := s.mobileExtra()
+	st.loadedVaultPath = strings.TrimSpace(s.VaultPathInput)
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return err
+	}
+	var payload MobileToolbarConfig
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	st.order = normalizeMobileToolbarOrder(payload.MobileToolbarOrder)
+	st.hidden = map[string]bool{}
+	for k, v := range payload.MobileToolbarHidden {
+		if v {
+			st.hidden[normalizeToolbarActionID(k)] = true
+		}
+	}
+	st.pinnedFiles = map[string]bool{}
+	for _, rel := range payload.PinnedFiles {
+		if rel != "" {
+			st.pinnedFiles[rel] = true
+		}
+	}
+	return nil
+}
+
+// MobileToolbarOrder returns a copy of the ordered mobile toolbar action IDs.
+func (s *Shell) MobileToolbarOrder() []string {
+	s.ensureToolbarConfigLoaded()
+	st := s.mobileExtra()
+	return normalizeMobileToolbarOrder(st.order)
+}
+
+// SetMobileToolbarOrder updates the mobile edit toolbar order and persists it.
+func (s *Shell) SetMobileToolbarOrder(order []string) {
+	st := s.mobileExtra()
+	st.order = normalizeMobileToolbarOrder(order)
+	st.explicitConfig = true
+	_ = s.SaveMobileToolbarConfig()
+	s.notifySettingsChanged()
+}
+
+// MobileToolbarHidden returns a copy of the hidden action ID map.
+func (s *Shell) MobileToolbarHidden() map[string]bool {
+	s.ensureToolbarConfigLoaded()
+	st := s.mobileExtra()
+	out := make(map[string]bool, len(st.hidden))
+	for k, v := range st.hidden {
+		if v {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// SetMobileToolbarHidden replaces the hidden action map and persists it.
+func (s *Shell) SetMobileToolbarHidden(hidden map[string]bool) {
+	st := s.mobileExtra()
+	st.hidden = map[string]bool{}
+	for k, v := range hidden {
+		if v {
+			st.hidden[normalizeToolbarActionID(k)] = true
+		}
+	}
+	st.explicitConfig = true
+	_ = s.SaveMobileToolbarConfig()
+	s.notifySettingsChanged()
+}
+
+// MobileToolbarOrderedSpecs returns all known toolbar actions in current customized order.
+func (s *Shell) MobileToolbarOrderedSpecs() []MobileToolbarActionSpec {
+	order := s.MobileToolbarOrder()
+	specMap := defaultToolbarSpecMap()
+	out := make([]MobileToolbarActionSpec, 0, len(order))
+	for _, id := range order {
+		if sp, ok := specMap[id]; ok {
+			out = append(out, sp)
+		}
+	}
+	return out
+}
+
+// IsMobileToolbarActionVisible reports whether an action ID is currently shown in the toolbar.
+func (s *Shell) IsMobileToolbarActionVisible(id string) bool {
+	s.ensureToolbarConfigLoaded()
+	st := s.mobileExtra()
+	return !st.hidden[normalizeToolbarActionID(id)]
+}
+
+// SetMobileToolbarActionVisible shows or hides a toolbar action and persists the change.
+func (s *Shell) SetMobileToolbarActionVisible(id string, visible bool) {
+	st := s.mobileExtra()
+	norm := normalizeToolbarActionID(id)
+	if st.hidden == nil {
+		st.hidden = map[string]bool{}
+	}
+	if visible {
+		delete(st.hidden, norm)
+	} else {
+		st.hidden[norm] = true
+	}
+	st.explicitConfig = true
+	_ = s.SaveMobileToolbarConfig()
+	s.notifySettingsChanged()
+}
+
+// MoveMobileToolbarAction moves an action up (delta < 0) or down (delta > 0) in toolbar order.
+func (s *Shell) MoveMobileToolbarAction(id string, delta int) bool {
+	if delta == 0 {
+		return false
+	}
+	order := s.MobileToolbarOrder()
+	norm := normalizeToolbarActionID(id)
+	idx := -1
+	for i, cur := range order {
+		if cur == norm {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	target := idx + delta
+	if target < 0 {
+		target = 0
+	}
+	if target >= len(order) {
+		target = len(order) - 1
+	}
+	if target == idx {
+		return false
+	}
+	order[idx], order[target] = order[target], order[idx]
+	s.SetMobileToolbarOrder(order)
+	return true
+}
+
+// ResetMobileToolbarConfig restores the default action order and visibility.
+func (s *Shell) ResetMobileToolbarConfig() {
+	st := s.mobileExtra()
+	st.order = normalizeMobileToolbarOrder(nil)
+	st.hidden = map[string]bool{}
+	st.explicitConfig = true
+	_ = s.SaveMobileToolbarConfig()
+	s.notifySettingsChanged()
+}
+
+// IsFilePinned reports whether a vault file is pinned in the mobile file tree.
+func (s *Shell) IsFilePinned(relPath string) bool {
+	s.ensureToolbarConfigLoaded()
+	st := s.mobileExtra()
+	return st.pinnedFiles[relPath]
+}
+
+// TogglePinFile toggles the pinned state for a vault file and persists it.
+func (s *Shell) TogglePinFile(relPath string) bool {
+	if relPath == "" {
+		return false
+	}
+	st := s.mobileExtra()
+	if st.pinnedFiles == nil {
+		st.pinnedFiles = map[string]bool{}
+	}
+	next := !st.pinnedFiles[relPath]
+	if next {
+		st.pinnedFiles[relPath] = true
+	} else {
+		delete(st.pinnedFiles, relPath)
+	}
+	st.explicitConfig = true
+	_ = s.SaveMobileToolbarConfig()
+	return next
+}
+
+// HandleMobileBack dismisses one active mobile overlay/drawer/modal layer at a time,
+// falling back to navigation history before returning false so the OS can background the app.
+func (s *Shell) HandleMobileBack() bool {
+	if s == nil {
+		return false
+	}
+	if s.Layers.HasOpen() {
+		return s.Layers.DismissTop()
+	}
+	switch {
+	case s.PaletteOpen:
+		s.PaletteOpen = false
+		return true
+	case s.GlobalSearchOpen:
+		s.GlobalSearchOpen = false
+		return true
+	case s.VaultSettingsOpen:
+		s.VaultSettingsOpen = false
+		return true
+	case s.ComponentGalleryOpen:
+		s.ComponentGalleryOpen = false
+		return true
+	case s.newFolderDialogOpen:
+		s.newFolderDialogOpen = false
+		return true
+	case s.VaultLauncherOpen:
+		s.VaultLauncherOpen = false
+		return true
+	case s.FeedbackOpen:
+		s.FeedbackOpen = false
+		return true
+	case s.WelcomeOpen:
+		s.WelcomeOpen = false
+		return true
+	case s.TourOpen:
+		s.TourOpen = false
+		return true
+	case s.DayPopoverOpen:
+		s.DayPopoverOpen = false
+		return true
+	case s.MobileTabSwitcherOpen:
+		s.MobileTabSwitcherOpen = false
+		return true
+	case s.MobileDrawer != "":
+		s.MobileDrawer = ""
+		s.MobileDrawerProgress = 0
+		s.MobileSwipeKind = ""
+		return true
+	case s.CanBack():
+		s.GoBack()
+		return true
+	default:
+		return false
+	}
+}
 
 // SetInitialMobilePrefs loads persisted mobile shell preferences without letting
 // EnsureMobileDefaults overwrite explicitly saved false booleans back to true.
@@ -90,9 +518,13 @@ func (s *Shell) MobileTopReserve(c *ui.Context) float32 {
 }
 
 // MobileBottomReserve returns the bottom clearance needed so scrolled document/calendar
-// items clear the centered floating bottom glass capsule cleanly.
+// items clear the centered floating bottom glass capsule and system home-indicator SafeArea cleanly.
 func (s *Shell) MobileBottomReserve(c *ui.Context) float32 {
-	return 76
+	var safeBottom float32
+	if c != nil {
+		_, _, safeBottom, _ = c.SafeArea()
+	}
+	return 76 + safeBottom
 }
 
 func (s *Shell) updateMobileScrollBehavior() {
@@ -157,12 +589,21 @@ func (s *Shell) executeMobilePullAction() {
 func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 	s.EnsureTabs()
 	s.EnsureMobileDefaults()
+	s.ensureToolbarConfigLoaded()
 	tok = s.SyncThemeLook(c)
 	s.updateMobileScrollBehavior()
+
+	if c.Shortcut(0, ui.KeyEscape) {
+		s.HandleMobileBack()
+	}
 
 	var topInset float32
 	if s.window != nil {
 		topInset = sidebar.HeaderHeight(c)
+	}
+	safeTop, safeRight, _, safeLeft := c.SafeArea()
+	if safeTop > topInset {
+		topInset = safeTop
 	}
 	activeTab := s.ActiveTab()
 	activePane := s.findPane(s.ActivePaneID)
@@ -178,7 +619,7 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 		sheetMaxW = 240
 	}
 
-	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, 0, 0, 0)
+	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, safeRight, 0, safeLeft)
 	theme.PaintCanvasBackground(rootBox, tok)
 	rootBox.Children(func() {
 		ui.Column(c).Fill().Children(func() {
@@ -422,8 +863,10 @@ func (s *Shell) renderMobileDockedTopChrome(c *ui.Context, tok theme.Tokens, act
 
 func (s *Shell) renderMobilePullDownQuickAction(c *ui.Context, tok theme.Tokens) {
 	st := s.MobileContentScrollState()
+	extra := s.mobileExtra()
 	if st.Y > 2 {
 		s.MobilePullOffset = 0
+		extra.pullWasReady = false
 		return
 	}
 	topZone := s.MobileTopReserve(c)
@@ -438,16 +881,25 @@ func (s *Shell) renderMobilePullDownQuickAction(c *ui.Context, tok theme.Tokens)
 	} else if s.MobilePullOffset > 0 {
 		triggered := s.MobilePullOffset >= mobilePullActionThresh
 		s.MobilePullOffset = 0
+		extra.pullWasReady = false
 		if triggered {
+			mygo.Haptics.Success()
 			s.executeMobilePullAction()
 			return
 		}
 	}
 
 	if s.MobilePullOffset <= 4 {
+		extra.pullWasReady = false
 		return
 	}
 	ready := s.MobilePullOffset >= mobilePullActionThresh
+	if ready && !extra.pullWasReady {
+		mygo.Haptics.Medium()
+		extra.pullWasReady = true
+	} else if !ready {
+		extra.pullWasReady = false
+	}
 	pillFg := tok.TextMuted
 	lbl := "继续下拉：" + s.mobilePullActionLabel()
 	if ready {
@@ -488,6 +940,7 @@ func (s *Shell) renderMobileEdgeSwipeSensors(c *ui.Context, sheetMaxW float32) {
 		if s.MobileDrawerProgress > 0.32 || vx > 320 {
 			s.MobileDrawer = "tree"
 			s.MobileDrawerProgress = 1
+			mygo.Haptics.Light()
 		} else {
 			s.MobileDrawerProgress = 0
 		}
@@ -507,6 +960,7 @@ func (s *Shell) renderMobileEdgeSwipeSensors(c *ui.Context, sheetMaxW float32) {
 		if s.MobileDrawerProgress > 0.32 || vx < -320 {
 			s.MobileDrawer = "outline"
 			s.MobileDrawerProgress = 1
+			mygo.Haptics.Light()
 		} else {
 			s.MobileDrawerProgress = 0
 		}
@@ -533,9 +987,10 @@ func (s *Shell) renderMobileFloatingBottomBar(
 	}
 	hideT := stage.AnimateTo("mb-dock-hide", targetHide, theme.MotionFluid)
 
+	_, _, safeBottom, _ := c.SafeArea()
 	if hideT > 0.85 {
 		pill := ui.ButtonBase(c.Key("mb-dock-reveal")).Absolute().
-			Left(120).Right(120).Bottom(8).Height(18).Center().Label("显示导航栏")
+			Left(120).Right(120).Bottom(8 + safeBottom).Height(18).Center().Label("显示导航栏")
 		pill.Children(func() {
 			ui.Box(c).Width(42).Height(4).Radius(2).Background(tok.TextMuted.Alpha(0.45))
 		})
@@ -556,7 +1011,7 @@ func (s *Shell) renderMobileFloatingBottomBar(
 	if vw > 48 {
 		maxCapsuleW = vw - 32
 	}
-	ui.Row(c.Key("mb-dock-wrap")).Absolute().Left(16).Right(16).Bottom(14).Center().PassThrough().Children(func() {
+	ui.Row(c.Key("mb-dock-wrap")).Absolute().Left(16).Right(16).Bottom(14 + safeBottom).Center().PassThrough().Children(func() {
 		capsule := ui.Row(c.Key("mb-dock-capsule")).Height(48).MaxWidth(maxCapsuleW).Radius(24).
 			Padding(0, 12).AlignItems(ui.Center).Gap(4).Clip().
 			Translate(0, hideT*78).
@@ -564,11 +1019,7 @@ func (s *Shell) renderMobileFloatingBottomBar(
 		theme.ApplyCapsuleGlass(capsule, tok, false)
 		capsule.Children(func() {
 			if editingBar {
-				ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(maxCapsuleW - 24).Height(40).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
-						s.renderMobileEditToolbarItems(c, tok, activeTab)
-					})
-				})
+				s.renderMobileEditToolbarCapsule(c, tok, maxCapsuleW-24, activeTab)
 				return
 			}
 			s.renderMobileNavDockItems(c, tok, activeTab, tabCount)
@@ -658,46 +1109,108 @@ func (s *Shell) renderMobileNavDockItems(c *ui.Context, tok theme.Tokens, active
 	})
 }
 
-func (s *Shell) renderMobileEditToolbarItems(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab) {
-	triggerAction := func(act string) {
+func (s *Shell) renderMobileEditToolbarCapsule(c *ui.Context, tok theme.Tokens, innerW float32, activeTab *WorkspaceTab) {
+	showSwitchNav := s.IsMobileToolbarActionVisible("switch_nav")
+	scrollMaxW := innerW
+	if showSwitchNav && innerW > float32(tok.Spacing48) {
+		scrollMaxW = innerW - float32(tok.Spacing48)
+	}
+	ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(scrollMaxW).Height(40).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			s.renderMobileEditToolbarItems(c, tok, activeTab)
+		})
+	})
+	if showSwitchNav {
+		ui.Box(c).Width(1).Height(float32(tok.Spacing16)).Background(tok.BorderStrong.Alpha(0.55))
+		s.renderMobileToolbarButton(c, tok, activeTab, MobileToolbarActionSpec{
+			ID: "switch_nav", Label: "切换底部导航栏", Icon: lucide.LayoutGrid(),
+		})
+	}
+}
+
+func (s *Shell) renderMobileToolbarButton(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab, spec MobileToolbarActionSpec) {
+	b := ui.ButtonBase(c.Key("mb-ed-"+spec.ID)).Size(36, 36).Radius(18).Center().Label(spec.Label)
+	if b.Hovered() {
+		b.Background(tok.Text.Alpha(0.06))
+	}
+	theme.ApplyTactilePress(b)
+	fg := tok.Text
+	if spec.Accent {
+		fg = tok.Accent
+	}
+	b.Children(func() {
+		ui.Icon(c, spec.Icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(fg)
+	})
+	if b.Clicked() {
+		mygo.Haptics.Selection()
+		s.dispatchMobileToolbarAction(c, activeTab, spec)
+	}
+}
+
+func (s *Shell) dispatchMobileToolbarAction(c *ui.Context, activeTab *WorkspaceTab, spec MobileToolbarActionSpec) {
+	act := spec.DispatchAction
+	if act == "" {
+		act = spec.ID
+	}
+	switch spec.ID {
+	case "switch_nav":
+		s.MobileDockForceNav = true
+		return
+	case "hide_keyboard":
+		if c != nil {
+			c.Root().Focus(ui.FocusOptions{PreventScroll: true})
+		}
 		if s.OnMobileDocToolbarAction != nil && activeTab != nil {
 			s.OnMobileDocToolbarAction(*activeTab, act)
-		} else if act == "undo" && s.OnUndo != nil {
+		}
+		return
+	case "undo":
+		if s.OnMobileDocToolbarAction != nil && activeTab != nil {
+			s.OnMobileDocToolbarAction(*activeTab, act)
+		} else if s.OnUndo != nil {
 			s.OnUndo()
-		} else if act == "redo" && s.OnRedo != nil {
+		}
+		return
+	case "redo":
+		if s.OnMobileDocToolbarAction != nil && activeTab != nil {
+			s.OnMobileDocToolbarAction(*activeTab, act)
+		} else if s.OnRedo != nil {
 			s.OnRedo()
 		}
-	}
-	toolIcon := func(key string, icon *ui.SVG, label string, accent bool, onClick func()) {
-		b := ui.ButtonBase(c.Key("mb-ed-"+key)).Size(36, 36).Radius(18).Center().Label(label)
-		if b.Hovered() {
-			b.Background(tok.Text.Alpha(0.06))
+		return
+	case "timer":
+		if s.OnMobileDocToolbarAction != nil && activeTab != nil {
+			s.OnMobileDocToolbarAction(*activeTab, act)
+		} else {
+			s.RightTab = 1
+			s.MobileDrawer = "outline"
 		}
-		theme.ApplyTactilePress(b)
-		fg := tok.Text
-		if accent {
-			fg = tok.Accent
-		}
-		b.Children(func() {
-			ui.Icon(c, icon).Size(18, 18).TextColor(fg)
-		})
-		if b.Clicked() {
-			onClick()
+		return
+	default:
+		if s.OnMobileDocToolbarAction != nil && activeTab != nil {
+			s.OnMobileDocToolbarAction(*activeTab, act)
 		}
 	}
+}
 
-	toolIcon("undo", lucide.Undo2(), "撤销", false, func() { triggerAction("undo") })
-	toolIcon("redo", lucide.Redo2(), "重做", false, func() { triggerAction("redo") })
-	ui.Box(c).Width(1).Height(18).Background(tok.BorderStrong.Alpha(0.55))
-	toolIcon("step", lucide.ListPlus(), "+步骤", true, func() { triggerAction("add_step") })
-	toolIcon("check", lucide.ListChecks(), "核对", false, func() { triggerAction("add_checklist") })
-	toolIcon("param", lucide.SlidersHorizontal(), "参数", false, func() { triggerAction("add_param") })
-	toolIcon("plate", lucide.Grid3x3(), "孔板", false, func() { triggerAction("add_plate") })
-	toolIcon("timer", lucide.Timer(), "计时", false, func() { triggerAction("open_timer") })
-	ui.Box(c).Width(1).Height(18).Background(tok.BorderStrong.Alpha(0.55))
-	toolIcon("nav", lucide.LayoutGrid(), "切换底部导航栏", false, func() {
-		s.MobileDockForceNav = true
-	})
+func (s *Shell) renderMobileEditToolbarItems(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab) {
+	specs := s.MobileToolbarOrderedSpecs()
+	prevGroup := ""
+	renderedAny := false
+	for _, spec := range specs {
+		if spec.ID == "switch_nav" {
+			continue
+		}
+		if !s.IsMobileToolbarActionVisible(spec.ID) {
+			continue
+		}
+		if renderedAny && prevGroup != "" && spec.Group != prevGroup {
+			ui.Box(c).Width(1).Height(float32(tok.Spacing16)).Background(tok.BorderStrong.Alpha(0.55))
+		}
+		s.renderMobileToolbarButton(c, tok, activeTab, spec)
+		prevGroup = spec.Group
+		renderedAny = true
+	}
 }
 
 func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetMaxW float32) {
@@ -783,23 +1296,30 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 				dismiss := s.MobileDrawerProgress < 0.65 || (isLeft && vx < -280) || (!isLeft && vx > 280)
 				if dismiss {
 					s.MobileDrawer = ""
+					mygo.Haptics.Light()
 				}
 				s.MobileDrawerProgress = 0
 			}
 		}
 
+		safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
 		sheet.Children(func() {
 			if isLeft {
-				// Clean Obsidian iOS Drawer: Scrollable Tree on top + Floating 3-Tier Bottom Control Island
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Padding(float32(tok.Spacing12), float32(tok.Spacing8), 0, float32(tok.Spacing8)).Children(func() {
-					s.renderFileTreeScrollBody(c, tok)
+				// Clean Obsidian iOS Drawer: Scrollable Tree (with SwipeRow actions) on top + Floating 3-Tier Bottom Control Island
+				ui.Box(c).FillWidth().Grow(1).MinHeight(0).
+					Padding(safeTop+float32(tok.Spacing12), float32(tok.Spacing8)+safeRight, 0, float32(tok.Spacing8)+safeLeft).Children(func() {
+					s.renderMobileFileTreeScrollBody(c, tok)
 				})
-				s.renderMobileDrawerBottomIsland(c, tok, "tree")
+				ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
+					s.renderMobileDrawerBottomIsland(c, tok, "tree")
+				})
 			} else {
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Padding(safeTop, safeRight, 0, safeLeft).Children(func() {
 					s.rightDrawer(c)
 				})
-				s.renderMobileDrawerBottomIsland(c, tok, "outline")
+				ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
+					s.renderMobileDrawerBottomIsland(c, tok, "outline")
+				})
 			}
 		})
 	})
@@ -880,8 +1400,8 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			}
 		}
 
-		// Tier 3: Vault title/stats on left + Standalone 40x40 Circular Glass Settings Gear on right!
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+		// Tier 3: Vault title/stats on left + compact Sync status pill + Standalone 40x40 Circular Glass Settings Gear on right!
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 					components.Text(c, "AsterLab").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
@@ -890,6 +1410,8 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 				components.Text(c, fmt.Sprintf("%d 份实验 · %d 模板", expCnt, tplCnt)).
 					FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).FontFeatures("tnum")
 			})
+
+			s.renderMobileDrawerSyncIndicator(c, tok)
 
 			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(40, 40).Radius(20).Center().Label("打开设置")
 			theme.ApplyCapsuleGlass(gearBtn, tok, true)
@@ -905,13 +1427,351 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 	})
 }
 
+func (s *Shell) renderMobileDrawerSyncIndicator(c *ui.Context, tok theme.Tokens) {
+	dotColor := tok.TextMuted
+	bgColor := tok.Elevated
+	borderColor := tok.BorderSubtle
+	textColor := tok.TextMuted
+	label := "未同步"
+	hasConflict := len(s.SyncConflicts) > 0
+
+	switch {
+	case hasConflict:
+		dotColor = tok.Warning
+		bgColor = tok.WarningBg
+		borderColor = tok.Warning
+		textColor = tok.WarningText
+		label = fmt.Sprintf("冲突 %d", len(s.SyncConflicts))
+	case s.SyncState.Status == "error":
+		dotColor = tok.Danger
+		bgColor = tok.DangerBg
+		borderColor = tok.Danger
+		textColor = tok.DangerText
+		label = "同步异常"
+	case s.SyncState.Status == "syncing":
+		dotColor = tok.Accent
+		bgColor = tok.InfoBg
+		borderColor = tok.Border
+		textColor = tok.InfoText
+		label = "同步中"
+	case s.SyncSettings.Enabled:
+		dotColor = tok.Success
+		bgColor = tok.Elevated
+		borderColor = tok.BorderSubtle
+		textColor = tok.TextMuted
+		if s.SyncState.PendingCount > 0 {
+			dotColor = tok.Warning
+			label = fmt.Sprintf("待同步 %d", s.SyncState.PendingCount)
+		} else {
+			label = "已同步"
+		}
+	}
+
+	syncPill := ui.ButtonBase(c.Key("mb-drawer-sync-status")).
+		Height(float32(tok.Spacing24)).
+		Padding(0, float32(tok.Spacing8)).
+		Radius(float32(tok.ControlRadius)).
+		Background(bgColor).
+		Border(1, borderColor).
+		Shrink(0).
+		Center().
+		Label("同步状态 " + label)
+	theme.ApplyTactilePress(syncPill)
+	syncPill.Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
+				Radius(float32(tok.Spacing4)).Background(dotColor).Shrink(0)
+			components.Text(c, label).FontSize(float32(tok.TextMeta)).
+				TextColor(textColor).SingleLine().FontFeatures("tnum")
+		})
+	})
+	if syncPill.Clicked() {
+		mygo.Haptics.Selection()
+		if hasConflict || !s.SyncSettings.Enabled || s.SyncState.Status == "error" || s.OnTriggerSyncNow == nil {
+			s.MobileDrawer = ""
+			s.SettingsView.Category = "sync"
+			s.VaultSettingsOpen = true
+		} else {
+			s.OnTriggerSyncNow()
+		}
+	}
+}
+
+func (s *Shell) renderMobileFileTreeScrollBody(c *ui.Context, tok theme.Tokens) {
+	if s.folderOpen == nil {
+		s.folderOpen = map[string]bool{}
+	}
+	s.ensureToolbarConfigLoaded()
+
+	scrollArea := ui.Scroll(c).FillWidth().Grow(1).MinHeight(0)
+	scrollArea.Children(func() {
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing4)).Gap(float32(tok.Spacing4)).Children(func() {
+			if s.VaultTree == nil || len(s.VaultTree.Children) == 0 {
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing4)).Children(func() {
+					components.Text(c, "暂无实验文件").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					if components.Button(c, "新建实验", components.ButtonGhost).Clicked() {
+						s.MobileDrawer = ""
+						s.triggerVaultNewFile("")
+					}
+				})
+				return
+			}
+			ui.Column(c).FillWidth().Gap(float32(tok.Spacing4) * 0.5).Children(func() {
+				s.renderMobileTreeChildren(c, tok, s.VaultTree.Children, 0)
+			})
+		})
+	})
+}
+
+func (s *Shell) renderMobileTreeChildren(c *ui.Context, tok theme.Tokens, children []*vault.TreeNode, depth int) {
+	var dirs, pinnedFiles, otherFiles []*vault.TreeNode
+	for _, ch := range children {
+		if ch == nil {
+			continue
+		}
+		if ch.IsDir {
+			dirs = append(dirs, ch)
+		} else if s.IsFilePinned(ch.RelPath) {
+			pinnedFiles = append(pinnedFiles, ch)
+		} else {
+			otherFiles = append(otherFiles, ch)
+		}
+	}
+	for _, node := range pinnedFiles {
+		s.renderMobileTreeNode(c, tok, node, depth)
+	}
+	for _, node := range dirs {
+		s.renderMobileTreeNode(c, tok, node, depth)
+	}
+	for _, node := range otherFiles {
+		s.renderMobileTreeNode(c, tok, node, depth)
+	}
+}
+
+func (s *Shell) renderMobileTreeNode(c *ui.Context, tok theme.Tokens, node *vault.TreeNode, depth int) {
+	if node == nil {
+		return
+	}
+	if node.IsDir {
+		if _, seen := s.folderOpen[node.RelPath]; !seen {
+			s.folderOpen[node.RelPath] = node.Name != vault.AssetsDirName
+		}
+		open := s.folderOpen[node.RelPath]
+		selected := s.SelectedTreePath == node.RelPath
+		if s.renamingRelPath == node.RelPath {
+			s.renderInlineTreeRename(c, tok, node.RelPath, node.Name)
+			return
+		}
+		icon := lucide.Folder()
+		if open {
+			icon = lucide.FolderOpen()
+		}
+		if node.Name == vault.TemplatesDirName {
+			icon = lucide.BookOpen()
+		} else if node.Name == vault.AssetsDirName {
+			icon = lucide.Paperclip()
+		}
+		row := ui.ButtonBase(c.Key("mb-tree-dir:"+node.RelPath)).Label(node.Name).
+			FillWidth().MinWidth(0).MinHeight(float32(tok.Spacing48)*0.85).
+			Justify(ui.Start).Radius(float32(tok.ControlRadius)).
+			Padding(0, float32(tok.Spacing8), 0, float32(tok.Spacing4)).
+			Selected(selected).TextColor(tok.Text)
+		if selected {
+			row.Background(tok.SelectedRow)
+		}
+		theme.ApplyTactilePress(row)
+		row.Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				renderTreeIndentGuides(c, tok, depth)
+				chev := lucide.ChevronRight()
+				if open {
+					chev = lucide.ChevronDown()
+				}
+				ui.Box(c).Size(float32(tok.Spacing16), float32(tok.Spacing16)).Center().Shrink(0).Children(func() {
+					ui.Icon(c, chev).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+				})
+				ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
+				dispName := node.Name
+				if node.IsSystem {
+					switch strings.ToLower(node.Name) {
+					case "templates":
+						dispName = "实验模板"
+					case "assets":
+						dispName = "图片与附件"
+					}
+				}
+				components.Text(c, dispName).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+			})
+		})
+		if row.Clicked() {
+			s.SelectedTreePath = node.RelPath
+			s.folderOpen[node.RelPath] = !open
+			open = !open
+		}
+		kit.ContextMenu(c, row, func(m *kit.Menu) {
+			if m.Item("在此文件夹新建实验").Chosen() {
+				s.MobileDrawer = ""
+				s.triggerVaultNewFile(node.RelPath)
+			}
+			if m.Item("新建子文件夹").Chosen() {
+				s.startNewFolderPrompt(node.RelPath)
+			}
+			m.Separator()
+			if m.Item("重命名").Disabled(node.IsSystem).Chosen() {
+				s.renamingRelPath = node.RelPath
+				s.renameDraft = node.Name
+			}
+			if m.Item("删除").Disabled(node.IsSystem).Chosen() && s.OnVaultDelete != nil {
+				s.OnVaultDelete(node.RelPath)
+			}
+		})
+		if open && len(node.Children) > 0 {
+			ui.Column(c.Key("mb-tree-dir-body:"+node.RelPath)).FillWidth().
+				Gap(float32(tok.Spacing4) * 0.25).Children(func() {
+				s.renderMobileTreeChildren(c, tok, node.Children, depth+1)
+			})
+		}
+		return
+	}
+
+	if s.renamingRelPath == node.RelPath {
+		s.renderInlineTreeRename(c, tok, node.RelPath, node.Name)
+		return
+	}
+	entry := node.Entry
+	isTemplate := entry != nil && entry.IsTemplate
+	isAsset := entry != nil && entry.IsAsset
+	activeTab := s.ActiveTab()
+	selected := s.SelectedTreePath == node.RelPath || (activeTab != nil && activeTab.Kind == TabFile && activeTab.FilePath == node.RelPath)
+	pinned := s.IsFilePinned(node.RelPath)
+
+	icon := lucide.FlaskConical()
+	if isTemplate {
+		icon = lucide.FileText()
+	} else if isAsset {
+		icon = lucide.Image()
+	}
+	shortDate := ""
+	if entry != nil && !isTemplate && len(entry.Date) >= 10 {
+		shortDate = entry.Date[5:10]
+	}
+
+	pinLbl := "置顶"
+	if pinned {
+		pinLbl = "取消置顶"
+	}
+	pinColor := tok.Accent
+	dupColor := tok.Success
+	var leading []mobile.SwipeAction
+	var trailing []mobile.SwipeAction
+	if !isAsset {
+		leading = append(leading, mobile.SwipeAction{
+			Label: pinLbl,
+			Color: &pinColor,
+			OnTap: func() {
+				s.TogglePinFile(node.RelPath)
+				mygo.Haptics.Selection()
+			},
+		})
+		if s.OnVaultDuplicate != nil {
+			trailing = append(trailing, mobile.SwipeAction{
+				Label: "副本",
+				Color: &dupColor,
+				OnTap: func() {
+					s.OnVaultDuplicate(node.RelPath, "")
+					mygo.Haptics.Light()
+				},
+			})
+		}
+	}
+	if s.OnVaultDelete != nil {
+		trailing = append(trailing, mobile.SwipeAction{
+			Label:       "删除",
+			Destructive: true,
+			OnTap: func() {
+				s.OnVaultDelete(node.RelPath)
+				mygo.Haptics.Warning()
+			},
+		})
+	}
+
+	mobile.SwipeRow(c.Key("mb-swipe-"+node.RelPath), nil, mobile.SwipeOptions{
+		Leading:  leading,
+		Trailing: trailing,
+	}, func() {
+		rowBg := tok.Surface
+		if selected {
+			rowBg = tok.SelectedRow
+		}
+		row := ui.ButtonBase(c.Key("mb-tree-file:"+node.RelPath)).Label(node.Name).
+			FillWidth().MinWidth(0).MinHeight(float32(tok.Spacing48)*0.85).
+			Justify(ui.Start).Radius(float32(tok.ControlRadius)).
+			Padding(0, float32(tok.Spacing8), 0, float32(tok.Spacing4)).
+			Background(rowBg).Selected(selected).TextColor(tok.Text)
+		theme.ApplyTactilePress(row)
+		row.Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+				renderTreeIndentGuides(c, tok, depth)
+				ui.Box(c).Size(float32(tok.Spacing16), float32(tok.Spacing16)).Center().Shrink(0).Children(func() {
+					if pinned {
+						ui.Icon(c, lucide.Pin()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+					}
+				})
+				ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
+				components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+				if shortDate != "" {
+					ui.Text(c, shortDate).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+						FontFeatures("tnum").Shrink(0)
+				}
+			})
+		})
+		if row.Clicked() {
+			s.SelectedTreePath = node.RelPath
+			if entry != nil && !isAsset {
+				s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), false)
+				s.MobileDrawer = ""
+			} else if isAsset && s.OnRevealInExplorer != nil {
+				s.OnRevealInExplorer(node.RelPath)
+			}
+		}
+		kit.ContextMenu(c, row, func(m *kit.Menu) {
+			if entry != nil && !isAsset {
+				if m.Item("打开").Chosen() {
+					s.OpenFileInPane(s.ActivePaneID, entry.RelPath, entry.Title, s.DefaultFileOpenMode(), false)
+					s.MobileDrawer = ""
+				}
+				if m.Item(pinLbl).Chosen() {
+					s.TogglePinFile(node.RelPath)
+				}
+				if m.Item("创建副本").Chosen() && s.OnVaultDuplicate != nil {
+					s.OnVaultDuplicate(entry.RelPath, "")
+				}
+				if !isTemplate && m.Item("存为模板").Chosen() && s.OnVaultSaveTemplate != nil {
+					s.OnVaultSaveTemplate(entry.RelPath)
+				}
+				m.Separator()
+			}
+			if m.Item("重命名").Chosen() {
+				s.renamingRelPath = node.RelPath
+				s.renameDraft = node.Name
+			}
+			if m.Item("删除").Chosen() && s.OnVaultDelete != nil {
+				s.OnVaultDelete(node.RelPath)
+			}
+		})
+	})
+}
+
 func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, activePane *PaneNode, activeTab *WorkspaceTab) {
 	if activePane == nil {
 		s.MobileTabSwitcherOpen = false
 		return
 	}
+	safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
 	overlay := ui.Column(c.Key("mb-tab-switcher")).Absolute().Fill().
-		Padding(float32(tok.Spacing16), float32(tok.Spacing16)).
+		Padding(float32(tok.Spacing16)+safeTop, float32(tok.Spacing16)+safeRight, float32(tok.Spacing16)+safeBottom, float32(tok.Spacing16)+safeLeft).
 		Gap(float32(tok.Spacing12)).
 		Transition(theme.FloatingBarTransition())
 	theme.ApplyPanelGlass(overlay, tok, 0.35)

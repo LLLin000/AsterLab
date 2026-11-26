@@ -11,6 +11,7 @@ import (
 	"github.com/oneo-me/onevra/source/shells/sidebar"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 type hotkeySpec struct {
@@ -56,6 +57,7 @@ func (s *Shell) ensureSettingsDefaults() {
 	if s.DefaultExcessPct == 0 {
 		s.DefaultExcessPct = 10
 	}
+	s.ensureSyncDefaults()
 	s.EnsureMobileDefaults()
 	if s.Hotkeys == nil {
 		s.Hotkeys = map[string]string{}
@@ -64,6 +66,35 @@ func (s *Shell) ensureSettingsDefaults() {
 		if strings.TrimSpace(s.Hotkeys[spec.ID]) == "" {
 			s.Hotkeys[spec.ID] = spec.Default
 		}
+	}
+}
+
+func (s *Shell) ensureSyncDefaults() {
+	if !s.syncPrefsInited {
+		s.syncPrefsInited = true
+		if s.SyncSettings.ImagePolicy == "" && s.SyncSettings.ImageThresholdMB == 0 && s.SyncSettings.Endpoint == "" && !s.SyncSettings.Enabled {
+			s.SyncSettings.WiFiOnlyOriginals = true
+		}
+		if s.SyncSettings.AutoIntervalMin == 0 && s.SyncSettings.Endpoint == "" && !s.SyncSettings.Enabled {
+			s.SyncSettings.AutoIntervalMin = 5
+		}
+		if strings.TrimSpace(s.SyncSettings.RemotePath) == "" {
+			s.SyncSettings.RemotePath = "/AsterLab"
+		}
+	}
+	s.SyncSettings.ImagePolicy = NormalizeImagePolicy(s.SyncSettings.ImagePolicy)
+	switch s.SyncSettings.ImageThresholdMB {
+	case 1, 2, 5, 10:
+	default:
+		s.SyncSettings.ImageThresholdMB = 2
+	}
+}
+
+func (s *Shell) saveSyncSettings() {
+	s.ensureSyncDefaults()
+	s.notifySettingsChanged()
+	if s.OnSaveSyncSettings != nil {
+		s.OnSaveSyncSettings()
 	}
 }
 
@@ -325,6 +356,23 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 							})
 						},
 					},
+					{
+						ID:          "vault-backup-zip",
+						Title:       "整库备份与恢复",
+						Description: "导出包含全部实验、附件与库存台账的 .zip 备份，或从备份压缩包恢复整库",
+						Keywords:    []string{"backup", "restore", "zip", "备份", "恢复", "整库", "导出"},
+						Stacked:     true,
+						Build: func(c *ui.Context) {
+							ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								if components.Button(c, "导出整库 .zip 备份", components.ButtonSecondary).Clicked() && s.OnVaultBackupZip != nil {
+									s.OnVaultBackupZip()
+								}
+								if components.Button(c, "从 .zip 恢复整库", components.ButtonOutline).Clicked() && s.OnVaultRestoreZip != nil {
+									s.OnVaultRestoreZip()
+								}
+							})
+						},
+					},
 				},
 			},
 		},
@@ -369,6 +417,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						}
 					})
 					if sel.Trigger.Changed() {
+						mygo.Haptics.Selection()
 						s.notifySettingsChanged()
 					}
 				},
@@ -395,6 +444,58 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						s.MobileDockForceNav = false
 						s.notifySettingsChanged()
 					}
+				},
+			},
+			components.SettingsItem{
+				ID:          "mobile-toolbar-customize",
+				Title:       "自定义移动端编辑工具栏",
+				Description: "调整键盘上方工具栏按钮的显示与排列顺序",
+				Keywords:    []string{"toolbar", "customize", "order", "visible", "工具栏", "排序", "显隐", "移动端"},
+				Stacked:     true,
+				Build: func(c *ui.Context) {
+					specs := s.MobileToolbarOrderedSpecs()
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							components.Text(c, fmt.Sprintf("共 %d 项操作，可开关显隐并上下排序", len(specs))).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
+							if components.Button(c, "恢复默认工具栏", components.ButtonGhost).Clicked() {
+								mygo.Haptics.Selection()
+								s.ResetMobileToolbarConfig()
+							}
+						})
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+							for idx, spec := range specs {
+								idx := idx
+								spec := spec
+								vis := s.IsMobileToolbarActionVisible(spec.ID)
+								ui.Row(c.Key("mb-tb-cfg-"+spec.ID)).FillWidth().AlignItems(ui.Center).
+									Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+									Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+									Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Icon(c, spec.Icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
+									components.Text(c, spec.Label).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+										SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+									components.Badge(c, spec.Group, components.BadgeOptions{Tone: components.BadgeNeutral})
+									upBtn := components.IconButton(c.Key("mb-tb-up-"+spec.ID), lucide.ChevronUp(), "上移 "+spec.Label, components.IconButtonCompact).
+										Disabled(idx == 0)
+									if upBtn.Clicked() {
+										mygo.Haptics.Selection()
+										s.MoveMobileToolbarAction(spec.ID, -1)
+									}
+									dnBtn := components.IconButton(c.Key("mb-tb-dn-"+spec.ID), lucide.ChevronDown(), "下移 "+spec.Label, components.IconButtonCompact).
+										Disabled(idx == len(specs)-1)
+									if dnBtn.Clicked() {
+										mygo.Haptics.Selection()
+										s.MoveMobileToolbarAction(spec.ID, 1)
+									}
+									if components.Switch(c.Key("mb-tb-vis-"+spec.ID), &vis, "显示 "+spec.Label, components.SwitchOptions{HideLabel: true}).Changed() {
+										mygo.Haptics.Selection()
+										s.SetMobileToolbarActionVisible(spec.ID, vis)
+									}
+								})
+							}
+						})
+					})
 				},
 			},
 		)
@@ -889,11 +990,403 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 		},
 	}
 
+	syncCat := s.buildSyncSettingsCategory(c, tok)
+
 	return []components.SettingsCategory{
 		vaultCat,
+		syncCat,
 		appearanceCat,
 		editorCat,
 		hotkeysCat,
 		aboutCat,
+	}
+}
+
+func (s *Shell) buildSyncSettingsCategory(c *ui.Context, tok theme.Tokens) components.SettingsCategory {
+	intervalLabels := map[int]string{
+		0:  "仅手动",
+		1:  "1 分钟",
+		5:  "5 分钟",
+		15: "15 分钟",
+		30: "30 分钟",
+	}
+	intervalLabel := intervalLabels[s.SyncSettings.AutoIntervalMin]
+	if intervalLabel == "" {
+		intervalLabel = fmt.Sprintf("%d 分钟", s.SyncSettings.AutoIntervalMin)
+	}
+
+	policyMode := NormalizeImagePolicy(s.SyncSettings.ImagePolicy)
+	renderPillChoice := func(keyID, label string, active bool, onClick func()) {
+		bg := tok.Elevated
+		fg := tok.TextMuted
+		bd := tok.Border
+		if active {
+			bg = tok.AccentSoftBg
+			fg = tok.Text
+			bd = tok.BorderSelected
+		}
+		btn := ui.ButtonBase(c.Key(keyID)).
+			Label(label).
+			Shrink(0).
+			Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+			Radius(float32(tok.ControlRadius)).
+			Background(bg).
+			Border(1, bd)
+		theme.ApplyTactilePress(btn)
+		btn.Children(func() {
+			txt := ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+			if active {
+				txt.Bold()
+			}
+		})
+		if btn.Clicked() {
+			onClick()
+		}
+	}
+
+	groups := []components.SettingsGroup{
+		{
+			ID:    "sync-webdav",
+			Title: "WebDAV 多端同步",
+			Items: []components.SettingsItem{
+				{
+					ID:          "sync-enabled",
+					Title:       "启用多端同步",
+					Description: "基于单文件清单索引增量同步，避免目录遍历触发限流",
+					Keywords:    []string{"sync", "webdav", "同步", "启用", "多端"},
+					Build: func(c *ui.Context) {
+						if components.Switch(c, &s.SyncSettings.Enabled, "启用多端同步", components.SwitchOptions{HideLabel: true}).Changed() {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:       "sync-status-summary",
+					Title:    "同步状态",
+					Keywords: []string{"sync", "status", "状态", "同步", "待同步"},
+					Stacked:  true,
+					Build: func(c *ui.Context) {
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								badgeText := "未启用"
+								tone := components.BadgeNeutral
+								switch {
+								case len(s.SyncConflicts) > 0:
+									badgeText = fmt.Sprintf("存在 %d 项冲突", len(s.SyncConflicts))
+									tone = components.BadgeWarning
+								case s.SyncState.Status == "error":
+									badgeText = "同步异常"
+									tone = components.BadgeDanger
+								case s.SyncState.Status == "syncing":
+									badgeText = "同步中…"
+									tone = components.BadgeAccent
+								case s.SyncState.Status == "synced":
+									badgeText = "已同步"
+									tone = components.BadgeSuccess
+								case s.SyncSettings.Enabled:
+									badgeText = "已就绪"
+									tone = components.BadgeSuccess
+								}
+								kit.Badge(c, badgeText, components.BadgeOptions{Tone: tone})
+								if strings.TrimSpace(s.SyncState.LastSyncText) != "" {
+									components.Text(c, "上次同步: "+s.SyncState.LastSyncText).
+										FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+								}
+								if s.SyncState.PendingCount > 0 {
+									kit.Badge(c, fmt.Sprintf("待同步 %d 项", s.SyncState.PendingCount), components.BadgeOptions{Tone: components.BadgeWarning})
+								}
+							})
+							if strings.TrimSpace(s.SyncState.ErrorText) != "" {
+								kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, s.SyncState.ErrorText, "重试", func() {
+									s.saveSyncSettings()
+									if s.OnTriggerSyncNow != nil {
+										s.OnTriggerSyncNow()
+									}
+								})
+							}
+						})
+					},
+				},
+				{
+					ID:          "sync-endpoint",
+					Title:       "服务器地址 (WebDAV)",
+					Description: "支持坚果云、群晖 NAS、Nextcloud 与 Alist；识别坚果云后自动启用防限流保护",
+					Keywords:    []string{"webdav", "url", "endpoint", "nutstore", "坚果云", "群晖", "nextcloud"},
+					Stacked:     true,
+					Build: func(c *ui.Context) {
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+							prev := s.SyncSettings.Endpoint
+							ui.Box(c.Key("sync-endpoint-box")).FillWidth().Children(func() {
+								components.TextBox(c, &s.SyncSettings.Endpoint, components.TextBoxOptions{LeadingIcon: lucide.Cloud()}).
+									Label("WebDAV 服务器地址").
+									Placeholder("https://dav.jianguoyun.com/dav/")
+							})
+							if s.SyncSettings.Endpoint != prev {
+								s.saveSyncSettings()
+							}
+							if s.SyncSettings.IsNutstore() {
+								ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+									kit.Badge(c, "坚果云自动限流保护 · 单线程并发", components.BadgeOptions{
+										Tone: components.BadgeAccent,
+										Icon: lucide.ShieldCheck(),
+									})
+								})
+							}
+						})
+					},
+				},
+				{
+					ID:       "sync-username",
+					Title:    "用户名",
+					Keywords: []string{"username", "account", "账号", "用户名"},
+					Stacked:  true,
+					Build: func(c *ui.Context) {
+						prev := s.SyncSettings.Username
+						ui.Box(c.Key("sync-username-box")).FillWidth().Children(func() {
+							components.TextBox(c, &s.SyncSettings.Username, components.TextBoxOptions{}).
+								Label("WebDAV 用户名").
+								Placeholder("账号邮箱或用户名")
+						})
+						if s.SyncSettings.Username != prev {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:       "sync-password",
+					Title:    "应用密码",
+					Keywords: []string{"password", "secret", "token", "密码", "应用密码"},
+					Stacked:  true,
+					Build: func(c *ui.Context) {
+						prev := s.SyncSettings.Password
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Box(c.Key("sync-password-box")).Grow(1).MinWidth(0).Children(func() {
+								tb := components.TextBox(c, &s.SyncSettings.Password, components.TextBoxOptions{LeadingIcon: lucide.Lock()}).
+									Label("WebDAV 应用密码").
+									Placeholder("输入 WebDAV 专用应用密码")
+								if !s.syncPasswordVisible {
+									tb.Password()
+								}
+							})
+							eyeIcon := lucide.Eye()
+							eyeLabel := "显示密码"
+							if s.syncPasswordVisible {
+								eyeIcon = lucide.EyeOff()
+								eyeLabel = "隐藏密码"
+							}
+							if components.IconButton(c.Key("sync-password-eye"), eyeIcon, eyeLabel, components.IconButtonCompact).Clicked() {
+								s.syncPasswordVisible = !s.syncPasswordVisible
+							}
+						})
+						if s.SyncSettings.Password != prev {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:       "sync-remote-path",
+					Title:    "远端目录路径",
+					Keywords: []string{"remote", "path", "目录", "远端"},
+					Stacked:  true,
+					Build: func(c *ui.Context) {
+						prev := s.SyncSettings.RemotePath
+						ui.Box(c.Key("sync-remote-path-box")).FillWidth().Children(func() {
+							components.TextBox(c, &s.SyncSettings.RemotePath, components.TextBoxOptions{}).
+								Label("远端同步目录").
+								Placeholder("/AsterLab")
+						})
+						if s.SyncSettings.RemotePath != prev {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:       "sync-interval",
+					Title:    "自动同步间隔",
+					Keywords: []string{"interval", "auto", "同步间隔", "频率"},
+					Build: func(c *ui.Context) {
+						opts := []int{0, 1, 5, 15, 30}
+						sel := components.Select(c, &s.SyncSettings.AutoIntervalMin)
+						sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
+							components.Text(c, intervalLabel).SingleLine()
+						})
+						sel.Popup(func(ui.Element) {
+							for _, opt := range opts {
+								opt := opt
+								sel.Item(opt).Children(func() {
+									components.Text(c, intervalLabels[opt]).SingleLine()
+								})
+							}
+						})
+						if sel.Trigger.Changed() {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:       "sync-actions",
+					Title:    "连接测试与手动同步",
+					Keywords: []string{"test", "sync", "测试连接", "立即同步"},
+					Stacked:  true,
+					Build: func(c *ui.Context) {
+						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							if components.Button(c, "测试连接", components.ButtonOutline).Clicked() {
+								s.saveSyncSettings()
+								if s.OnTestSyncConnection != nil {
+									s.OnTestSyncConnection()
+								}
+							}
+							syncNowBtn := components.Button(c, "立即同步", components.ButtonPrimary)
+							if s.SyncState.Status == "syncing" {
+								syncNowBtn.Disabled(true)
+							}
+							if syncNowBtn.Clicked() {
+								s.saveSyncSettings()
+								if s.OnTriggerSyncNow != nil {
+									s.OnTriggerSyncNow()
+								}
+							}
+							if components.Button(c, "保存设置", components.ButtonSecondary).Clicked() {
+								s.saveSyncSettings()
+							}
+						})
+					},
+				},
+			},
+		},
+		{
+			ID:    "sync-image-policy",
+			Title: "科学图像双轨同步策略",
+			Items: []components.SettingsItem{
+				{
+					ID:       "sync-image-policy-banner",
+					Title:    "科学原图零损原则",
+					Keywords: []string{"image", "original", "preview", "科学原图", "预览图", "双轨"},
+					Content: func(c *ui.Context) {
+						kit.InlineBanner(c, tok, lucide.Images(), kit.BannerInfo, "上传端始终保留 100% 科学原图，手机端按阈值拉取预览图", "", nil)
+					},
+				},
+				{
+					ID:          "sync-image-policy-mode",
+					Title:       "手机端图像拉取策略",
+					Description: "控制远端高清显微/电泳原图同步到移动端时的本地拉取方式",
+					Keywords:    []string{"preview_only", "threshold", "always_original", "仅同步预览图", "阈值内拉原图", "始终拉原图"},
+					Stacked:     true,
+					Build: func(c *ui.Context) {
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								for _, opt := range []struct {
+									key   string
+									label string
+								}{
+									{SyncImagePolicyPreviewOnly, "仅同步预览图"},
+									{SyncImagePolicyThreshold, "阈值内拉原图 (1/2/5/10 MB)"},
+									{SyncImagePolicyAlwaysOriginal, "始终拉原图"},
+								} {
+									opt := opt
+									renderPillChoice("sync-pol-"+opt.key, opt.label, policyMode == opt.key, func() {
+										s.SyncSettings.ImagePolicy = opt.key
+										s.saveSyncSettings()
+									})
+								}
+							})
+							if policyMode == SyncImagePolicyThreshold {
+								ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+									components.Text(c, "自动拉取原图阈值:").
+										FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Shrink(0)
+									for _, mb := range []int{1, 2, 5, 10} {
+										mb := mb
+										lbl := fmt.Sprintf("%d MB", mb)
+										renderPillChoice(fmt.Sprintf("sync-thresh-%d", mb), lbl, s.SyncSettings.ImageThresholdMB == mb, func() {
+											s.SyncSettings.ImageThresholdMB = mb
+											s.saveSyncSettings()
+										})
+									}
+								})
+							}
+						})
+					},
+				},
+				{
+					ID:          "sync-wifi-only-originals",
+					Title:       "仅 Wi-Fi 自动拉原图",
+					Description: "蜂窝移动网络下仅拉取轻量预览图，避免流量消耗",
+					Keywords:    []string{"wifi", "cellular", "流量", "原图"},
+					Build: func(c *ui.Context) {
+						if components.Switch(c, &s.SyncSettings.WiFiOnlyOriginals, "切换仅 Wi-Fi 自动拉原图", components.SwitchOptions{HideLabel: true}).Changed() {
+							s.saveSyncSettings()
+						}
+					},
+				},
+				{
+					ID:          "sync-originals-cache",
+					Title:       "本地原图缓存空间",
+					Description: "释放仅删除本机缓存的高清原图，远端与上传端 100% 原图不受影响",
+					Keywords:    []string{"cache", "clear", "释放", "缓存", "原图"},
+					Stacked:     true,
+					Build: func(c *ui.Context) {
+						label := fmt.Sprintf("本地原图缓存 %.1f MB · 一键释放", s.SyncState.LocalOriginalsCacheMB)
+						if components.Button(c, label, components.ButtonSecondary).Clicked() && s.OnClearOriginalsCache != nil {
+							s.OnClearOriginalsCache()
+						}
+					},
+				},
+			},
+		},
+	}
+
+	if len(s.SyncConflicts) > 0 {
+		conflictItems := make([]components.SettingsItem, 0, len(s.SyncConflicts))
+		for idx, cf := range s.SyncConflicts {
+			idx := idx
+			cf := cf
+			conflictItems = append(conflictItems, components.SettingsItem{
+				ID:       fmt.Sprintf("sync-conflict-%d", idx),
+				Title:    cf.RelPath,
+				Keywords: []string{"conflict", "冲突", cf.RelPath, cf.ConflictPath},
+				Stacked:  true,
+				Build: func(c *ui.Context) {
+					ui.Column(c.Key(fmt.Sprintf("sync-conflict-row-%d", idx))).FillWidth().
+						Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+						Radius(float32(tok.ControlRadius)).
+						Background(tok.WarningBg).
+						Border(1, tok.Warning).
+						Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+							components.Text(c, "冲突副本: "+cf.ConflictPath).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.WarningText).SingleLine().Ellipsis("…")
+							if strings.TrimSpace(cf.DetectedAt) != "" {
+								components.Text(c, "检测时间: "+cf.DetectedAt).
+									FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+							}
+						})
+						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							if components.Button(c, "保留本地", components.ButtonSecondary).Clicked() && s.OnResolveSyncConflict != nil {
+								s.OnResolveSyncConflict(cf.RelPath, cf.ConflictPath, "keep_local")
+							}
+							if components.Button(c, "采用远端", components.ButtonOutline).Clicked() && s.OnResolveSyncConflict != nil {
+								s.OnResolveSyncConflict(cf.RelPath, cf.ConflictPath, "use_remote")
+							}
+							if components.Button(c, "打开副本", components.ButtonGhost).Clicked() && s.OnResolveSyncConflict != nil {
+								s.OnResolveSyncConflict(cf.RelPath, cf.ConflictPath, "open_copy")
+							}
+						})
+					})
+				},
+			})
+		}
+		groups = append(groups, components.SettingsGroup{
+			ID:    "sync-conflicts",
+			Title: "冲突副本处理",
+			Items: conflictItems,
+		})
+	}
+
+	return components.SettingsCategory{
+		ID:      "sync",
+		Title:   "多端同步",
+		Section: "工作区",
+		Icon:    lucide.CloudSync(),
+		Groups:  groups,
 	}
 }

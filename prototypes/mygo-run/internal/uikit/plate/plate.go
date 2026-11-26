@@ -3,12 +3,17 @@ package plate
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
+	"github.com/oneo-me/onevra/source/components"
+	"github.com/oneo-me/onevra/source/icons/lucide"
 
 	"asterlab-mygo-prototype/internal/theme"
 )
@@ -23,6 +28,15 @@ type WellState struct {
 	Ambiguous bool
 }
 
+// TouchMode selects how touch/pointer interaction behaves inside the mobile plate sheet.
+type TouchMode uint8
+
+const (
+	TouchModeTap    TouchMode = iota // 点选
+	TouchModeBrush                   // 涂抹框选
+	TouchModeRowCol                  // 按行·按列快选
+)
+
 // InteractionState persists pointer drag-marquee and hover state across frames
 // for interactive inline, overlay, and tool plates.
 type InteractionState struct {
@@ -36,6 +50,12 @@ type InteractionState struct {
 	baseSelected    []string
 	hoverWell       string
 	stickyHoverWell string
+
+	TouchMode       TouchMode
+	RowColAxis      string // ""|"row"|"col"
+	MobileSheetOpen bool
+	ZoomState       mobile.ZoomState
+	brushDragDummy  ui.Point
 }
 
 type DilutionColumn struct {
@@ -52,24 +72,30 @@ type DilutionOverlay struct {
 }
 
 type Props struct {
-	Wells        map[string]WellState
-	SelectedIDs  []string
-	OnSelect     func(wellIDs []string)
-	Interactive  bool
-	Rows         int
-	Cols         int
-	Topology     string
-	Roles        map[string]string
-	ColorBy      string // "group" | "sample" | "factor" | "replicate" | "role"
-	FactorKey    string
-	Blind        bool
-	GroupIndex   map[string]int
-	GroupLabels  map[string]string
-	ExcludedIDs  map[string]bool
-	HideFooter   bool
-	Zoom         float32
-	State        *InteractionState
-	DilutionFlow *DilutionOverlay
+	Wells            map[string]WellState
+	SelectedIDs      []string
+	OnSelect         func(wellIDs []string)
+	Interactive      bool
+	Rows             int
+	Cols             int
+	Topology         string
+	Roles            map[string]string
+	ColorBy          string // "group" | "sample" | "factor" | "replicate" | "role"
+	FactorKey        string
+	Blind            bool
+	GroupIndex       map[string]int
+	GroupLabels      map[string]string
+	ExcludedIDs      map[string]bool
+	HideFooter       bool
+	Zoom             float32
+	State            *InteractionState
+	DilutionFlow     *DilutionOverlay
+	MobileCompact    bool
+	FullscreenSheet  bool
+	OnOpenFullscreen func()
+	TouchMode        *TouchMode
+	OnAssignGroup    func(groupID string, wellIDs []string)
+	OnClearWells     func(wellIDs []string)
 }
 
 const (
@@ -447,6 +473,67 @@ func nextSelection(selected map[string]bool, id string, additive bool) map[strin
 	return next
 }
 
+func isNarrowPlateViewport(c *ui.Context) bool {
+	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+		return true
+	}
+	w, _ := c.Size()
+	return w > 0 && w < 680
+}
+
+func shouldRenderCompactMobileCard(c *ui.Context, props Props, rows, cols int, mini bool) bool {
+	if props.FullscreenSheet || props.HideFooter || mini {
+		return false
+	}
+	if props.Topology == "rack_1d" {
+		return false
+	}
+	if cols < 6 && rows*cols < 24 {
+		return false
+	}
+	return props.MobileCompact || isNarrowPlateViewport(c)
+}
+
+type mobilePlateStateKey struct {
+	rows, cols int
+	topology   string
+}
+
+func plateGeometryLabel(rows, cols int, topology string) string {
+	switch strings.TrimSpace(topology) {
+	case "dish":
+		return fmt.Sprintf("%d 区培养皿 · %d×%d", rows*cols, rows, cols)
+	case "rack_1d":
+		return fmt.Sprintf("%d 联管 / 泳道", rows*cols)
+	case "cohort":
+		return fmt.Sprintf("%d×%d 队列", rows, cols)
+	default:
+		return fmt.Sprintf("%d 孔板 · %d×%d", rows*cols, rows, cols)
+	}
+}
+
+// ComputeFullscreenFitZoom returns a zoom factor so the entire plate fits cleanly
+// inside a mobile sheet viewport at 1x Zoomable scale before two-finger pinching.
+func ComputeFullscreenFitZoom(viewportW float32, rows, cols int, topology string, t theme.Tokens) float32 {
+	if viewportW <= 0 {
+		return 1
+	}
+	cellW, _, gap := AdaptiveMetrics(rows, cols, topology, 1)
+	naturalW := float32(t.Spacing24) + float32(cols)*cellW + float32(max(0, cols-1))*gap + float32(t.Spacing24)
+	availW := viewportW - float32(t.Spacing32)
+	if availW <= 0 || naturalW <= 0 {
+		return 1
+	}
+	if naturalW <= availW {
+		return 1
+	}
+	z := availW / naturalW
+	if z < 0.55 {
+		z = 0.55
+	}
+	return z
+}
+
 // View renders the plate. Drag-rectangle selection is not implemented:
 // MyGo exposes no pointer-coordinate API for a marquee without a separate model.
 // Click selects one well; clicking it again clears it. Shift+click toggles a well in the selection.
@@ -463,6 +550,23 @@ func View(c *ui.Context, props Props) {
 	isSingleDish := isDish && !isDishMatrix
 	cellW, cellH, gap := AdaptiveMetrics(rows, cols, props.Topology, props.Zoom)
 	mini := !props.Interactive && props.Zoom > 0 && props.Zoom < 0.75
+	selected := selectedSet(props)
+	legend := ComputeLegend(props, dark)
+
+	if shouldRenderCompactMobileCard(c, props, rows, cols, mini) {
+		st := props.State
+		if st == nil {
+			stPtr := ui.Local(c.Root(), mobilePlateStateKey{rows, cols, props.Topology}, func() *InteractionState {
+				return &InteractionState{}
+			})
+			st = *stPtr
+		}
+		renderCompactMobileCard(c, props, rows, cols, legend, selected, st, t)
+		if props.OnOpenFullscreen == nil {
+			renderMobilePlateSheet(c, props, rows, cols, legend, st, t, dark)
+		}
+		return
+	}
 	labelSize := float32(t.TextMeta)
 	leftLabel := float32(t.Spacing24)
 	topLabel := float32(t.Spacing16)
@@ -497,8 +601,6 @@ func View(c *ui.Context, props Props) {
 	gridH := float32(rows)*cellH + float32(rows-1)*gap
 	width := leftLabel + gridW + dishPad*2 + float32(t.Spacing4)
 	height := dilHeaderH + topLabel + gridH + dishPad*2 + footerPad
-	selected := selectedSet(props)
-	legend := ComputeLegend(props, dark)
 	legendCounts := make(map[string]int, len(legend))
 	legendColors := make(map[string]ui.Color, len(legend))
 	legendOrder := make([]string, 0, len(legend))
@@ -559,8 +661,14 @@ func View(c *ui.Context, props Props) {
 			st.suppressClick = false
 			st.hoverWell = ""
 
+			touchActive := props.FullscreenSheet || props.TouchMode != nil
+			activeMode := st.TouchMode
+			if props.TouchMode != nil {
+				activeMode = *props.TouchMode
+			}
+
 			// UI-02: Place color legend cleanly in the top-right above the plate/dish so it never overlaps the dish rim.
-			if len(legendOrder) > 0 {
+			if len(legendOrder) > 0 && !props.FullscreenSheet {
 				ui.Row(c).FillWidth().Wrap().Justify(ui.End).Gap(float32(t.Spacing8)).AlignItems(ui.Center).Children(func() {
 					for _, label := range legendOrder {
 						dispLbl := formatPlateSuperLabel(label)
@@ -625,6 +733,47 @@ func View(c *ui.Context, props Props) {
 				}
 				notify(out)
 			}
+			toggleBatchSelection := func(ids []string) {
+				allSelected := len(ids) > 0
+				for _, id := range ids {
+					if !selected[id] {
+						allSelected = false
+						break
+					}
+				}
+				next := make(map[string]bool, len(selected)+len(ids))
+				for id := range selected {
+					next[id] = true
+				}
+				if allSelected {
+					for _, id := range ids {
+						delete(next, id)
+					}
+				} else {
+					for _, id := range ids {
+						next[id] = true
+					}
+				}
+				out := make([]string, 0, len(next))
+				for id := range next {
+					out = append(out, id)
+				}
+				notify(out)
+			}
+			rowWellIDs := func(rIdx int) []string {
+				ids := make([]string, 0, cols)
+				for cc := 0; cc < cols; cc++ {
+					ids = append(ids, wellID(rIdx, cc))
+				}
+				return ids
+			}
+			colWellIDs := func(cIdx int) []string {
+				ids := make([]string, 0, rows)
+				for rr := 0; rr < rows; rr++ {
+					ids = append(ids, wellID(rr, cIdx))
+				}
+				return ids
+			}
 			applyMarquee := func() {
 				x0, y0 := st.dragStart.X, st.dragStart.Y
 				x1, y1 := st.dragLast.X, st.dragLast.Y
@@ -668,11 +817,13 @@ func View(c *ui.Context, props Props) {
 								})
 							})
 							if hdrBtn.Clicked() && !st.dragging && !suppressGridClick {
-								ids := make([]string, 0, rows)
-								for r := 0; r < rows; r++ {
-									ids = append(ids, wellID(r, cIdx))
+								ids := colWellIDs(cIdx)
+								if touchActive {
+									toggleBatchSelection(ids)
+									mygo.Haptics.Selection()
+								} else {
+									mergeSelect(ids, hdrBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 								}
-								mergeSelect(ids, hdrBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 							}
 						}
 					})
@@ -687,11 +838,13 @@ func View(c *ui.Context, props Props) {
 								})
 							})
 							if rBtn.Clicked() && !st.dragging && !suppressGridClick {
-								ids := make([]string, 0, cols)
-								for cc := 0; cc < cols; cc++ {
-									ids = append(ids, wellID(rIdx, cc))
+								ids := rowWellIDs(rIdx)
+								if touchActive {
+									toggleBatchSelection(ids)
+									mygo.Haptics.Selection()
+								} else {
+									mergeSelect(ids, rBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 								}
-								mergeSelect(ids, rBtn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
 							}
 							for col := 0; col < cols; col++ {
 								cIdx := col
@@ -780,63 +933,106 @@ func View(c *ui.Context, props Props) {
 										Y: float32(rIdx)*(cellH+gap) + y,
 									}
 								}
-								btn = btn.HandleInput(func(event ui.InputEvent) bool {
-									if (event.Kind == ui.InputPointerDown || event.Kind == ui.InputPointerUp) && event.Button != 0 {
-										return false
+								allowBrushDrag := !touchActive || activeMode == TouchModeBrush
+								if allowBrushDrag {
+									brushExclusive := touchActive && activeMode == TouchModeBrush
+									if brushExclusive {
+										st.brushDragDummy = ui.Point{}
+										btn.Draggable(&st.brushDragDummy, ui.DraggableOptions{
+											Bounds: &ui.Rect{},
+											Rigid:  true,
+										})
 									}
-									switch event.Kind {
-									case ui.InputPointerDown:
-										pt := cellPt(event.X, event.Y)
-										st.pointerDown = true
-										st.pointerStart = ui.Point{X: event.X, Y: event.Y}
-										st.dragStart, st.dragLast = pt, pt
-										st.dragging = false
-										st.additive = event.Mods&(ui.Shift|ui.Cmd) != 0
-										st.baseSelected = append(st.baseSelected[:0], props.SelectedIDs...)
-										return false
-									case ui.InputPointerMove:
-										if !st.pointerDown {
+									btn = btn.HandleInput(func(event ui.InputEvent) bool {
+										if (event.Kind == ui.InputPointerDown || event.Kind == ui.InputPointerUp) && event.Button != 0 {
 											return false
 										}
-										dx, dy := event.X-st.pointerStart.X, event.Y-st.pointerStart.Y
-										if !st.dragging {
-											if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+										switch event.Kind {
+										case ui.InputPointerDown:
+											pt := cellPt(event.X, event.Y)
+											st.pointerDown = true
+											st.pointerStart = ui.Point{X: event.X, Y: event.Y}
+											st.dragStart, st.dragLast = pt, pt
+											st.dragging = false
+											st.additive = touchActive || event.Mods&(ui.Shift|ui.Cmd) != 0
+											st.baseSelected = append(st.baseSelected[:0], props.SelectedIDs...)
+											return brushExclusive
+										case ui.InputPointerMove:
+											if !st.pointerDown {
 												return false
 											}
-											st.dragging = true
-										}
-										st.dragLast = cellPt(event.X, event.Y)
-										applyMarquee()
-										return true
-									case ui.InputPointerUp:
-										if !st.pointerDown {
-											return false
-										}
-										st.pointerDown = false
-										if !st.dragging {
-											st.baseSelected = nil
-											return false
-										}
-										if event.Canceled {
-											notify(append([]string(nil), st.baseSelected...))
-										} else {
+											dx, dy := event.X-st.pointerStart.X, event.Y-st.pointerStart.Y
+											if !st.dragging {
+												if dx > -3 && dx < 3 && dy > -3 && dy < 3 {
+													return brushExclusive
+												}
+												st.dragging = true
+											}
 											st.dragLast = cellPt(event.X, event.Y)
 											applyMarquee()
+											return true
+										case ui.InputPointerUp:
+											if !st.pointerDown {
+												return false
+											}
+											st.pointerDown = false
+											if !st.dragging {
+												st.baseSelected = nil
+												if brushExclusive && !event.Canceled {
+													mygo.Haptics.Selection()
+													next := nextSelection(selected, id, true)
+													out := make([]string, 0, len(next))
+													for k := range next {
+														out = append(out, k)
+													}
+													notify(out)
+													return true
+												}
+												return false
+											}
+											if event.Canceled {
+												notify(append([]string(nil), st.baseSelected...))
+											} else {
+												st.dragLast = cellPt(event.X, event.Y)
+												applyMarquee()
+												if touchActive {
+													mygo.Haptics.Selection()
+												}
+											}
+											st.dragging = false
+											st.suppressClick = true
+											st.baseSelected = nil
+											return true
 										}
-										st.dragging = false
-										st.suppressClick = true
-										st.baseSelected = nil
-										return true
-									}
-									return false
-								})
+										return false
+									})
+								}
 								if btn.Clicked() && !st.dragging && !suppressGridClick {
-									next := nextSelection(selected, id, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
-									out := make([]string, 0, len(next))
-									for k := range next {
-										out = append(out, k)
+									if touchActive {
+										mygo.Haptics.Selection()
+										switch activeMode {
+										case TouchModeRowCol:
+											if st.RowColAxis == "col" {
+												toggleBatchSelection(colWellIDs(cIdx))
+											} else {
+												toggleBatchSelection(rowWellIDs(rIdx))
+											}
+										default:
+											next := nextSelection(selected, id, true)
+											out := make([]string, 0, len(next))
+											for k := range next {
+												out = append(out, k)
+											}
+											notify(out)
+										}
+									} else {
+										next := nextSelection(selected, id, btn.ClickModifiers()&(ui.Shift|ui.Cmd) != 0)
+										out := make([]string, 0, len(next))
+										for k := range next {
+											out = append(out, k)
+										}
+										notify(out)
 									}
-									notify(out)
 								}
 							}
 						})
@@ -1505,4 +1701,317 @@ func plateToSup(s string) (string, bool) {
 		}
 	}
 	return b.String(), true
+}
+
+// RenderCompactSummaryCard renders a mobile-friendly summary card with plate geometry,
+// a proportional group color bar, well counts, and a full-width action button.
+func RenderCompactSummaryCard(
+	c *ui.Context,
+	props Props,
+	rows, cols int,
+	legend []LegendItem,
+	selected map[string]bool,
+	onOpen func(),
+) {
+	t := theme.GetTokens(c.Theme())
+	totalWells := rows * cols
+	assignedWells := len(props.Wells)
+	geomLabel := plateGeometryLabel(rows, cols, props.Topology)
+
+	ui.Column(c).FillWidth().Padding(float32(t.Spacing12)).Radius(float32(t.PanelRadius)).
+		Background(t.Elevated).Border(1, t.Border).Gap(float32(t.Spacing12)).Children(func() {
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+			components.Badge(c, geomLabel, components.BadgeOptions{Tone: components.BadgeAccent})
+			ui.Text(c, fmt.Sprintf("已排 %d / %d 孔", assignedWells, totalWells)).
+				FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted)
+			if len(selected) > 0 {
+				components.Badge(c, fmt.Sprintf("已选 %d 孔", len(selected)), components.BadgeOptions{Tone: components.BadgeNeutral})
+			}
+		})
+
+		// Proportional group color bar
+		ui.Row(c).FillWidth().Height(float32(t.Spacing12)).Radius(float32(t.ControlRadius)).
+			Clip().Background(t.Surface).Border(1, t.Border).Gap(0).Children(func() {
+			sumCounts := 0
+			for _, item := range legend {
+				if item.Count > 0 {
+					sumCounts += item.Count
+					ui.Box(c).FillHeight().Grow(float32(item.Count)).Basis(0).Background(item.Color)
+				}
+			}
+			if rem := totalWells - sumCounts; rem > 0 {
+				ui.Box(c).FillHeight().Grow(float32(rem)).Basis(0).Background(t.Canvas)
+			}
+		})
+
+		if len(legend) > 0 {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+				for _, item := range legend {
+					dispLbl := formatPlateSuperLabel(item.Label)
+					ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).
+							Radius(float32(t.ControlRadius)).Background(item.Color)
+						ui.Text(c, fmt.Sprintf("%s (%d)", dispLbl, item.Count)).
+							FontSize(float32(t.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum")
+					})
+				}
+			})
+		} else {
+			ui.Text(c, "尚无孔位分组，打开全屏排板开始点选或涂抹标注").
+				FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
+		}
+
+		openBtn := components.Button(c, "全屏排板 / 读数", components.ButtonPrimary).
+			FillWidth().MinHeight(float32(t.Spacing48))
+		if openBtn.Clicked() {
+			mygo.Haptics.Selection()
+			if onOpen != nil {
+				onOpen()
+			}
+		}
+	})
+}
+
+func renderCompactMobileCard(
+	c *ui.Context,
+	props Props,
+	rows, cols int,
+	legend []LegendItem,
+	selected map[string]bool,
+	st *InteractionState,
+	t theme.Tokens,
+) {
+	_ = t
+	RenderCompactSummaryCard(c, props, rows, cols, legend, selected, func() {
+		if props.OnOpenFullscreen != nil {
+			props.OnOpenFullscreen()
+		} else if st != nil {
+			st.ZoomState.Reset()
+			st.MobileSheetOpen = true
+		}
+	})
+}
+
+// RenderTouchModeSelector renders the bottom 3-mode touch selection bar
+// (点选 / 涂抹框选 / 按行·按列快选) and optional row/column axis pill.
+func RenderTouchModeSelector(c *ui.Context, st *InteractionState, onClear func()) {
+	if st == nil {
+		return
+	}
+	t := theme.GetTokens(c.Theme())
+	modes := []struct {
+		mode  TouchMode
+		label string
+	}{
+		{TouchModeTap, "点选"},
+		{TouchModeBrush, "涂抹框选"},
+		{TouchModeRowCol, "按行·按列快选"},
+	}
+
+	ui.Column(c).FillWidth().Gap(float32(t.Spacing8)).Children(func() {
+		ui.Row(c).FillWidth().Padding(float32(t.Spacing4)).Radius(float32(t.PanelRadius)).
+			Background(t.Elevated).Border(1, t.Border).Gap(float32(t.Spacing4)).Children(func() {
+			for _, m := range modes {
+				m := m
+				active := st.TouchMode == m.mode
+				bg, fg, bd := ui.Transparent, t.TextMuted, ui.Transparent
+				if active {
+					bg, fg, bd = t.AccentSoftBg, t.Accent, t.Accent
+				}
+				btn := ui.ButtonBase(c.Key("touch-mode-"+m.label)).Label(m.label).
+					Grow(1).Basis(0).MinWidth(0).MinHeight(float32(t.Spacing48)).
+					Padding(float32(t.Spacing4), float32(t.Spacing8)).
+					Radius(float32(t.ControlRadius)).Background(bg).Border(1, bd).
+					Center().OnClick(func() {
+					st.TouchMode = m.mode
+					mygo.Haptics.Selection()
+				})
+				btn.Children(func() {
+					txt := ui.Text(c, m.label).FontSize(float32(t.TextMeta)).TextColor(fg).SingleLine()
+					if active {
+						txt.Bold()
+					}
+				})
+			}
+		})
+
+		if st.TouchMode == TouchModeRowCol {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+				ui.Text(c, "点击孔位快选方向：").FontSize(float32(t.TextMeta)).TextColor(t.TextMuted)
+				for _, ax := range []struct {
+					key, lbl string
+				}{
+					{"row", "整行"},
+					{"col", "整列"},
+				} {
+					ax := ax
+					isCur := (st.RowColAxis == "col") == (ax.key == "col")
+					variant := components.ButtonGhost
+					if isCur {
+						variant = components.ButtonSecondary
+					}
+					if components.Button(c, ax.lbl, variant).Clicked() {
+						st.RowColAxis = ax.key
+						mygo.Haptics.Selection()
+					}
+				}
+				ui.Spacer(c)
+				if onClear != nil {
+					if components.Button(c, "清空选区", components.ButtonGhost).Clicked() {
+						onClear()
+						mygo.Haptics.Light()
+					}
+				}
+			})
+		}
+	})
+}
+
+func renderMobilePlateSheet(
+	c *ui.Context,
+	props Props,
+	rows, cols int,
+	legend []LegendItem,
+	st *InteractionState,
+	t theme.Tokens,
+	dark bool,
+) {
+	if st == nil {
+		return
+	}
+	mobile.Sheet(c, &st.MobileSheetOpen, mobile.SheetOptions{
+		Detents: []float32{0.94},
+		Label:   "全屏孔板排板",
+	}, func() {
+		vw, winH := c.Size()
+		_, _, bottomSafe, _ := c.SafeArea()
+		sheetBodyH := winH*0.94 - float32(t.Spacing24) - bottomSafe
+		if sheetBodyH < float32(t.Spacing48)*6 {
+			sheetBodyH = float32(t.Spacing48) * 6
+		}
+		fitZoom := ComputeFullscreenFitZoom(vw, rows, cols, props.Topology, t)
+		maxZoom := float32(4)
+		if rows*cols > 96 {
+			maxZoom = 6
+		}
+		if st.ZoomState.Scale == 0 {
+			st.ZoomState.Scale = 1
+		}
+
+		ui.Column(c).FillWidth().Height(sheetBodyH).Padding(float32(t.Spacing12)).Gap(float32(t.Spacing8)).Children(func() {
+			// Header bar
+			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(t.Spacing4)).Children(func() {
+					ui.Text(c, plateGeometryLabel(rows, cols, props.Topology)).
+						FontSize(float32(t.TextSection)).Bold().TextColor(t.Text).SingleLine()
+					sub := fmt.Sprintf("已排 %d / %d 孔 · 已选 %d 孔", len(props.Wells), rows*cols, len(props.SelectedIDs))
+					ui.Text(c, sub).FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).SingleLine()
+				})
+				if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() {
+					st.ZoomState.Scale = max(1, st.ZoomState.Scale-0.5)
+				}
+				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
+					FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted)
+				if components.IconButton(c, lucide.ZoomIn(), "放大孔板", components.IconButtonCompact).Clicked() {
+					st.ZoomState.Scale = min(maxZoom, st.ZoomState.Scale+0.5)
+				}
+				if components.Button(c, "重置", components.ButtonGhost).Clicked() {
+					st.ZoomState.Reset()
+				}
+				doneBtn := components.Button(c, "完成", components.ButtonPrimary).MinHeight(float32(t.ButtonHeight))
+				if doneBtn.Clicked() {
+					mygo.Haptics.Light()
+					st.MobileSheetOpen = false
+				}
+			})
+
+			// Pinch-zoomable plate canvas
+			zoomBox := ui.Box(c).FillWidth().Grow(1).Basis(0).MinHeight(0).
+				Radius(float32(t.PanelRadius)).Background(t.Canvas).Border(1, t.Border).Clip()
+			zoomBox.Children(func() {
+				mobile.Zoomable(c, &st.ZoomState, mobile.ZoomOptions{
+					Min:       1,
+					Max:       maxZoom,
+					DoubleTap: 2.2,
+				}, func() {
+					ui.Box(c).Fill().Center().Padding(float32(t.Spacing8)).Children(func() {
+						sheetProps := props
+						sheetProps.FullscreenSheet = true
+						sheetProps.MobileCompact = false
+						sheetProps.Zoom = fitZoom
+						sheetProps.State = st
+						sheetProps.TouchMode = &st.TouchMode
+						View(c, sheetProps)
+					})
+				}).Fill()
+			})
+
+			// 3-mode touch selector
+			RenderTouchModeSelector(c, st, func() {
+				if props.OnSelect != nil {
+					props.OnSelect(nil)
+				}
+			})
+
+			// Thumb-friendly group assignment bar
+			if props.Interactive {
+				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+						seenGrp := map[string]bool{}
+						var groupIDs []string
+						for gid := range props.GroupLabels {
+							if gid != "" && !seenGrp[gid] {
+								seenGrp[gid] = true
+								groupIDs = append(groupIDs, gid)
+							}
+						}
+						for _, w := range props.Wells {
+							if w.Group != "" && !seenGrp[w.Group] {
+								seenGrp[w.Group] = true
+								groupIDs = append(groupIDs, w.Group)
+							}
+						}
+						sort.Strings(groupIDs)
+						for _, gid := range groupIDs {
+							gid := gid
+							lbl := gid
+							if gl := strings.TrimSpace(props.GroupLabels[gid]); gl != "" {
+								lbl = gl
+							}
+							col := GroupColorIndexed(gid, props.GroupIndex, dark)
+							chip := ui.ButtonBase(c.Key("sheet-grp-"+gid)).Label("归入分组 "+lbl).
+								MinHeight(float32(t.Spacing48)).Padding(float32(t.Spacing8), float32(t.Spacing12)).
+								Radius(float32(t.ControlRadius)).Background(t.Surface).Border(1, t.Border).
+								OnClick(func() {
+									if len(props.SelectedIDs) > 0 && props.OnAssignGroup != nil {
+										mygo.Haptics.Success()
+										props.OnAssignGroup(gid, append([]string(nil), props.SelectedIDs...))
+									}
+								})
+							chip.Children(func() {
+								ui.Row(c).AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
+									ui.Box(c).Size(float32(t.Spacing12), float32(t.Spacing12)).
+										Radius(float32(t.ControlRadius)).Background(col)
+									ui.Text(c, lbl).FontSize(float32(t.TextMeta)).Bold().TextColor(t.Text).SingleLine()
+								})
+							})
+						}
+						if len(props.SelectedIDs) > 0 {
+							if props.OnClearWells != nil {
+								clrBtn := components.Button(c, "清空所选", components.ButtonSecondary).MinHeight(float32(t.Spacing48))
+								if clrBtn.Clicked() {
+									mygo.Haptics.Light()
+									props.OnClearWells(append([]string(nil), props.SelectedIDs...))
+								}
+							}
+							deselBtn := components.Button(c, "取消选区", components.ButtonGhost).MinHeight(float32(t.Spacing48))
+							if deselBtn.Clicked() && props.OnSelect != nil {
+								props.OnSelect(nil)
+							}
+						}
+					})
+				})
+			}
+		})
+	})
 }
