@@ -111,30 +111,55 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 		}, nil
 	}
 
-	// 1. Default 4-zone Pro Camera HUD with live Auto telemetry readouts (200 / 1/100 / 4900K)
+	// 1. Minimalist 4-zone Pro Camera HUD (matching reference dark aesthetic & live Auto readouts)
 	a.openSciCamera(nil, curTab, curLD, nil)
 	sess.telemetry = liveTelem
 	settleIPhoneFrames(tt, 180)
-	assertNoHorizontalOverflow402(t, tt, "SciCameraHUDv3")
-	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_hud_v3_402x874.png")
+	assertNoHorizontalOverflow402(t, tt, "SciCameraHUDv4")
+	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_hud_v4_402x874.png")
 
-	for _, want := range []string{"DNG", "1x", "ISO·A", "200", "SS·A", "1/100", "WB·A", "4900K", "锁参"} {
+	for _, want := range []string{"DNG", "1.0×", "ISO·A", "200", "SS·A", "1/100", "WB·A", "4900K", "LOCK"} {
 		if !tt.HasText(want) {
-			t.Fatalf("expected %q in Pro Camera HUD with live Auto readouts", want)
+			t.Fatalf("expected %q in minimalist Pro Camera HUD", want)
 		}
 	}
 	if tt.HasText("角色") || tt.HasText("灰卡定白") {
 		t.Fatalf("experiment role tags must not appear inside pure Camera HUD")
 	}
 
-	// Honest ghost toggle on empty vault does NOT fake-enable ghost mode
+	// 2. Open "•••" overflow menu -> Switch controls & honest empty-vault Ghost guard
+	tt.Click("相机菜单")
+	settleIPhoneFrames(tt, 160)
+	assertNoHorizontalOverflow402(t, tt, "SciCameraMenuv4")
+	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_menu_v4_402x874.png")
+	for _, want := range []string{"网格线", "水平仪", "叠影参照", "同步至系统相册 (AsterLab)", "防频闪电网频率"} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q inside camera overflow menu", want)
+		}
+	}
+	// Toggle 叠影参照 on empty vault -> stays false + shows toast cleanly
 	tt.Click("叠影参照")
 	settleIPhoneFrames(tt, 120)
 	if sess.ghostEnabled {
 		t.Fatalf("expected ghostEnabled=false when vault has no reference photo yet")
 	}
+	// Dismiss overflow menu cleanly via tap-outside backdrop
+	tt.Click("关闭相机菜单")
+	settleIPhoneFrames(tt, 120)
+	if sess.settingsOpen {
+		t.Fatalf("expected backdrop tap to close camera menu")
+	}
 
-	// 2. Lock-What-You-See: locking preserves live ISO 200 (never jumps down to MinISO 34!)
+	// 3. Open WB drawer (aligned capsule) & verify Lock-What-You-See + EV mutual exclusion
+	tt.Click("调节 WB")
+	settleIPhoneFrames(tt, 160)
+	assertNoHorizontalOverflow402(t, tt, "SciCameraWBv4")
+	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_wb_v4_402x874.png")
+	tt.Click("5500K")
+	settleIPhoneFrames(tt, 120)
+	tt.Click("调节 WB")
+	settleIPhoneFrames(tt, 100)
+
 	tt.Click("锁定曝光与白平衡")
 	settleIPhoneFrames(tt, 120)
 	if !sess.allLocked || sess.selectedISO != 200 || sess.isoAuto || sess.shutterAuto {
@@ -142,33 +167,22 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 			sess.allLocked, sess.selectedISO, sess.isoAuto)
 	}
 
-	// OpenCamera EV-vs-Manual-Exposure mutual exclusion check
 	tt.Click("调节 EV")
-	settleIPhoneFrames(tt, 140)
-	assertNoHorizontalOverflow402(t, tt, "SciCameraEVManualv3")
-	maybeSaveIPhoneSnapshot(t, tt, "sci_camera_ev_manual_v3_402x874.png")
+	settleIPhoneFrames(tt, 120)
 	if !tt.HasText("切回自动曝光") {
-		t.Fatalf("expected EV drawer under manual exposure to show 切回自动曝光 reset button")
+		t.Fatalf("expected EV drawer under manual exposure to offer 切回自动曝光")
 	}
 	tt.Click("切回自动曝光")
 	settleIPhoneFrames(tt, 120)
 	if !sess.isoAuto || !sess.shutterAuto || sess.allLocked {
-		t.Fatalf("expected EV reset button to return to Auto exposure cleanly")
+		t.Fatalf("expected 切回自动曝光 to unlock auto exposure")
 	}
-	tt.Click("调节 EV") // close drawer
-	settleIPhoneFrames(tt, 100)
-
-	// Re-lock and set 5500K WB, then capture continuous shot
-	tt.Click("调节 WB")
-	settleIPhoneFrames(tt, 120)
-	assertNoHorizontalOverflow402(t, tt, "SciCameraWBDrawerv3")
-	tt.Click("5500K")
-	settleIPhoneFrames(tt, 120)
-	tt.Click("调节 WB")
+	tt.Click("调节 EV")
 	settleIPhoneFrames(tt, 100)
 	tt.Click("锁定曝光与白平衡")
 	settleIPhoneFrames(tt, 120)
 
+	// Capture shot
 	a.triggerSciCapture()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -183,11 +197,11 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 			sess.shotCount, sess.lastRawAbs, sess.lastPreviewAbs, sess.lastMetaAbs)
 	}
 
-	// 3. Flow A: Tap bottom-left thumbnail -> Lab Gallery floats cleanly on top of Camera
+	// 4. Flow A: Tap bottom-left thumbnail -> Lab Gallery floats cleanly on top of Camera
 	tt.Click("打开科研图库")
 	settleIPhoneFrames(tt, 220)
-	assertNoHorizontalOverflow402(t, tt, "LabGallery402v3")
-	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_v3_402x874.png")
+	assertNoHorizontalOverflow402(t, tt, "LabGallery402v4")
+	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_v4_402x874.png")
 
 	for _, want := range []string{"返回拍摄", "科研图库", "Bayer DNG", "用途标注"} {
 		if !tt.HasText(want) {
