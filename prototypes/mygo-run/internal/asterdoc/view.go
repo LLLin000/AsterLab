@@ -218,6 +218,20 @@ type View struct {
 	swipeStates              map[string]*mobile.SwipeState
 	swipeFlashTimers         map[string]time.Time
 	OnMobileOpenTimer        func()
+	cachedFootnoteSrc        string
+	cachedFootnoteDoc        *FootnoteDoc
+}
+
+func (v *View) parsedFootnotes() *FootnoteDoc {
+	if v == nil || v.Doc == nil || !HasFootnotes(v.Doc.Source) {
+		return nil
+	}
+	if v.cachedFootnoteDoc != nil && v.cachedFootnoteSrc == v.Doc.Source {
+		return v.cachedFootnoteDoc
+	}
+	v.cachedFootnoteSrc = v.Doc.Source
+	v.cachedFootnoteDoc = ParseFootnotes(v.Doc.Source)
+	return v.cachedFootnoteDoc
 }
 
 var (
@@ -333,7 +347,7 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 	// uses heading steps, so each STEP and Sub-step renders inside a TRUE continuous nested
 	// layout container with unbroken guide rails and strictly aligned indented components!
 	visualSegs := expandSegmentsForStepContainers(src, segs, stepTree, stepExcludeOff)
-	fnDoc := ParseFootnotes(src)
+	fnDoc := v.parsedFootnotes()
 	if v.footnoteAnchorY == nil {
 		v.footnoteAnchorY = map[string]float32{}
 	}
@@ -3449,7 +3463,7 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 	}
 	var fnEntry *FootnoteEntry
 	if v.mobileFootnoteSheetOpen && v.Doc != nil {
-		if fnDoc := ParseFootnotes(v.Doc.Source); fnDoc != nil {
+		if fnDoc := v.parsedFootnotes(); fnDoc != nil {
 			fnEntry = fnDoc.ByID[v.mobileFootnoteSheetID]
 		}
 		if fnEntry == nil {

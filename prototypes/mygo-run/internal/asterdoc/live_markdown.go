@@ -1321,6 +1321,34 @@ func (v *View) renderLiveMarkdownSegmentFull(
 
 	st.ReadOnly = readOnly
 	st.Placeholder = placeholder
+	// Mobile native edit-menu commands & strict ModeLab single-tap shield (zero focus/caret on single tap,
+	// while long-press Clicks>=2 still selects a word for native iOS Copy / Select All).
+	st.OnInput = func(ev ui.InputEvent) bool {
+		if readOnly && v.MobileCompact && ev.Kind == ui.InputPointerDown && ev.Clicks == 1 {
+			return true
+		}
+		if !readOnly && ev.Kind == ui.InputCommand {
+			switch ev.Text {
+			case "formatBold":
+				v.lastFocusedLiveKey = key
+				v.applyMarkdownInlineWrap("**", "**")
+				return true
+			case "formatItalic":
+				v.lastFocusedLiveKey = key
+				v.applyMarkdownInlineWrap("*", "*")
+				return true
+			case "formatCode":
+				v.lastFocusedLiveKey = key
+				v.applyMarkdownInlineWrap("`", "`")
+				return true
+			case "formatFootnote":
+				v.lastFocusedLiveKey = key
+				v.InsertFootnoteAtActiveCursor()
+				return true
+			}
+		}
+		return false
+	}
 	edTheme := liveEditorTheme(t, tok)
 	if readOnly {
 		// In strict read-only ModeLab/Read views, hide the edit caret completely.
@@ -1492,7 +1520,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			return
 		}
 		// Markdown footnote hover preview when hovering raw `[^id]` on an active line
-		if fnDoc := ParseFootnotes(v.Doc.Source); fnDoc != nil && len(fnDoc.Entries) > 0 {
+		if fnDoc := v.parsedFootnotes(); fnDoc != nil && len(fnDoc.Entries) > 0 {
 			bufText := st.Buffer.String()
 			for _, m := range reMDFootnoteRef.FindAllStringSubmatchIndex(bufText, -1) {
 				if req.Offset >= m[0] && req.Offset <= m[1] {
@@ -1678,7 +1706,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		}
 		var docFN *FootnoteDoc
 		if v.Doc != nil && HasFootnotes(v.Doc.Source) {
-			docFN = ParseFootnotes(v.Doc.Source)
+			docFN = v.parsedFootnotes()
 		}
 		fnHooks := &liveFootnoteHooks{
 			doc:      docFN,
@@ -2080,8 +2108,8 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.pendingInjectSlash = false
 		}
 		// Mobile Scheme A: Silky animated inline Tufte accordion note directly beneath the paragraph (zero heavy chrome).
-		if v.MobileCompact && strings.Contains(curBuf, "[^") && v.Doc != nil && HasFootnotes(v.Doc.Source) {
-			if mbDocFN := ParseFootnotes(v.Doc.Source); mbDocFN != nil {
+		if v.MobileCompact && strings.Contains(curBuf, "[^") && v.Doc != nil {
+			if mbDocFN := v.parsedFootnotes(); mbDocFN != nil {
 				v.renderMobileInlineFootnotes(c, tok, key, curBuf, mbDocFN)
 			}
 		}
@@ -3116,7 +3144,7 @@ func (v *View) applyMobileMentionSelection(it editor.Completion) {
 	if v.Doc != nil && v.OnChange != nil {
 		src := v.Doc.Source
 		insPos := len(src)
-		if fnDoc := ParseFootnotes(src); fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < insPos {
+		if fnDoc := v.parsedFootnotes(); fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < insPos {
 			insPos = fnDoc.TrailingDefStart
 		}
 		if nextSrc, err := ReplaceByteRange(src, insPos, insPos, it.Insert); err == nil {

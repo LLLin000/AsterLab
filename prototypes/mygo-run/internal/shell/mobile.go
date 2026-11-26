@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -68,11 +69,12 @@ type mobileExtraState struct {
 	calModeInited          bool
 	calStripPage           mobile.PageState
 	calStripInited         bool
-	canvasSwipeOffset      ui.Point
-	drawerDragOffset       ui.Point
-	scrimDragOffset        ui.Point
-	drawerDragOpened       string
-	pullRefresh            ui.RefreshState
+	canvasSwipeOffset           ui.Point
+	drawerDragOffset            ui.Point
+	drawerDragOpened            string
+	drawerSkipCloseAnim         bool
+	mobileDrawerFilterTemplates bool
+	pullRefresh                 ui.RefreshState
 	mobileSettingsDetail   bool
 	mobileSettingsLastOpen bool
 }
@@ -489,13 +491,6 @@ func (s *Shell) EnsureMobileDefaults() {
 	if s.MobilePullAction == "" {
 		s.MobilePullAction = "palette"
 	}
-	extra := s.mobileExtra()
-	if !extra.calModeInited {
-		extra.calModeInited = true
-		if s.CalendarMode == 0 {
-			s.CalendarMode = 1
-		}
-	}
 	if !s.mobilePrefsInited {
 		s.mobilePrefsInited = true
 		if !s.MobileAutoHideDock {
@@ -630,6 +625,7 @@ func (s *Shell) HandleMobilePullRefresh(c *ui.Context, el ui.Element) {
 }
 
 type mobileSwipeBackKey struct{ id string }
+type mobileSwipeBackShownKey struct{ id string }
 
 // renderMobileSwipeBackContainer wraps a full-screen mobile page in ui.Overlay with
 // native horizontal right-swipe-to-go-back physics.
@@ -645,10 +641,16 @@ func (s *Shell) renderMobileSwipeBackContainer(
 		vw = 402
 	}
 	offset := ui.Local(c.Root(), mobileSwipeBackKey{key}, func() ui.Point { return ui.Point{} })
+	lastShownX := ui.Local(c.Root(), mobileSwipeBackShownKey{key}, func() float32 { return 0 })
+	// Emit backdrop scrim BEFORE panel in Z-order so full-screen overlays keep full brightness.
+	scrimAlpha := float32(1) - max(0, min(1, (*lastShownX)/max(vw, 1)))
+	ui.Box(c.Key(key + "-scrim")).Absolute().Fill().PassThrough().
+		Background(tok.Scrim.Alpha(scrimAlpha)).
+		Transition(theme.MobileOverlayFadeTransition())
+
 	panel := ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).
 		Shadow(0, 8, 32, 0, tok.ShadowColor).
 		Transition(theme.MobilePagePushTransition())
-	var shownX float32
 	if onBack != nil {
 		panel.Draggable(offset, ui.DraggableOptions{
 			Axis:      ui.Horizontal,
@@ -657,9 +659,11 @@ func (s *Shell) renderMobileSwipeBackContainer(
 			Animation: theme.MotionPagePush,
 			Snap:      ui.Nearest(ui.Point{}, ui.Point{X: vw}),
 		})
-		shownX = panel.DragOffset().X
+		shownX := panel.DragOffset().X
+		*lastShownX = shownX
 		if !panel.Dragging() && offset.X > vw*0.45 {
 			*offset = ui.Point{}
+			*lastShownX = 0
 			mygo.Haptics.Light()
 			onBack()
 			return
@@ -668,16 +672,18 @@ func (s *Shell) renderMobileSwipeBackContainer(
 			*offset = ui.Point{}
 		}
 	}
-	scrimAlpha := float32(1) - max(0, min(1, shownX/max(vw, 1)))
-	ui.Box(c.Key(key + "-scrim")).Absolute().Fill().PassThrough().
-		Background(tok.Scrim.Alpha(scrimAlpha)).
-		Transition(theme.MobileOverlayFadeTransition())
 	panel.Children(content)
 }
 
 func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 	s.EnsureTabs()
 	s.EnsureMobileDefaults()
+	if ex := s.mobileExtra(); !ex.calModeInited {
+		ex.calModeInited = true
+		if s.CalendarMode == 0 {
+			s.CalendarMode = 1
+		}
+	}
 	s.ensureToolbarConfigLoaded()
 	tok = s.SyncThemeLook(c)
 	s.updateMobileScrollBehavior()
@@ -751,15 +757,17 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 					switch {
 					case extra.canvasSwipeOffset.X > sheetMaxW*0.5 || shownX > sheetMaxW*0.32:
 						s.MobileDrawer = "tree"
-						s.MobileDrawerProgress = 1
+						s.MobileDrawerProgress = min(1, max(0, shownX/sheetMaxW))
 						extra.canvasSwipeOffset = ui.Point{}
 						s.MobileSwipeKind = ""
+						extra.drawerSkipCloseAnim = false
 						mygo.Haptics.Light()
 					case extra.canvasSwipeOffset.X < -sheetMaxW*0.5 || shownX < -sheetMaxW*0.32:
 						s.MobileDrawer = "outline"
-						s.MobileDrawerProgress = 1
+						s.MobileDrawerProgress = min(1, max(0, (-shownX)/sheetMaxW))
 						extra.canvasSwipeOffset = ui.Point{}
 						s.MobileSwipeKind = ""
+						extra.drawerSkipCloseAnim = false
 						mygo.Haptics.Light()
 					case !bodyRoot.Transitioning():
 						s.MobileSwipeKind = ""
@@ -901,7 +909,7 @@ func (s *Shell) renderMobileGlassTopBar(c *ui.Context, tok theme.Tokens, activeT
 					s.SetActiveTabMode(ModeLab)
 				})
 			} else {
-				pillIcon("mode-edit", lucide.PenLine(), "切换到编辑态", true, func() {
+				pillIcon("mode-edit", lucide.PenLine(), "切换到编辑态", false, func() {
 					s.MobileDockForceNav = false
 					s.SetActiveTabMode(ModeEdit)
 				})
@@ -1383,24 +1391,34 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	}
 	if activeKind != "" {
 		s.mobileLastDrawerKind = activeKind
+		if s.MobileDrawer != "" {
+			extra.drawerSkipCloseAnim = false
+		}
 	}
 	targetP := float32(0)
+	anim := theme.MotionDrawer
 	if s.MobileDrawer != "" {
 		targetP = 1
 	} else if s.MobileSwipeKind != "" {
 		targetP = s.MobileDrawerProgress
+		anim = ui.Animation{Duration: time.Millisecond}
+	} else if extra.drawerSkipCloseAnim {
+		anim = ui.Animation{Duration: time.Millisecond}
 	}
 
 	animHost := ui.Box(c.Key("mb-drawer-host")).Absolute().Size(0, 0).PassThrough()
-	pAnim := animHost.AnimateTo("mb-drawer-p", targetP, theme.MotionDrawer)
+	pAnim := animHost.AnimateTo("mb-drawer-p", targetP, anim)
 	if s.MobileSwipeKind != "" {
 		pAnim = targetP
+	} else if extra.drawerSkipCloseAnim && s.MobileDrawer == "" {
+		pAnim = 0
 	}
 	if activeKind == "" && pAnim <= 0.01 {
 		s.mobileLastDrawerKind = ""
+		s.MobileDrawerProgress = 0
 		extra.drawerDragOffset = ui.Point{}
-		extra.scrimDragOffset = ui.Point{}
 		extra.drawerDragOpened = ""
+		extra.drawerSkipCloseAnim = false
 		return
 	}
 	if activeKind == "" {
@@ -1413,143 +1431,114 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	ui.Overlay(c, func() {
 		root := ui.Box(c.Key("mb-drawer-overlay")).Absolute().Fill().PassThrough().Clip()
 		root.Children(func() {
-		isLeft := activeKind == "tree"
-		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Top(0).Bottom(0).Left(-sheetMaxW).Right(-sheetMaxW)
-		var scrimDragX float32
-		if s.MobileDrawer != "" {
-			gone := -sheetMaxW
-			bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
-			if !isLeft {
-				gone = sheetMaxW
-				bounds = ui.Rect{X: 0, W: sheetMaxW}
+			isLeft := activeKind == "tree"
+			backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill()
+			if s.MobileDrawer != "" {
+				if extra.drawerDragOpened != s.MobileDrawer {
+					extra.drawerDragOffset = ui.Point{}
+					extra.drawerDragOpened = s.MobileDrawer
+				}
+				if backdrop.Clicked() {
+					s.MobileDrawer = ""
+					s.MobileDrawerProgress = 0
+					extra.drawerDragOffset = ui.Point{}
+					extra.drawerDragOpened = ""
+					extra.drawerSkipCloseAnim = false
+				}
 			}
-			if extra.drawerDragOpened != s.MobileDrawer {
-				extra.drawerDragOffset = ui.Point{}
-				extra.scrimDragOffset = ui.Point{}
-				extra.drawerDragOpened = s.MobileDrawer
-			}
-			backdrop.Draggable(&extra.scrimDragOffset, ui.DraggableOptions{
-				Axis:      ui.Horizontal,
-				Bounds:    &bounds,
-				Rigid:     true,
-				Animation: theme.MotionDrawer,
-				Snap:      ui.Nearest(ui.Point{}, ui.Point{X: gone}),
-			})
-			scrimDragX = backdrop.DragOffset().X
-			if !backdrop.Dragging() && math.Abs(float64(extra.scrimDragOffset.X-gone)) < 1.0 {
-				s.MobileDrawer = ""
-				s.MobileDrawerProgress = 0
-				extra.drawerDragOffset = ui.Point{}
-				extra.scrimDragOffset = ui.Point{}
-				extra.drawerDragOpened = ""
-				mygo.Haptics.Light()
-				return
-			}
-			if backdrop.Clicked() {
-				s.MobileDrawer = ""
-				s.MobileDrawerProgress = 0
-				extra.drawerDragOffset = ui.Point{}
-				extra.scrimDragOffset = ui.Point{}
-				extra.drawerDragOpened = ""
-			}
-		} else {
-			extra.scrimDragOffset = ui.Point{}
-		}
 
-		sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
-			Shadow(0, 8, 32, 0, tok.ShadowColor).Clip()
-		theme.ApplyPanelGlass(sheet, tok, 0.45)
-		if isLeft {
-			sheet.Left(0)
-		} else {
-			sheet.Right(0)
-		}
-
-		var sheetDragX float32
-		if s.MobileDrawer != "" {
-			gone := -sheetMaxW
-			bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
-			if !isLeft {
-				gone = sheetMaxW
-				bounds = ui.Rect{X: 0, W: sheetMaxW}
-			}
-			sheet.Draggable(&extra.drawerDragOffset, ui.DraggableOptions{
-				Axis:      ui.Horizontal,
-				Bounds:    &bounds,
-				Rigid:     true,
-				Animation: theme.MotionDrawer,
-				Snap:      ui.Nearest(ui.Point{}, ui.Point{X: gone}),
-			})
-			sheetDragX = sheet.DragOffset().X
-			if scrimDragX != 0 {
-				sheet.Translate(scrimDragX, 0)
-			}
-			if !sheet.Dragging() && math.Abs(float64(extra.drawerDragOffset.X-gone)) < 1.0 {
-				s.MobileDrawer = ""
-				s.MobileDrawerProgress = 0
-				extra.drawerDragOffset = ui.Point{}
-				extra.scrimDragOffset = ui.Point{}
-				extra.drawerDragOpened = ""
-				mygo.Haptics.Light()
-			}
-		} else {
-			sheetOffsetX := (1 - pAnim) * sheetMaxW
+			sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
+				Shadow(0, 8, 32, 0, tok.ShadowColor).Clip()
+			theme.ApplyPanelGlass(sheet, tok, 0.45)
 			if isLeft {
-				sheetOffsetX = -(1 - pAnim) * sheetMaxW
-			}
-			sheet.Translate(sheetOffsetX, 0)
-		}
-		dragProgress := float32(math.Min(1, (math.Abs(float64(sheetDragX))+math.Abs(float64(scrimDragX)))/float64(max(sheetMaxW, 1))))
-		backdrop.Background(tok.Scrim.Alpha(max(0, pAnim*(1-dragProgress))))
-
-		safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
-		t := c.Theme()
-		sheet.Children(func() {
-			if isLeft {
-				// Left Drawer: compact header + clipped scrollable file tree + 3-tier bottom control island.
-				ui.Row(c).FillWidth().
-					Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
-					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-					ui.Icon(c, lucide.FolderOpen()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-					components.Text(c, "实验库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
-					if components.IconButton(c.Key("mb-left-close"), lucide.X(), "关闭实验库抽屉", components.IconButtonPlain).Clicked() {
-						s.MobileDrawer = ""
-						s.MobileDrawerProgress = 0
-						extra.drawerDragOffset = ui.Point{}
-						extra.drawerDragOpened = ""
-					}
-				})
-				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
-					Padding(t.Space(1), t.Space(2)+safeRight, 0, t.Space(2)+safeLeft).Children(func() {
-					s.renderMobileFileTreeScrollBody(c, tok)
-				})
-				ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
-					s.renderMobileDrawerBottomIsland(c, tok, "tree")
-				})
+				sheet.Left(0)
 			} else {
-				// Dedicated Right Companion Drawer: clean header with drawer switch + close, and full-height clipped body
-				// (NO bottom island overlapping timers or calculator controls).
-				ui.Row(c).FillWidth().
-					Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
-					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-					ui.Icon(c, lucide.Calculator()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-					components.Text(c, "步骤与速算").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
-					if components.IconButton(c.Key("mb-right-close"), lucide.X(), "关闭右侧抽屉", components.IconButtonPlain).Clicked() {
-						s.MobileDrawer = ""
-						s.MobileDrawerProgress = 0
-						extra.drawerDragOffset = ui.Point{}
-						extra.drawerDragOpened = ""
-					}
-				})
-				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-				ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
-					Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
-					s.rightDrawer(c)
-				})
+				sheet.Right(0)
 			}
+
+			var sheetDragX float32
+			if s.MobileDrawer != "" && pAnim >= 0.985 {
+				gone := -sheetMaxW
+				bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
+				if !isLeft {
+					gone = sheetMaxW
+					bounds = ui.Rect{X: 0, W: sheetMaxW}
+				}
+				sheet.Draggable(&extra.drawerDragOffset, ui.DraggableOptions{
+					Axis:      ui.Horizontal,
+					Bounds:    &bounds,
+					Rigid:     true,
+					Animation: theme.MotionDrawer,
+					Snap:      ui.Nearest(ui.Point{}, ui.Point{X: gone}),
+				})
+				sheetDragX = sheet.DragOffset().X
+				if !sheet.Dragging() && math.Abs(float64(extra.drawerDragOffset.X-gone)) < 1.0 {
+					s.MobileDrawer = ""
+					s.MobileDrawerProgress = 0
+					extra.drawerDragOffset = ui.Point{}
+					extra.drawerDragOpened = ""
+					extra.drawerSkipCloseAnim = true
+					mygo.Haptics.Light()
+					return
+				}
+			} else {
+				sheetOffsetX := (1 - pAnim) * sheetMaxW
+				if isLeft {
+					sheetOffsetX = -(1 - pAnim) * sheetMaxW
+				}
+				sheet.Translate(sheetOffsetX, 0)
+			}
+			dragProgress := float32(math.Min(1, math.Abs(float64(sheetDragX))/float64(max(sheetMaxW, 1))))
+			backdrop.Background(tok.Scrim.Alpha(max(0, pAnim*(1-dragProgress))))
+
+			safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
+			t := c.Theme()
+			sheet.Children(func() {
+				if isLeft {
+					// Left Drawer: compact header + clipped scrollable file tree + 3-tier bottom control island.
+					ui.Row(c).FillWidth().
+						Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
+						AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						ui.Icon(c, lucide.FolderOpen()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+						components.Text(c, "实验库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+						if components.IconButton(c.Key("mb-left-close"), lucide.X(), "关闭实验库抽屉", components.IconButtonPlain).Clicked() {
+							s.MobileDrawer = ""
+							s.MobileDrawerProgress = 0
+							extra.drawerDragOffset = ui.Point{}
+							extra.drawerDragOpened = ""
+						}
+					})
+					ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+					ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
+						Padding(t.Space(1), t.Space(2)+safeRight, 0, t.Space(2)+safeLeft).Children(func() {
+						s.renderMobileFileTreeScrollBody(c, tok)
+					})
+					ui.Box(c).FillWidth().Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
+						s.renderMobileDrawerBottomIsland(c, tok, "tree")
+					})
+				} else {
+					// Dedicated Right Companion Drawer: clean header with drawer switch + close, and full-height clipped body
+					// (NO bottom island overlapping timers or calculator controls).
+					ui.Row(c).FillWidth().
+						Padding(safeTop+t.Space(2), t.Space(3)+safeRight, t.Space(2), t.Space(3)+safeLeft).
+						AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+						ui.Icon(c, lucide.Calculator()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+						components.Text(c, "步骤与速算").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+						if components.IconButton(c.Key("mb-right-close"), lucide.X(), "关闭右侧抽屉", components.IconButtonPlain).Clicked() {
+							s.MobileDrawer = ""
+							s.MobileDrawerProgress = 0
+							extra.drawerDragOffset = ui.Point{}
+							extra.drawerDragOpened = ""
+						}
+					})
+					ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+					ui.Box(c).FillWidth().Grow(1).MinHeight(0).Clip().
+						Padding(0, safeRight, safeBottom, safeLeft).Children(func() {
+						s.rightDrawer(c)
+					})
+				}
+			})
 		})
-	})
 	})
 }
 
@@ -1603,45 +1592,71 @@ func (s *Shell) renderMobileDrawerBottomIsland(c *ui.Context, tok theme.Tokens, 
 			})
 		})
 
-		// Tier 2: Pill mode switcher (📁 实验列表 ↕ / 📋 步骤与速算 ↕)
+		// Tier 2: Pill view filter switcher inside Left Drawer (实验列表 ↕ / 仅看模板 ↕ — NEVER jumps to right drawer!)
+		extra := s.mobileExtra()
 		modeIcon := lucide.Folder()
 		modeText := "实验列表"
+		if extra.mobileDrawerFilterTemplates {
+			modeIcon = lucide.BookOpen()
+			modeText = "仅看模板"
+		}
 		if activeMode == "outline" {
 			modeIcon = lucide.ListTree()
 			modeText = "步骤与速算"
 		}
-		pillSwitch := ui.ButtonBase(c.Key("mb-drawer-mode-pill")).FillWidth().Height(40).
+		pillSwitch := ui.ButtonBase(c.Key("mb-drawer-mode-pill")).FillWidth().Height(float32(tok.Spacing32)+float32(tok.Spacing8)).
 			Radius(float32(tok.PillRadius)).Padding(0, float32(tok.Spacing16)).Background(tok.Elevated).Label(modeText)
 		theme.ApplyTactilePress(pillSwitch)
 		pillSwitch.Children(func() {
 			ui.Row(c).Fill().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				ui.Icon(c, modeIcon).Size(17, 17).TextColor(tok.Text)
+				ui.Icon(c, modeIcon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
 				components.Text(c, modeText).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
-				ui.Icon(c, lucide.ChevronsUpDown()).Size(14, 14).TextColor(tok.TextMuted)
+				ui.Icon(c, lucide.ChevronsUpDown()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
 			})
 		})
 		if pillSwitch.Clicked() {
+			mygo.Haptics.Selection()
 			if activeMode == "tree" {
-				s.MobileDrawer = "outline"
+				extra.mobileDrawerFilterTemplates = !extra.mobileDrawerFilterTemplates
 			} else {
 				s.MobileDrawer = "tree"
 			}
 		}
 
-		// Tier 3: Vault title/stats on left + compact Sync status pill + Standalone 40x40 Circular Glass Settings Gear on right!
+		// Tier 3: Clickable Vault Manager trigger (Vault title/stats on left) + Sync status pill + Settings Gear!
+		vaultTitle := "AsterLab"
+		if vp := strings.TrimSpace(s.VaultPathInput); vp != "" {
+			if base := filepath.Base(vp); base != "" && base != "." && base != "/" && base != `\` {
+				vaultTitle = base
+			}
+		}
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-					components.Text(c, "AsterLab").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-					ui.Icon(c, lucide.ChevronDown()).Size(14, 14).TextColor(tok.TextMuted)
+			vaultBtn := ui.ButtonBase(c.Key("mb-drawer-vault-mgr")).Grow(1).MinWidth(0).
+				Radius(float32(tok.ControlRadius)).Padding(float32(tok.Spacing4)).
+				Justify(ui.Start).Label("管理实验库 " + vaultTitle)
+			theme.ApplyTactilePress(vaultBtn)
+			vaultBtn.Children(func() {
+				ui.Column(c).FillWidth().Gap(2).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						components.Text(c, vaultTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+						ui.Icon(c, lucide.ChevronDown()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+					})
+					components.Text(c, fmt.Sprintf("%d 份实验 · %d 模板", expCnt, tplCnt)).
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
 				})
-				components.Text(c, fmt.Sprintf("%d 份实验 · %d 模板", expCnt, tplCnt)).
-					FontSize(float32(tok.TextMeta)*0.9).TextColor(tok.TextMuted).FontFeatures("tnum")
 			})
+			if vaultBtn.Clicked() {
+				mygo.Haptics.Selection()
+				s.MobileDrawer = ""
+				s.MobileDrawerProgress = 0
+				extra.drawerDragOffset = ui.Point{}
+				extra.drawerDragOpened = ""
+				s.VaultLauncherOpen = true
+			}
 
 			s.renderMobileDrawerSyncIndicator(c, tok)
 
-			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(40, 40).Radius(float32(tok.PillRadius)).Center().Label("打开设置")
+			gearBtn := ui.ButtonBase(c.Key("mb-drawer-settings")).Size(float32(tok.Spacing32)+float32(tok.Spacing8), float32(tok.Spacing32)+float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).Center().Label("打开设置")
 			theme.ApplyCapsuleGlass(gearBtn, tok, true)
 			theme.ApplyTactilePress(gearBtn)
 			gearBtn.Children(func() {
@@ -1757,9 +1772,29 @@ func (s *Shell) renderMobileFileTreeScrollBody(c *ui.Context, tok theme.Tokens) 
 }
 
 func (s *Shell) renderMobileTreeChildren(c *ui.Context, tok theme.Tokens, children []*vault.TreeNode, depth int) {
+	filterTemplates := s.mobileExtra().mobileDrawerFilterTemplates
+	var nodeHasTemplate func(n *vault.TreeNode) bool
+	nodeHasTemplate = func(n *vault.TreeNode) bool {
+		if n == nil {
+			return false
+		}
+		if !n.IsDir {
+			return n.Entry != nil && n.Entry.IsTemplate
+		}
+		for _, ch := range n.Children {
+			if nodeHasTemplate(ch) {
+				return true
+			}
+		}
+		return false
+	}
+
 	var dirs, pinnedFiles, otherFiles []*vault.TreeNode
 	for _, ch := range children {
 		if ch == nil {
+			continue
+		}
+		if filterTemplates && !nodeHasTemplate(ch) {
 			continue
 		}
 		if ch.IsDir {

@@ -129,6 +129,14 @@ jobs:
           go-version-file: prototypes/mygo-run/go.mod
           cache-dependency-path: prototypes/mygo-run/go.sum
 
+      - name: Run L1 UI Hygiene & L2 Go Mobile Quality Gates
+        working-directory: prototypes/mygo-run
+        run: |
+          set -euo pipefail
+          python3 ../../scripts/ci/check_ui_hygiene.py
+          go test ./internal/theme ./internal/asterdoc
+          go test ./internal/shell -run "TestMobile|TestObsidianMobile|TestPhotoRouteOptions"
+
       - name: Patch MyGo mobile touch UX & build patched CLI (v0.10.0)
         working-directory: prototypes/mygo-run
         run: |
@@ -151,6 +159,30 @@ jobs:
           "$RUNNER_TEMP/mygo-patched-bin" build -platform ios/simulator
           ls -lh dist/ios-simulator/
 
+      - name: Install Maestro CLI for L3 Simulator Smoke Gate
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://get.maestro.mobile.dev" | bash || true
+          if [ -d "$HOME/.maestro/bin" ]; then
+            echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Run L3 Real iOS Simulator Smoke & Screenshot Audit Gate
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find prototypes/mygo-run/dist/ios-simulator -maxdepth 2 -name '*.app' -type d | head -n 1)"
+          python3 scripts/ci/ios_sim_gate.py "$APP_PATH" \
+            --maestro-flow .maestro/ios-smoke.yaml \
+            --out-dir "$RUNNER_TEMP/sim-gate-screenshots"
+
+      - name: Upload L3 iOS Simulator gate screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-gate-screenshots-${{ github.sha }}
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/sim-gate-screenshots
+
       - name: Upload iOS Simulator .app artifact
         uses: actions/upload-artifact@v4
         with:
@@ -160,6 +192,7 @@ jobs:
 
   build-ios-unsigned:
     name: build-ios-unsigned
+    needs: [build-ios-sim]
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -204,6 +237,7 @@ jobs:
 
   build-ios-signed:
     name: build-ios-signed
+    needs: [build-ios-sim]
     runs-on: macos-latest
     timeout-minutes: 45
     if: ${{ vars.ENABLE_IOS_SIGNED == 'true' || (github.event_name == 'workflow_dispatch' && inputs.build_ios_signed) }}

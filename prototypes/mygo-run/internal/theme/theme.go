@@ -5,6 +5,7 @@ package theme
 
 import (
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,6 +14,10 @@ import (
 	"github.com/egoist/mygo/ui"
 	onevra "github.com/oneo-me/onevra/source/theme"
 )
+
+func isMobileFastSurface() bool {
+	return runtime.GOOS == "ios" || runtime.GOOS == "android"
+}
 
 // ParseHexColor parses a #RGB or #RRGGBB color attribute string cleanly.
 func ParseHexColor(raw string) (ui.Color, bool) {
@@ -413,7 +418,7 @@ func PaintCanvasBackground(el ui.Element, tok Tokens) ui.Element {
 
 // ApplyChromeGlass equips top bars with crisp frosted surface without glass-on-glass washout.
 func ApplyChromeGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
-	if tok.LiquidGlass {
+	if tok.LiquidGlass && !isMobileFastSurface() {
 		if tok.Dark {
 			// In dark mode, Avoid glass.Regular lifting dark pixels to gray; use deep smoked Clear glass.
 			return el.Material(glass.Glass{
@@ -428,40 +433,43 @@ func ApplyChromeGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
 			Interactive: interactive,
 		})
 	}
+	if tok.Dark {
+		return el.Background(ui.RGBA(20, 22, 28, 0.94))
+	}
 	return el.Background(tok.Surface.Alpha(0.95))
 }
 
-// ApplyCapsuleGlass gives Obsidian iOS 26 floating pills optimal Light/Dark Liquid Glass contrast:
-// Light uses luminous milky frost (76%); Dark uses deep smoked Clear-bezel glass + crisp specular rim
-// so bright elements underneath never bleach or blotch icons.
+// ApplyCapsuleGlass gives Obsidian iOS 26 floating pills optimal Light/Dark contrast:
+// On mobile (iOS/Android), uses single-pass lightweight frosted fill + 1px specular rim
+// so 120Hz scrolling never stalls on per-frame multi-pass Metal blur; Desktop retains Liquid Glass.
 func ApplyCapsuleGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
 	if tok.Dark {
 		el.Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.56)).
 			Border(1, ui.RGBA(255, 255, 255, 0.14))
-		if tok.LiquidGlass {
+		if tok.LiquidGlass && !isMobileFastSurface() {
 			return el.Material(glass.Glass{
 				Style:       glass.Clear,
 				Tint:        ui.RGBA(24, 26, 33, 0.84),
 				Interactive: interactive,
 			})
 		}
-		return el.Background(ui.Hex("#1e2028"))
+		return el.Background(ui.RGBA(24, 26, 34, 0.92))
 	}
 	el.Shadow(0, 8, 28, 0, ui.RGBA(0, 0, 0, 0.11)).
-		Border(1, tok.Surface.Alpha(0.95))
-	if tok.LiquidGlass {
+		Border(1, tok.Border)
+	if tok.LiquidGlass && !isMobileFastSurface() {
 		return el.Material(glass.Glass{
 			Style:       glass.Regular,
 			Tint:        tok.Surface.Alpha(0.76),
 			Interactive: interactive,
 		})
 	}
-	return el.Background(tok.Surface.Alpha(0.96))
+	return el.Background(tok.Surface.Alpha(0.95))
 }
 
-// ApplyPanelGlass applies clean sheet/drawer surfaces (deep smoked glass in dark mode to preserve full text legibility).
+// ApplyPanelGlass applies clean sheet/drawer surfaces (lightweight frosted surface on mobile).
 func ApplyPanelGlass(el ui.Element, tok Tokens, clarity float32) ui.Element {
-	if tok.LiquidGlass {
+	if tok.LiquidGlass && !isMobileFastSurface() {
 		if tok.Dark {
 			return el.Material(glass.Glass{
 				Style:   glass.Clear,
@@ -475,12 +483,15 @@ func ApplyPanelGlass(el ui.Element, tok Tokens, clarity float32) ui.Element {
 			Tint:    tok.Surface.Alpha(0.86),
 		})
 	}
-	return el.Background(tok.Surface)
+	if tok.Dark {
+		return el.Background(ui.RGBA(20, 22, 28, 0.96))
+	}
+	return el.Background(tok.Surface.Alpha(0.97))
 }
 
 // ApplyAccentGlass gives primary CTA buttons a clean tinted finish.
 func ApplyAccentGlass(el ui.Element, tok Tokens, interactive bool) ui.Element {
-	if tok.LiquidGlass {
+	if tok.LiquidGlass && !isMobileFastSurface() {
 		return el.Material(glass.Glass{
 			Style:       glass.Regular,
 			Tint:        tok.Accent.Alpha(0.88),

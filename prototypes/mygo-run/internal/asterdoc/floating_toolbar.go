@@ -64,7 +64,7 @@ func (v *View) InsertFootnoteAtActiveCursor() {
 			return
 		}
 	}
-	fnDoc := ParseFootnotes(v.Doc.Source)
+	fnDoc := v.parsedFootnotes()
 	insertOff := len(v.Doc.Source)
 	if fnDoc != nil && fnDoc.TrailingDefStart >= 0 && fnDoc.TrailingDefStart < insertOff {
 		insertOff = fnDoc.TrailingDefStart

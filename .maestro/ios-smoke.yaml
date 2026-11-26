@@ -1,0 +1,54 @@
+appId: party.asterlab.app
+---
+# L3 Real iOS Simulator Smoke Gate for AsterLab
+# Uses MyGo's native UIAccessibility tree bridged via SurfaceWindow.swift.
+- launchApp
+- extendedWaitUntil:
+    visible: ".*"
+    timeout: 20000
+- takeScreenshot: 01_launch
+
+# Open left experiment library drawer via top-left floating pill
+- tapOn:
+    text: "打开实验库抽屉"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: 02_left_drawer
+
+# Open Vault Manager from drawer header button
+- tapOn:
+    text: ".*管理实验库.*"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: 03_vault_mgr
+
+# Swipe back or tap close on Vault Manager
+- tapOn:
+    text: "关闭"
+    optional: true
+- waitForAnimationToEnd
+
+# Open left drawer then Settings to check brightness & layout
+- tapOn:
+    text: "打开实验库抽屉"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "打开设置"
+    optional: true
+- waitForAnimationToEnd
+- takeScreenshot: 04_settings
+
+# Close Settings via header Done button
+- tapOn:
+    text: "完成"
+    optional: true
+- waitForAnimationToEnd
+
+# Scroll main experiment document & verify still alive
+- scroll
+- waitForAnimationToEnd
+- longPressOn:
+    point: "50%,45%"
+- waitForAnimationToEnd
+- takeScreenshot: 05_long_press
