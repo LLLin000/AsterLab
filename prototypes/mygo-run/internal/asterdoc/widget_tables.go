@@ -300,10 +300,14 @@ func (v *View) renderUnifiedGroupTable(
 					repStr = strconv.Itoa(int(techR))
 				}
 
+				touchMode := compact || v.MobileCompact || isMobileAsterdocViewport(c, v)
 				row := ui.Row(c.Key(fmt.Sprintf("ugt-row:%s:%d:%s", moduleID, idx, gid))).FillWidth().
 					Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
 					Radius(float32(tok.ControlRadius)).
 					AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+				if touchMode {
+					row.MinHeight(float32(tok.Spacing32) + float32(tok.Spacing8))
+				}
 				rowHover := row.Hovered()
 				if rowHover {
 					row.Background(tok.Text.Alpha(0.03))
@@ -363,7 +367,7 @@ func (v *View) renderUnifiedGroupTable(
 						if editable {
 							cBuf := v.ensureWidgetDraft(fmt.Sprintf("gt_c:%s:%d:%s", moduleID, idx, gid), cond)
 							cPh := "—"
-							if rowHover || cond != "" {
+							if rowHover || touchMode || cond != "" {
 								cPh = "处理条件"
 							}
 							tb := BorderlessTextInput(c, tok, cBuf, float32(tok.TextMeta), false, cPh).TextColor(tok.TextMuted)
@@ -383,7 +387,7 @@ func (v *View) renderUnifiedGroupTable(
 						if editable {
 							buf := v.ensureWidgetDraft(fmt.Sprintf("gt_%s:%s:%d:%s", draftSuffix, moduleID, idx, gid), initStr)
 							dispPh := "—"
-							if rowHover || initStr != "" {
+							if rowHover || touchMode || initStr != "" {
 								dispPh = ph
 							}
 							ui.Box(c).Width(width).Shrink(0).Children(func() {
@@ -423,7 +427,7 @@ func (v *View) renderUnifiedGroupTable(
 								}
 								if editable {
 									ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(2).Children(func() {
-										if indStr != "" || rowHover {
+										if indStr != "" || rowHover || touchMode {
 											ui.Text(c, "n=").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
 										}
 										renderIntField("n", "independent_n", indStr, "n", float32(tok.Spacing24)+float32(tok.Spacing4))
@@ -432,7 +436,7 @@ func (v *View) renderUnifiedGroupTable(
 									ui.Text(c, nBadge).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Shrink(0).SingleLine()
 								}
 							})
-							if cond != "" || rowHover {
+							if cond != "" || rowHover || (editable && touchMode) {
 								ui.Box(c).FillWidth().Children(renderCondField)
 							}
 						})
@@ -710,11 +714,15 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 				*devOpenPtr = true
 			}
 
+			paramTouch := v.MobileCompact || isMobileAsterdocViewport(c, v)
 			rowBox := ui.Row(c.Key(fmt.Sprintf("live-pt:%s:%d:%s", moduleID, idx, key))).FillWidth().
 				Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing4)).
 				Radius(float32(tok.ControlRadius)).
 				AlignItems(ui.Center).Wrap().Gap(float32(tok.Spacing8)).
 				Transition(theme.AccordionTransition())
+			if paramTouch {
+				rowBox.MinHeight(float32(tok.Spacing32) + float32(tok.Spacing8))
+			}
 			rowHover := rowBox.Hovered()
 			targetRowBg := ui.Transparent
 			if rowHover {
@@ -779,11 +787,11 @@ func (v *View) renderUnifiedParamTable(c *ui.Context, tok theme.Tokens, moduleID
 						dispUnit := DisplayUnit(unit)
 						unitBuf := v.ensureWidgetDraft(fmt.Sprintf("pt_u:%s:%d:%s", moduleID, idx, key), dispUnit)
 						unitPh := ""
-						if rowHover || dispUnit != "" {
+						if rowHover || paramTouch || dispUnit != "" {
 							unitPh = "单位"
 						}
 						unitW := float32(tok.Spacing48) * 1.45
-						if dispUnit == "" && !rowHover {
+						if dispUnit == "" && !rowHover && !paramTouch {
 							unitW = float32(tok.Spacing48) * 0.95
 						}
 						ui.Box(c).Width(unitW).Children(func() {
@@ -1168,6 +1176,9 @@ func (v *View) renderUnifiedDataTable(c *ui.Context, tok theme.Tokens, dark bool
 				Radius(float32(tok.ControlRadius)).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
 				Transition(theme.AccordionTransition())
+			if isMobileAsterdocViewport(c, v) {
+				rowElem.MinHeight(float32(tok.Spacing32) + float32(tok.Spacing8))
+			}
 			if rowElem.Hovered() {
 				rowElem.Background(tok.Text.Alpha(0.025))
 			}

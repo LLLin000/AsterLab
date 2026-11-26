@@ -5,12 +5,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -706,3 +710,536 @@ func buildSolidPNG(t *testing.T, w, h int, c color.RGBA) []byte {
 	}
 	return buf.Bytes()
 }
+
+type faultRemoteStore struct {
+	RemoteStore
+	onPutIfMatch func(ctx context.Context, relPath string, data []byte, contentType, ifMatchETag string) (string, error, bool)
+	onPut        func(ctx context.Context, relPath string, data []byte, contentType string) (error, bool)
+}
+
+func (f *faultRemoteStore) PutIfMatch(ctx context.Context, relPath string, data []byte, contentType, ifMatchETag string) (string, error) {
+	if f.onPutIfMatch != nil {
+		if etag, err, handled := f.onPutIfMatch(ctx, relPath, data, contentType, ifMatchETag); handled {
+			return etag, err
+		}
+	}
+	return f.RemoteStore.PutIfMatch(ctx, relPath, data, contentType, ifMatchETag)
+}
+
+func (f *faultRemoteStore) Put(ctx context.Context, relPath string, data []byte, contentType string) error {
+	if f.onPut != nil {
+		if err, handled := f.onPut(ctx, relPath, data, contentType); handled {
+			return err
+		}
+	}
+	return f.RemoteStore.Put(ctx, relPath, data, contentType)
+}
+
+func TestSyncManifestCAS412ThreeWayMerge(t *testing.T) {
+	srv := newMockWebDAVServer()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	vaultA := t.TempDir()
+	vaultB := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vaultA, "base.asterml"), []byte("# Base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cA, err := NewWebDAVClient(WebDAVConfig{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cBBase, err := NewWebDAVClient(WebDAVConfig{BaseURL: ts.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engA, _ := NewEngine(vaultA, cA, DefaultDesktopDownloadPolicy(), "dev-a")
+	if _, err := engA.Sync(context.Background()); err != nil {
+		t.Fatalf("initial A sync: %v", err)
+	}
+
+	var bIntercepted atomic.Bool
+	cB := &faultRemoteStore{
+		RemoteStore: cBBase,
+		onPutIfMatch: func(ctx context.Context, relPath string, data []byte, contentType, ifMatchETag string) (string, error, bool) {
+			if relPath == ManifestRelPath && bIntercepted.CompareAndSwap(false, true) {
+				// Simulate Device A sneaking in an edit to fileX.asterml while Device B was preparing its manifest commit!
+				_ = os.WriteFile(filepath.Join(vaultA, "fileX.asterml"), []byte("# Concurrent A File\n"), 0o644)
+				if _, aErr := engA.Sync(ctx); aErr != nil {
+					t.Errorf("concurrent A sync inside CAS hook: %v", aErr)
+				}
+				return "", ErrPreconditionFailed, true
+			}
+			return "", nil, false
+		},
+	}
+
+	engB, _ := NewEngine(vaultB, cB, DefaultDesktopDownloadPolicy(), "dev-b")
+	if _, err := engB.Sync(context.Background()); err != nil {
+		t.Fatalf("initial B sync: %v", err)
+	}
+	bIntercepted.Store(false)
+
+	// Device B creates non-overlapping fileY.asterml and hits HTTP 412 CAS race on first manifest PUT.
+	if err := os.WriteFile(filepath.Join(vaultB, "fileY.asterml"), []byte("# Concurrent B File\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repB, err := engB.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Device B 412 CAS 3-way merge failed: %v", err)
+	}
+	if !bIntercepted.Load() || !repB.ManifestUpdated {
+		t.Fatalf("expected 412 CAS intercept & retry commit, intercepted=%v rep=%+v", bIntercepted.Load(), repB)
+	}
+
+	// Now Device A syncs again -> both fileX.asterml and fileY.asterml MUST survive!
+	if _, err := engA.Sync(context.Background()); err != nil {
+		t.Fatalf("follow-up A sync: %v", err)
+	}
+	if _, err := engB.Sync(context.Background()); err != nil {
+		t.Fatalf("follow-up B sync: %v", err)
+	}
+	for _, root := range []string{vaultA, vaultB} {
+		if _, err := os.Stat(filepath.Join(root, "fileX.asterml")); err != nil {
+			t.Fatalf("missing fileX in %s after 3-way merge: %v", root, err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "fileY.asterml")); err != nil {
+			t.Fatalf("missing fileY in %s after 3-way merge: %v", root, err)
+		}
+	}
+}
+
+func TestSyncIncrementalStateCheckpoint(t *testing.T) {
+	srv := newMockWebDAVServer()
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	vaultA := t.TempDir()
+	for _, name := range []string{"01-first.asterml", "02-second.asterml"} {
+		if err := os.WriteFile(filepath.Join(vaultA, name), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	baseClient, _ := NewWebDAVClient(WebDAVConfig{BaseURL: ts.URL})
+	var failSecond atomic.Bool
+	failSecond.Store(true)
+	client := &faultRemoteStore{
+		RemoteStore: baseClient,
+		onPut: func(ctx context.Context, relPath string, data []byte, contentType string) (error, bool) {
+			if relPath == "02-second.asterml" && failSecond.Load() {
+				return errors.New("injected mid-sync failure"), true
+			}
+			return nil, false
+		},
+	}
+
+	eng, _ := NewEngine(vaultA, client, DefaultDesktopDownloadPolicy(), "dev-ckpt")
+	if _, err := eng.Sync(context.Background()); err == nil {
+		t.Fatalf("expected mid-sync error on 02-second.asterml")
+	}
+	// Checkpoint MUST have saved 01-first.asterml into LocalSyncState despite failure on file 2!
+	st, err := LoadLocalSyncState(vaultA, "dev-ckpt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.Files["01-first.asterml"]; !ok {
+		t.Fatalf("expected 01-first.asterml checkpointed in LocalSyncState, got %+v", st.Files)
+	}
+
+	// On retry after network recovers, 01-first.asterml should NOT be re-uploaded!
+	failSecond.Store(false)
+	rep2, err := eng.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("recovery sync failed: %v", err)
+	}
+	for _, up := range rep2.UploadedFiles {
+		if up == "01-first.asterml" {
+			t.Fatalf("expected checkpointed 01-first.asterml NOT to re-upload, uploaded=%v", rep2.UploadedFiles)
+		}
+	}
+}
+
+type mockOneDriveServer struct {
+	mu      sync.Mutex
+	files   map[string][]byte
+	etags   map[string]string
+	seq     int
+	token   string
+	refresh int
+}
+
+func (m *mockOneDriveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/token" {
+		m.mu.Lock()
+		m.token = fmt.Sprintf("od-tok-%d", m.refresh+1)
+		m.refresh++
+		tok := m.token
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"od-ref-1","token_type":"Bearer","expires_in":3600}`, tok)
+		return
+	}
+	m.mu.Lock()
+	wantTok := m.token
+	m.mu.Unlock()
+	if r.Header.Get("Authorization") != "Bearer "+wantTok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if r.URL.Path == "/me/drive/special/approot" && r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"approot-id","name":"AsterLab"}`))
+		return
+	}
+	const prefix = "/me/drive/special/approot:/"
+	if !strings.HasPrefix(r.URL.Path, prefix) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, prefix)
+	isContent := strings.HasSuffix(rest, ":/content")
+	key := strings.TrimSuffix(strings.TrimSuffix(rest, ":/content"), ":")
+
+	switch r.Method {
+	case http.MethodGet:
+		if !isContent {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		m.mu.Lock()
+		data, ok := m.files[key]
+		etag := m.etags[key]
+		m.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("ETag", etag)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	case http.MethodPut:
+		body, _ := io.ReadAll(r.Body)
+		ifMatch := strings.TrimSpace(r.Header.Get("If-Match"))
+		m.mu.Lock()
+		curETag := m.etags[key]
+		if ifMatch != "" && ifMatch != curETag {
+			m.mu.Unlock()
+			w.WriteHeader(http.StatusPreconditionFailed)
+			return
+		}
+		m.seq++
+		nextETag := fmt.Sprintf(`"od-etag-%d"`, m.seq)
+		m.files[key] = body
+		m.etags[key] = nextETag
+		m.mu.Unlock()
+		w.Header().Set("ETag", nextETag)
+		w.WriteHeader(http.StatusCreated)
+	case http.MethodDelete:
+		m.mu.Lock()
+		delete(m.files, key)
+		delete(m.etags, key)
+		m.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func TestOneDriveStoreEndToEndAndAuthRefresh(t *testing.T) {
+	srv := &mockOneDriveServer{
+		files: map[string][]byte{},
+		etags: map[string]string{},
+		token: "expired-tok",
+	}
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	// Start with an old access token -> first request gets 401 -> OAuthClient.Refresh exchanges refresh_token!
+	srv.mu.Lock()
+	srv.token = "valid-server-tok"
+	srv.mu.Unlock()
+
+	oa := NewOAuthClient(OAuthEndpointConfig{
+		TokenURL: ts.URL + "/token",
+		ClientID: "az-client",
+	}, OAuthTokens{
+		AccessToken:  "stale-client-tok",
+		RefreshToken: "od-ref-1",
+	}, ts.Client(), nil)
+
+	storeA, err := NewOneDriveStore(OneDriveConfig{
+		BaseURL:      ts.URL,
+		RemoteRoot:   "AsterLab",
+		UseAppFolder: true,
+		OAuth:        oa,
+		HTTPClient:   ts.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storeA.TestConnection(context.Background()); err != nil {
+		t.Fatalf("OneDrive TestConnection with 401 refresh failed: %v", err)
+	}
+	if srv.refresh != 1 {
+		t.Fatalf("expected 1 OAuth refresh, got %d", srv.refresh)
+	}
+
+	vaultA := t.TempDir()
+	vaultB := t.TempDir()
+	_ = os.WriteFile(filepath.Join(vaultA, "od_exp.asterml"), []byte("# OneDrive Sync OK\n"), 0o644)
+
+	engA, _ := NewEngine(vaultA, storeA, DefaultDesktopDownloadPolicy(), "od-a")
+	if _, err := engA.Sync(context.Background()); err != nil {
+		t.Fatalf("OneDrive A sync failed: %v", err)
+	}
+
+	storeB, _ := NewOneDriveStore(OneDriveConfig{
+		BaseURL:      ts.URL,
+		RemoteRoot:   "AsterLab",
+		UseAppFolder: true,
+		OAuth:        oa,
+		HTTPClient:   ts.Client(),
+	})
+	engB, _ := NewEngine(vaultB, storeB, DefaultDesktopDownloadPolicy(), "od-b")
+	if _, err := engB.Sync(context.Background()); err != nil {
+		t.Fatalf("OneDrive B sync failed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(vaultB, "od_exp.asterml"))
+	if err != nil || string(got) != "# OneDrive Sync OK\n" {
+		t.Fatalf("expected synced file in OneDrive B, err=%v got=%q", err, string(got))
+	}
+
+	// Verify If-Match 412 rejection works on stale ETag
+	if _, err := storeA.PutIfMatch(context.Background(), "od_exp.asterml", []byte("stale"), "text/plain", `"wrong-etag"`); !errors.Is(err, ErrPreconditionFailed) {
+		t.Fatalf("expected ErrPreconditionFailed on stale If-Match, got %v", err)
+	}
+}
+
+type mockGDriveItem struct {
+	ID       string
+	Name     string
+	ParentID string
+	MimeType string
+	Data     []byte
+	Version  int
+}
+
+type mockGDriveServer struct {
+	mu      sync.Mutex
+	items   map[string]*mockGDriveItem
+	nextID  int
+	token   string
+	refresh int
+}
+
+func (g *mockGDriveServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/token" {
+		g.mu.Lock()
+		g.refresh++
+		g.token = fmt.Sprintf("gd-tok-%d", g.refresh)
+		tok := g.token
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"access_token":%q,"refresh_token":"gd-ref-1","token_type":"Bearer","expires_in":3600}`, tok)
+		return
+	}
+	g.mu.Lock()
+	wantTok := g.token
+	g.mu.Unlock()
+	if r.Header.Get("Authorization") != "Bearer "+wantTok {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if r.URL.Path == "/drive/v3/about" && r.Method == http.MethodGet {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"user":{"emailAddress":"lab@example.com"}}`))
+		return
+	}
+	if r.URL.Path == "/drive/v3/files" && r.Method == http.MethodGet {
+		q := r.URL.Query().Get("q")
+		var nameFilter, parentFilter string
+		wantFolder := strings.Contains(q, "mimeType = 'application/vnd.google-apps.folder'")
+		if i := strings.Index(q, "name = '"); i >= 0 {
+			rest := q[i+len("name = '"):]
+			if j := strings.IndexByte(rest, '\''); j >= 0 {
+				nameFilter = rest[:j]
+			}
+		}
+		if i := strings.Index(q, " and '"); i >= 0 {
+			rest := q[i+len(" and '"):]
+			if j := strings.Index(rest, "' in parents"); j >= 0 {
+				parentFilter = rest[:j]
+			}
+		}
+		g.mu.Lock()
+		var matches []gdriveEntry
+		for _, it := range g.items {
+			isFolder := it.MimeType == "application/vnd.google-apps.folder"
+			if it.Name == nameFilter && it.ParentID == parentFilter && isFolder == wantFolder {
+				matches = append(matches, gdriveEntry{
+					ID: it.ID, Name: it.Name, MimeType: it.MimeType, Version: fmt.Sprintf("%d", it.Version),
+				})
+				break
+			}
+		}
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"files": matches})
+		return
+	}
+	if r.URL.Path == "/drive/v3/files" && r.Method == http.MethodPost {
+		var meta struct {
+			Name     string   `json:"name"`
+			MimeType string   `json:"mimeType"`
+			Parents  []string `json:"parents"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&meta)
+		parentID := "appDataFolder"
+		if len(meta.Parents) > 0 {
+			parentID = meta.Parents[0]
+		}
+		g.mu.Lock()
+		g.nextID++
+		id := fmt.Sprintf("gd-%d", g.nextID)
+		it := &mockGDriveItem{ID: id, Name: meta.Name, ParentID: parentID, MimeType: meta.MimeType, Version: 1}
+		g.items[id] = it
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gdriveEntry{ID: it.ID, Name: it.Name, MimeType: it.MimeType, Version: "1"})
+		return
+	}
+	if r.URL.Path == "/upload/drive/v3/files" && r.Method == http.MethodPost {
+		_, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mr := multipart.NewReader(r.Body, params["boundary"])
+		p1, _ := mr.NextPart()
+		var meta struct {
+			Name    string   `json:"name"`
+			Parents []string `json:"parents"`
+		}
+		_ = json.NewDecoder(p1).Decode(&meta)
+		p2, _ := mr.NextPart()
+		data, _ := io.ReadAll(p2)
+		parentID := "appDataFolder"
+		if len(meta.Parents) > 0 {
+			parentID = meta.Parents[0]
+		}
+		g.mu.Lock()
+		g.nextID++
+		id := fmt.Sprintf("gd-%d", g.nextID)
+		it := &mockGDriveItem{ID: id, Name: meta.Name, ParentID: parentID, Data: data, Version: 1}
+		g.items[id] = it
+		g.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gdriveEntry{ID: it.ID, Name: it.Name, Version: "1"})
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/upload/drive/v3/files/") && r.Method == http.MethodPatch {
+		id := strings.TrimPrefix(r.URL.Path, "/upload/drive/v3/files/")
+		body, _ := io.ReadAll(r.Body)
+		g.mu.Lock()
+		it, ok := g.items[id]
+		if ok {
+			it.Data = body
+			it.Version++
+		}
+		g.mu.Unlock()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(gdriveEntry{ID: it.ID, Name: it.Name, Version: fmt.Sprintf("%d", it.Version)})
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/drive/v3/files/") {
+		id := strings.TrimPrefix(r.URL.Path, "/drive/v3/files/")
+		switch r.Method {
+		case http.MethodGet:
+			g.mu.Lock()
+			it, ok := g.items[id]
+			g.mu.Unlock()
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(it.Data)
+		case http.MethodDelete:
+			g.mu.Lock()
+			delete(g.items, id)
+			g.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+func TestGoogleDriveStoreEndToEndAndAuthRefresh(t *testing.T) {
+	srv := &mockGDriveServer{
+		items: map[string]*mockGDriveItem{},
+		token: "server-gd-tok",
+	}
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	oa := NewOAuthClient(OAuthEndpointConfig{
+		TokenURL: ts.URL + "/token",
+		ClientID: "google-client",
+	}, OAuthTokens{
+		AccessToken:  "stale-gd-tok",
+		RefreshToken: "gd-ref-1",
+	}, ts.Client(), nil)
+
+	storeA, err := NewGoogleDriveStore(GoogleDriveConfig{
+		BaseURL:          ts.URL,
+		RemoteRoot:       "AsterLab",
+		UseAppDataFolder: true,
+		OAuth:            oa,
+		HTTPClient:       ts.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := storeA.TestConnection(context.Background()); err != nil {
+		t.Fatalf("GoogleDrive TestConnection with 401 refresh failed: %v", err)
+	}
+	if srv.refresh != 1 {
+		t.Fatalf("expected 1 OAuth refresh, got %d", srv.refresh)
+	}
+
+	vaultA := t.TempDir()
+	vaultB := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(vaultA, "2026"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(vaultA, "2026", "gd_exp.asterml"), []byte("# Google Drive Nested OK\n"), 0o644)
+
+	engA, _ := NewEngine(vaultA, storeA, DefaultDesktopDownloadPolicy(), "gd-a")
+	if _, err := engA.Sync(context.Background()); err != nil {
+		t.Fatalf("GoogleDrive A sync failed: %v", err)
+	}
+
+	storeB, _ := NewGoogleDriveStore(GoogleDriveConfig{
+		BaseURL:          ts.URL,
+		RemoteRoot:       "AsterLab",
+		UseAppDataFolder: true,
+		OAuth:            oa,
+		HTTPClient:       ts.Client(),
+	})
+	engB, _ := NewEngine(vaultB, storeB, DefaultDesktopDownloadPolicy(), "gd-b")
+	if _, err := engB.Sync(context.Background()); err != nil {
+		t.Fatalf("GoogleDrive B sync failed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(vaultB, "2026", "gd_exp.asterml"))
+	if err != nil || string(got) != "# Google Drive Nested OK\n" {
+		t.Fatalf("expected nested file synced via Google Drive B, err=%v got=%q", err, string(got))
+	}
+}
+

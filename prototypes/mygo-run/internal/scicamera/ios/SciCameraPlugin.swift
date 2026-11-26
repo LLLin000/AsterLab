@@ -343,7 +343,7 @@ private final class SciPreviewView: UIView, AVCapturePhotoCaptureDelegate, UIGes
         CATransaction.commit()
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === panRecognizer {
             guard reticleVisible else { return false }
             let vel = panRecognizer?.velocity(in: self) ?? .zero

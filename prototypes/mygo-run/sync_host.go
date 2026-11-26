@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -27,10 +28,16 @@ const syncConfigRelPath = ".asterlab/sync_config.json"
 // `<Vault>/.asterlab/sync_config.json`. Passwords are NEVER written to disk;
 // they are stored exclusively via mygo.Secrets (with a memory-only test fallback).
 type syncHostConfig struct {
+	Provider                        string                        `json:"provider,omitempty"` // "webdav" | "onedrive" | "gdrive"
 	Enabled                         bool                          `json:"enabled"`
 	BaseURL                         string                        `json:"baseUrl"`
 	Username                        string                        `json:"username"`
 	Password                        string                        `json:"-"`
+	RemotePath                      string                        `json:"remotePath,omitempty"`
+	AutoIntervalMin                 int                           `json:"autoIntervalMin,omitempty"`
+	OAuthClientID                   string                        `json:"oauthClientId,omitempty"`
+	OAuthAuthorized                 bool                          `json:"oauthAuthorized,omitempty"`
+	OAuthAccountHint                string                        `json:"oauthAccountHint,omitempty"`
 	PolicyMode                      syncengine.DownloadPolicyMode `json:"policyMode"`
 	ThresholdBytes                  int64                         `json:"thresholdBytes"`
 	WiFiOnlyForOriginals            bool                          `json:"wifiOnlyForOriginals"`
@@ -48,12 +55,50 @@ func defaultSyncHostConfig() syncHostConfig {
 		pol = syncengine.DefaultMobileDownloadPolicy()
 	}
 	return syncHostConfig{
+		Provider:                        shell.SyncProviderWebDAV,
+		AutoIntervalMin:                 5,
 		PolicyMode:                      pol.Mode,
 		ThresholdBytes:                  pol.ThresholdBytes,
 		WiFiOnlyForOriginals:            pol.WiFiOnlyForOriginals,
 		AutoPruneMobileOriginalOnUpload: pol.AutoPruneMobileOriginalOnUpload,
 		DeviceID:                        defaultSyncDeviceID(),
 	}
+}
+
+func syncOAuthSecretAccountKey(vaultRoot, provider string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(vaultRoot) + "|" + shell.NormalizeSyncProvider(provider)))
+	return "asterlab-oauth-" + hex.EncodeToString(sum[:8])
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func effectiveWebDAVBaseURL(baseURL, remotePath string) string {
+	rawBase := strings.TrimSpace(baseURL)
+	if rawBase == "" {
+		return ""
+	}
+	rp := strings.Trim(strings.ReplaceAll(strings.TrimSpace(remotePath), "\\", "/"), "/")
+	if rp == "" {
+		return rawBase
+	}
+	u, err := url.Parse(rawBase)
+	if err != nil {
+		return rawBase
+	}
+	curPath := strings.TrimRight(u.Path, "/")
+	if curPath == "/"+rp || strings.HasSuffix(curPath, "/"+rp) {
+		return rawBase
+	}
+	u.Path = curPath + "/" + rp + "/"
+	u.RawPath = ""
+	return u.String()
 }
 
 func defaultSyncDeviceID() string {
@@ -159,6 +204,7 @@ func (a *app) loadSyncConfig() (syncHostConfig, error) {
 		def := defaultSyncHostConfig()
 		cfg.PolicyMode = def.PolicyMode
 	}
+	cfg.Provider = shell.NormalizeSyncProvider(cfg.Provider)
 	if cfg.ThresholdBytes <= 0 {
 		cfg.ThresholdBytes = syncengine.Threshold2MB
 	}
@@ -169,6 +215,58 @@ func (a *app) loadSyncConfig() (syncHostConfig, error) {
 	return cfg, nil
 }
 
+func (a *app) loadOAuthTokens(provider string) syncengine.OAuthTokens {
+	if a == nil || a.vault == nil || strings.TrimSpace(a.vault.Root) == "" {
+		return syncengine.OAuthTokens{}
+	}
+	raw := a.loadWebDAVPassword(syncOAuthSecretAccountKey(a.vault.Root, provider))
+	if strings.TrimSpace(raw) == "" {
+		return syncengine.OAuthTokens{}
+	}
+	var toks syncengine.OAuthTokens
+	_ = json.Unmarshal([]byte(raw), &toks)
+	return toks
+}
+
+func (a *app) storeOAuthTokens(provider string, toks syncengine.OAuthTokens) error {
+	if a == nil || a.vault == nil || strings.TrimSpace(a.vault.Root) == "" {
+		return errors.New("sync: no active vault")
+	}
+	key := syncOAuthSecretAccountKey(a.vault.Root, provider)
+	if strings.TrimSpace(toks.AccessToken) == "" && strings.TrimSpace(toks.RefreshToken) == "" {
+		return a.storeWebDAVPassword(key, "")
+	}
+	raw, err := json.Marshal(toks)
+	if err != nil {
+		return err
+	}
+	return a.storeWebDAVPassword(key, string(raw))
+}
+
+func (a *app) newOAuthClientForProvider(cfg syncHostConfig) (*syncengine.OAuthClient, error) {
+	if a == nil || a.vault == nil || strings.TrimSpace(a.vault.Root) == "" {
+		return nil, errors.New("sync: no active vault")
+	}
+	prov := shell.NormalizeSyncProvider(cfg.Provider)
+	var ep syncengine.OAuthEndpointConfig
+	switch prov {
+	case shell.SyncProviderOneDrive:
+		ep = syncengine.DefaultOneDriveOAuthConfig(cfg.OAuthClientID)
+	case shell.SyncProviderGDrive:
+		ep = syncengine.DefaultGoogleDriveOAuthConfig(cfg.OAuthClientID, "")
+	default:
+		return nil, fmt.Errorf("sync: provider %s does not use OAuth", prov)
+	}
+	vaultRoot := a.vault.Root
+	toks := a.loadOAuthTokens(prov)
+	return syncengine.NewOAuthClient(ep, toks, a.syncHTTPClient, func(updated syncengine.OAuthTokens) {
+		key := syncOAuthSecretAccountKey(vaultRoot, prov)
+		if raw, err := json.Marshal(updated); err == nil {
+			_ = a.storeWebDAVPassword(key, string(raw))
+		}
+	}), nil
+}
+
 // saveSyncConfig atomically persists non-secret sync config to `<Vault>/.asterlab/sync_config.json`
 // and stores cfg.Password in `mygo.Secrets` (never serialized to JSON).
 func (a *app) saveSyncConfig(cfg syncHostConfig) error {
@@ -176,6 +274,7 @@ func (a *app) saveSyncConfig(cfg syncHostConfig) error {
 	if err != nil {
 		return err
 	}
+	cfg.Provider = shell.NormalizeSyncProvider(cfg.Provider)
 	if cfg.PolicyMode == "" {
 		cfg.PolicyMode = defaultSyncHostConfig().PolicyMode
 	}
@@ -190,6 +289,8 @@ func (a *app) saveSyncConfig(cfg syncHostConfig) error {
 	}
 	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
 	cfg.Username = strings.TrimSpace(cfg.Username)
+	cfg.RemotePath = strings.TrimSpace(cfg.RemotePath)
+	cfg.OAuthClientID = strings.TrimSpace(cfg.OAuthClientID)
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -197,17 +298,43 @@ func (a *app) saveSyncConfig(cfg syncHostConfig) error {
 	return asterdoc.WriteFileAtomic(cfgPath, data)
 }
 
-func (a *app) newSyncClient(cfg syncHostConfig) (*syncengine.WebDAVClient, error) {
-	if strings.TrimSpace(cfg.BaseURL) == "" {
-		return nil, errors.New("sync: WebDAV URL is required")
+func (a *app) newSyncClient(cfg syncHostConfig) (syncengine.RemoteStore, error) {
+	prov := shell.NormalizeSyncProvider(cfg.Provider)
+	switch prov {
+	case shell.SyncProviderOneDrive:
+		oa, err := a.newOAuthClientForProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return syncengine.NewOneDriveStore(syncengine.OneDriveConfig{
+			RemoteRoot:   firstNonEmptyString(cfg.RemotePath, "/AsterLab"),
+			UseAppFolder: true,
+			OAuth:        oa,
+			HTTPClient:   a.syncHTTPClient,
+		})
+	case shell.SyncProviderGDrive:
+		oa, err := a.newOAuthClientForProvider(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return syncengine.NewGoogleDriveStore(syncengine.GoogleDriveConfig{
+			RemoteRoot:       firstNonEmptyString(cfg.RemotePath, "/AsterLab"),
+			UseAppDataFolder: true,
+			OAuth:            oa,
+			HTTPClient:       a.syncHTTPClient,
+		})
+	default:
+		if strings.TrimSpace(cfg.BaseURL) == "" {
+			return nil, errors.New("sync: WebDAV URL is required")
+		}
+		return syncengine.NewWebDAVClient(syncengine.WebDAVConfig{
+			BaseURL:           effectiveWebDAVBaseURL(cfg.BaseURL, cfg.RemotePath),
+			Username:          cfg.Username,
+			Password:          cfg.Password,
+			ForceNutstoreMode: cfg.ForceNutstoreMode,
+			HTTPClient:        a.syncHTTPClient,
+		})
 	}
-	return syncengine.NewWebDAVClient(syncengine.WebDAVConfig{
-		BaseURL:           cfg.BaseURL,
-		Username:          cfg.Username,
-		Password:          cfg.Password,
-		ForceNutstoreMode: cfg.ForceNutstoreMode,
-		HTTPClient:        a.syncHTTPClient,
-	})
 }
 
 func (a *app) newSyncEngine(cfg syncHostConfig) (*syncengine.Engine, error) {
@@ -225,7 +352,7 @@ func (a *app) newSyncEngine(cfg syncHostConfig) (*syncengine.Engine, error) {
 	return syncengine.NewEngine(a.vault.Root, client, pol, cfg.DeviceID)
 }
 
-// testSyncConnection verifies WebDAV connectivity and credentials via a bounded Depth-0 PROPFIND.
+// testSyncConnection verifies remote connectivity and credentials.
 func (a *app) testSyncConnection(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -238,20 +365,23 @@ func (a *app) testSyncConnection(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = client.Propfind(ctx, "", "0")
-	return err
+	return client.TestConnection(ctx)
 }
 
-// runSyncNow executes one full manifest-driven sync pass against the configured WebDAV endpoint.
+// runSyncNow executes one full manifest-driven sync pass against the configured remote backend.
 func (a *app) runSyncNow(ctx context.Context) (syncengine.SyncReport, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	a.syncRunMu.Lock()
+	defer a.syncRunMu.Unlock()
+
 	cfg, err := a.loadSyncConfig()
 	if err != nil {
 		return syncengine.SyncReport{}, err
 	}
-	if !cfg.Enabled && strings.TrimSpace(cfg.BaseURL) == "" {
+	prov := shell.NormalizeSyncProvider(cfg.Provider)
+	if prov == shell.SyncProviderWebDAV && !cfg.Enabled && strings.TrimSpace(cfg.BaseURL) == "" {
 		return syncengine.SyncReport{}, errors.New("sync: synchronization is not configured")
 	}
 	eng, err := a.newSyncEngine(cfg)
@@ -443,15 +573,22 @@ func (a *app) hydrateSyncShellState() {
 		thMB = 2
 	}
 	a.shell.SyncSettings = shell.SyncSettings{
+		Provider:          shell.NormalizeSyncProvider(cfg.Provider),
 		Enabled:           cfg.Enabled,
 		Endpoint:          cfg.BaseURL,
 		Username:          cfg.Username,
 		Password:          cfg.Password,
-		RemotePath:        "/asterlab",
-		AutoIntervalMin:   15,
+		RemotePath:        firstNonEmptyString(cfg.RemotePath, "/AsterLab"),
+		AutoIntervalMin:   cfg.AutoIntervalMin,
 		ImagePolicy:       shell.NormalizeImagePolicy(string(cfg.PolicyMode)),
 		ImageThresholdMB:  thMB,
 		WiFiOnlyOriginals: cfg.WiFiOnlyForOriginals,
+		OAuthClientID:     cfg.OAuthClientID,
+		OAuthAuthorized:   cfg.OAuthAuthorized || a.loadOAuthTokens(cfg.Provider).RefreshToken != "" || a.loadOAuthTokens(cfg.Provider).AccessToken != "",
+		OAuthAccountHint:  cfg.OAuthAccountHint,
+		OAuthUserCode:     a.shell.SyncSettings.OAuthUserCode,
+		OAuthVerifyURL:    a.shell.SyncSettings.OAuthVerifyURL,
+		OAuthPending:      a.shell.SyncSettings.OAuthPending,
 	}
 
 	var cacheMB float64
@@ -539,62 +676,174 @@ func (a *app) wireSyncAndBackupShellCallbacks() {
 	if a == nil || a.shell == nil {
 		return
 	}
-	applySettingsFromShell := func() error {
+	applySettingsFromShell := func() (syncHostConfig, error) {
 		cur, _ := a.loadSyncConfig()
 		ss := a.shell.SyncSettings
 		pol := ss.ToDownloadPolicy(isMobileRuntime())
+		cur.Provider = shell.NormalizeSyncProvider(ss.Provider)
 		cur.Enabled = ss.Enabled
 		cur.BaseURL = strings.TrimSpace(ss.Endpoint)
 		cur.Username = strings.TrimSpace(ss.Username)
 		cur.Password = ss.Password
+		cur.RemotePath = strings.TrimSpace(ss.RemotePath)
+		cur.AutoIntervalMin = ss.AutoIntervalMin
+		cur.OAuthClientID = strings.TrimSpace(ss.OAuthClientID)
 		cur.PolicyMode = pol.Mode
 		cur.ThresholdBytes = pol.ThresholdBytes
 		cur.WiFiOnlyForOriginals = pol.WiFiOnlyForOriginals
-		return a.saveSyncConfig(cur)
+		err := a.saveSyncConfig(cur)
+		return cur, err
 	}
 
 	a.shell.OnSaveSyncSettings = func() {
-		if err := applySettingsFromShell(); err != nil {
-			a.shell.SyncState.Status = "error"
-			a.shell.SyncState.ErrorText = err.Error()
-			return
-		}
-		a.hydrateSyncShellState()
-	}
-	a.shell.OnTestSyncConnection = func() {
-		if err := applySettingsFromShell(); err != nil {
-			a.shell.SyncState.Status = "error"
-			a.shell.SyncState.ErrorText = err.Error()
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := a.testSyncConnection(ctx); err != nil {
-			a.shell.SyncState.Status = "error"
-			a.shell.SyncState.ErrorText = err.Error()
-			return
-		}
-		a.shell.SyncState.ErrorText = ""
-		if a.shell.SyncState.Status == "error" || a.shell.SyncState.Status == "" {
-			a.shell.SyncState.Status = "idle"
-		}
-	}
-	a.shell.OnTriggerSyncNow = func() {
-		_ = applySettingsFromShell()
-		a.shell.SyncState.Status = "syncing"
-		a.shell.SyncState.ErrorText = ""
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		report, err := a.runSyncNow(ctx)
-		a.hydrateSyncShellState()
+		cur, err := applySettingsFromShell()
 		if err != nil {
 			a.shell.SyncState.Status = "error"
 			a.shell.SyncState.ErrorText = err.Error()
-		} else if len(report.Conflicts) > 0 {
-			a.shell.SyncState.Status = "conflict"
-		} else {
-			a.shell.SyncState.Status = "synced"
+			return
 		}
+		a.configureAutoSyncTicker(cur)
+		a.hydrateSyncShellState()
+	}
+	a.shell.OnTestSyncConnection = func() {
+		if _, err := applySettingsFromShell(); err != nil {
+			a.shell.SyncState.Status = "error"
+			a.shell.SyncState.ErrorText = err.Error()
+			return
+		}
+		a.shell.SyncState.Status = "syncing"
+		a.shell.SyncState.ErrorText = ""
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			err := a.testSyncConnection(ctx)
+			if a.shell == nil {
+				return
+			}
+			if err != nil {
+				a.shell.SyncState.Status = "error"
+				a.shell.SyncState.ErrorText = err.Error()
+			} else {
+				a.shell.SyncState.ErrorText = ""
+				a.shell.SyncState.Status = "idle"
+			}
+			a.shell.Invalidate()
+		}()
+	}
+	a.shell.OnTriggerSyncNow = func() {
+		_, _ = applySettingsFromShell()
+		a.shell.SyncState.Status = "syncing"
+		a.shell.SyncState.ErrorText = ""
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+			defer cancel()
+			report, err := a.runSyncNow(ctx)
+			if a.shell == nil {
+				return
+			}
+			a.hydrateSyncShellState()
+			if err != nil {
+				a.shell.SyncState.Status = "error"
+				a.shell.SyncState.ErrorText = err.Error()
+			} else if len(report.Conflicts) > 0 {
+				a.shell.SyncState.Status = "conflict"
+			} else {
+				a.shell.SyncState.Status = "synced"
+			}
+			a.shell.Invalidate()
+		}()
+	}
+	a.shell.OnStartCloudOAuth = func(provider string) {
+		cur, err := applySettingsFromShell()
+		if err != nil {
+			a.shell.SyncState.Status = "error"
+			a.shell.SyncState.ErrorText = err.Error()
+			return
+		}
+		cur.Provider = shell.NormalizeSyncProvider(provider)
+		oa, oErr := a.newOAuthClientForProvider(cur)
+		if oErr != nil {
+			a.shell.SyncState.Status = "error"
+			a.shell.SyncState.ErrorText = oErr.Error()
+			return
+		}
+		if a.syncOAuthCancel != nil {
+			a.syncOAuthCancel()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		a.syncOAuthCancel = cancel
+		a.shell.SyncSettings.OAuthPending = true
+		a.shell.SyncState.ErrorText = ""
+
+		go func() {
+			defer cancel()
+			ch, err := oa.StartDeviceCode(ctx)
+			if a.shell == nil {
+				return
+			}
+			if err != nil {
+				a.shell.SyncSettings.OAuthPending = false
+				a.shell.SyncState.Status = "error"
+				a.shell.SyncState.ErrorText = err.Error()
+				a.shell.Invalidate()
+				return
+			}
+			a.shell.SyncSettings.OAuthUserCode = ch.UserCode
+			a.shell.SyncSettings.OAuthVerifyURL = ch.VerificationURI
+			a.shell.Invalidate()
+
+			interval := time.Duration(max(ch.Interval, 2)) * time.Second
+			for ctx.Err() == nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(interval):
+				}
+				toks, pending, slowDown, pErr := oa.PollDeviceCodeOnce(ctx, ch.DeviceCode)
+				if pErr != nil {
+					a.shell.SyncSettings.OAuthPending = false
+					a.shell.SyncSettings.OAuthUserCode = ""
+					a.shell.SyncState.Status = "error"
+					a.shell.SyncState.ErrorText = pErr.Error()
+					a.shell.Invalidate()
+					return
+				}
+				if slowDown {
+					interval += 3 * time.Second
+					continue
+				}
+				if pending {
+					continue
+				}
+				_ = a.storeOAuthTokens(cur.Provider, toks)
+				cur.OAuthAuthorized = true
+				_ = a.saveSyncConfig(cur)
+				a.shell.SyncSettings.OAuthPending = false
+				a.shell.SyncSettings.OAuthUserCode = ""
+				a.shell.SyncSettings.OAuthVerifyURL = ""
+				a.shell.SyncSettings.OAuthAuthorized = true
+				a.hydrateSyncShellState()
+				a.shell.Invalidate()
+				return
+			}
+		}()
+	}
+	a.shell.OnDisconnectCloudOAuth = func(provider string) {
+		if a.syncOAuthCancel != nil {
+			a.syncOAuthCancel()
+		}
+		prov := shell.NormalizeSyncProvider(provider)
+		_ = a.storeOAuthTokens(prov, syncengine.OAuthTokens{})
+		if cur, err := a.loadSyncConfig(); err == nil {
+			cur.OAuthAuthorized = false
+			cur.OAuthAccountHint = ""
+			_ = a.saveSyncConfig(cur)
+		}
+		a.shell.SyncSettings.OAuthAuthorized = false
+		a.shell.SyncSettings.OAuthPending = false
+		a.shell.SyncSettings.OAuthUserCode = ""
+		a.shell.SyncSettings.OAuthAccountHint = ""
+		a.hydrateSyncShellState()
 	}
 	a.shell.OnClearOriginalsCache = func() {
 		if _, err := a.clearLocalOriginalsCache(); err != nil {
@@ -637,4 +886,42 @@ func (a *app) wireSyncAndBackupShellCallbacks() {
 		a.wireSyncAndBackupShellCallbacks()
 	}
 	a.hydrateSyncShellState()
+	if cfg, err := a.loadSyncConfig(); err == nil {
+		a.configureAutoSyncTicker(cfg)
+	}
+}
+
+func (a *app) configureAutoSyncTicker(cfg syncHostConfig) {
+	if a.syncAutoStop != nil {
+		close(a.syncAutoStop)
+		a.syncAutoStop = nil
+	}
+	if testing.Testing() || !cfg.Enabled || cfg.AutoIntervalMin <= 0 {
+		return
+	}
+	stop := make(chan struct{})
+	a.syncAutoStop = stop
+	interval := time.Duration(cfg.AutoIntervalMin) * time.Minute
+	go func() {
+		tk := time.NewTicker(interval)
+		defer tk.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-tk.C:
+				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+				_, err := a.runSyncNow(ctx)
+				cancel()
+				if a.shell != nil {
+					a.hydrateSyncShellState()
+					if err != nil {
+						a.shell.SyncState.Status = "error"
+						a.shell.SyncState.ErrorText = err.Error()
+					}
+					a.shell.Invalidate()
+				}
+			}
+		}
+	}()
 }

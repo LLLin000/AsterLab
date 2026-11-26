@@ -174,6 +174,30 @@ func (a *app) syncRecentVaultsToShell() {
 	for _, p := range prefs.RecentVaults {
 		addPath(p)
 	}
+	// Discover sibling Vault folders under the default documents directory (e.g. iOS Files imports).
+	if defDir := strings.TrimSpace(vault.DefaultVaultDir()); defDir != "" {
+		parentDir := filepath.Dir(defDir)
+		if entries, err := os.ReadDir(parentDir); err == nil {
+			for _, ent := range entries {
+				if !ent.IsDir() || strings.HasPrefix(ent.Name(), ".") {
+					continue
+				}
+				cand := filepath.Join(parentDir, ent.Name())
+				if _, stErr := os.Stat(filepath.Join(cand, vault.SystemDirName)); stErr == nil {
+					addPath(cand)
+					continue
+				}
+				if subEntries, sErr := os.ReadDir(cand); sErr == nil {
+					for _, se := range subEntries {
+						if !se.IsDir() && strings.HasSuffix(strings.ToLower(se.Name()), ".asterml") {
+							addPath(cand)
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	a.shell.RecentVaults = out
 }
 
@@ -1224,9 +1248,33 @@ func (a *app) revealPathInOS(relPath string) {
 	}
 }
 
+func probeDirWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("无法创建或访问实验库目录：%w", err)
+	}
+	f, err := os.CreateTemp(dir, ".asterlab-write-probe-*")
+	if err != nil {
+		return fmt.Errorf("实验库目录不可写：%w", err)
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return nil
+}
+
 func (a *app) switchVaultRoot(newPath string) {
-	if strings.TrimSpace(newPath) == "" {
-		return
+	_ = a.switchVaultRootErr(newPath)
+}
+
+func (a *app) switchVaultRootErr(newPath string) error {
+	newPath = strings.TrimSpace(newPath)
+	if newPath == "" {
+		return fmt.Errorf("实验库路径不能为空")
+	}
+	clean := filepath.Clean(newPath)
+	if err := probeDirWritable(clean); err != nil {
+		a.syncErr = err.Error()
+		return err
 	}
 	a.liveViews = nil
 	a.liveEditors = nil
@@ -1234,15 +1282,26 @@ func (a *app) switchVaultRoot(newPath string) {
 	a.liveTitleDrafts = nil
 	a.liveDateDrafts = nil
 	a.lastCompanionKey = ""
-	if err := a.initVaultWorkspace(newPath); err != nil {
+	if err := a.initVaultWorkspace(clean); err != nil {
 		a.syncErr = fmt.Sprintf("切换实验库失败：%v", err)
-		return
+		return fmt.Errorf("切换实验库失败：%w", err)
 	}
 	if a.vault != nil {
 		saveLastVaultRoot(a.vault.Root)
 		a.syncRecentVaultsToShell()
 	}
+	a.wireSyncAndBackupShellCallbacks()
+	if a.shell != nil {
+		a.shell.EnsureTabs()
+		if a.shell.Toasts != nil && a.vault != nil {
+			a.shell.Toasts.Push(kit.Toast{
+				Tone:    kit.ToastSuccess,
+				Message: "已进入实验库：" + filepath.Base(a.vault.Root),
+			})
+		}
+	}
 	a.syncErr = ""
+	return nil
 }
 
 func (a *app) createVaultAt(targetPath string, seedDemo bool) error {
@@ -1251,12 +1310,8 @@ func (a *app) createVaultAt(targetPath string, seedDemo bool) error {
 		return fmt.Errorf("实验库路径不能为空")
 	}
 	clean := filepath.Clean(targetPath)
-	if err := os.MkdirAll(clean, 0o755); err != nil {
-		return fmt.Errorf("创建实验库目录失败：%w", err)
-	}
-	a.switchVaultRoot(clean)
-	if a.syncErr != "" {
-		return fmt.Errorf("%s", a.syncErr)
+	if err := a.switchVaultRootErr(clean); err != nil {
+		return err
 	}
 	if seedDemo && a.vault != nil {
 		a.openOrSeedUserGuideDoc()

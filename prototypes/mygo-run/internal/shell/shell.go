@@ -99,8 +99,28 @@ const (
 	SyncImagePolicyAlwaysOriginal = string(syncengine.PolicyAlwaysOriginal)
 )
 
-// SyncSettings holds WebDAV connection parameters and the dual-track scientific image download policy.
+const (
+	SyncProviderWebDAV   = "webdav"
+	SyncProviderOneDrive = "onedrive"
+	SyncProviderGDrive   = "gdrive"
+)
+
+// NormalizeSyncProvider maps empty/unknown sync provider strings to canonical keys.
+func NormalizeSyncProvider(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case SyncProviderOneDrive:
+		return SyncProviderOneDrive
+	case SyncProviderGDrive, "google_drive", "google":
+		return SyncProviderGDrive
+	default:
+		return SyncProviderWebDAV
+	}
+}
+
+// SyncSettings holds WebDAV / OneDrive / Google Drive connection parameters and the
+// dual-track scientific image download policy.
 type SyncSettings struct {
+	Provider          string // "webdav" | "onedrive" | "gdrive"
 	Enabled           bool
 	Endpoint          string
 	Username          string
@@ -110,6 +130,12 @@ type SyncSettings struct {
 	ImagePolicy       string // "preview_only" | "threshold" | "always_original"
 	ImageThresholdMB  int    // 1 | 2 | 5 | 10
 	WiFiOnlyOriginals bool
+	OAuthClientID     string
+	OAuthAuthorized   bool
+	OAuthAccountHint  string
+	OAuthUserCode     string
+	OAuthVerifyURL    string
+	OAuthPending      bool
 }
 
 // NormalizeImagePolicy maps syncengine.DownloadPolicyMode or UI policy values into canonical UI keys.
@@ -406,8 +432,10 @@ type Shell struct {
 	OnRevealInExplorer     func(relPath string)
 	OnPickVaultPath        func() string
 	OnSwitchVaultPath      func(newPath string)
+	OnSwitchVaultPathErr   func(newPath string) error
 	OnCreateVault          func(targetPath string, seedDemo bool) error
 	OnOpenSandboxVault     func()
+	OnDismissVaultLauncher func()
 	OnRemoveRecentVault    func(vaultPath string)
 	OnToggleHideAssets     func(hide bool)
 	SyncSettings           SyncSettings
@@ -418,6 +446,8 @@ type Shell struct {
 	OnSaveSyncSettings     func()
 	OnTestSyncConnection   func()
 	OnTriggerSyncNow       func()
+	OnStartCloudOAuth      func(provider string)
+	OnDisconnectCloudOAuth func(provider string)
 	OnClearOriginalsCache  func()
 	OnResolveSyncConflict  func(relPath, conflictPath, choice string)
 	OnVaultBackupZip       func()

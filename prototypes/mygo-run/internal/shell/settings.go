@@ -2,6 +2,7 @@ package shell
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -70,6 +71,7 @@ func (s *Shell) ensureSettingsDefaults() {
 }
 
 func (s *Shell) ensureSyncDefaults() {
+	s.SyncSettings.Provider = NormalizeSyncProvider(s.SyncSettings.Provider)
 	if !s.syncPrefsInited {
 		s.syncPrefsInited = true
 		if s.SyncSettings.ImagePolicy == "" && s.SyncSettings.ImageThresholdMB == 0 && s.SyncSettings.Endpoint == "" && !s.SyncSettings.Enabled {
@@ -185,6 +187,10 @@ func (s *Shell) renderMobileSettingsPage(c *ui.Context, tok theme.Tokens, extra 
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
+	if s.SettingsView.Category == "hotkeys" {
+		s.SettingsView.Category = ""
+		extra.mobileSettingsDetail = false
+	}
 	cats := s.obsidianSettingsCategories(c)
 	query := strings.TrimSpace(s.SettingsView.Query)
 	searching := query != ""
@@ -357,7 +363,7 @@ func (s *Shell) renderMobileSettingsPage(c *ui.Context, tok theme.Tokens, extra 
 
 func (s *Shell) mobileSettingsCategoryHint(catID string) string {
 	switch catID {
-	case "files":
+	case "vault", "files":
 		p := strings.TrimRight(strings.TrimSpace(s.VaultPathInput), `/\`)
 		if p == "" {
 			return ""
@@ -367,11 +373,23 @@ func (s *Shell) mobileSettingsCategoryHint(catID string) string {
 		}
 		return p
 	case "sync":
-		if strings.TrimSpace(s.SyncSettings.Endpoint) != "" {
-			if st := strings.TrimSpace(s.SyncState.LastSyncText); st != "" {
-				return st
+		prov := NormalizeSyncProvider(s.SyncSettings.Provider)
+		if strings.TrimSpace(s.SyncState.LastSyncText) != "" && (strings.TrimSpace(s.SyncSettings.Endpoint) != "" || s.SyncSettings.OAuthAuthorized) {
+			return s.SyncState.LastSyncText
+		}
+		switch prov {
+		case SyncProviderOneDrive:
+			if s.SyncSettings.OAuthAuthorized {
+				return "OneDrive"
 			}
-			return "WebDAV"
+		case SyncProviderGDrive:
+			if s.SyncSettings.OAuthAuthorized {
+				return "Google Drive"
+			}
+		default:
+			if strings.TrimSpace(s.SyncSettings.Endpoint) != "" {
+				return "WebDAV"
+			}
 		}
 		return "未配置"
 	case "appearance":
@@ -471,6 +489,8 @@ func (s *Shell) renderMobileSettingsResultsList(
 
 func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsCategory {
 	tok := theme.GetTokens(c.Theme())
+	isMobile := s.IsMobileLayout(c)
+	isMobileOS := runtime.GOOS == "ios" || runtime.GOOS == "android"
 
 	applyThemeChoice := func(choice string) {
 		s.ThemeSource = choice
@@ -522,8 +542,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 											s.OnSwitchVaultPath(strings.TrimSpace(s.VaultPathInput))
 											s.VaultSettingsOpen = false
 										}
-										if s.OnRevealInExplorer != nil && components.Button(c, "打开目录", components.ButtonOutline).Clicked() {
-											s.OnRevealInExplorer("")
+										if components.Button(c, "切换 / 新建实验库", components.ButtonOutline).Clicked() {
+											s.VaultSettingsOpen = false
+											s.openVaultLauncher()
 										}
 									})
 								})
@@ -566,9 +587,14 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						},
 					},
 					{
-						ID:       "auto-archive-assets",
-						Title:    "粘贴或拖入图片自动存至 ./assets/",
-						Keywords: []string{"paste", "drag", "assets", "图片", "相对路径"},
+						ID: "auto-archive-assets",
+						Title: func() string {
+							if isMobile {
+								return "拍照与插入图片自动存至 ./assets/"
+							}
+							return "粘贴或拖入图片自动存至 ./assets/"
+						}(),
+						Keywords: []string{"paste", "drag", "assets", "图片", "相对路径", "拍照"},
 						Build: func(c *ui.Context) {
 							if components.Switch(c, &s.AutoArchiveAssets, "自动存至 assets", components.SwitchOptions{HideLabel: true}).Changed() {
 								s.notifySettingsChanged()
@@ -725,8 +751,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 		},
 	}
 
-	mobileItems := []components.SettingsItem{
-		{
+	var mobileItems []components.SettingsItem
+	if !isMobileOS {
+		mobileItems = append(mobileItems, components.SettingsItem{
 			ID:       "mobile-preview",
 			Title:    "移动端单栏预览",
 			Keywords: []string{"mobile", "android", "ios", "touch", "移动端", "自适应"},
@@ -736,9 +763,9 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 					s.MobileTabSwitcherOpen = false
 				}
 			},
-		},
+		})
 	}
-	if s.ForceMobilePreview || s.IsMobileLayout(c) {
+	if s.ForceMobilePreview || isMobile {
 		mobileItems = append(mobileItems,
 			components.SettingsItem{
 				ID:       "mobile-pull-action",
@@ -941,10 +968,15 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						},
 					},
 					{
-						ID:          "text-scale",
-						Title:       "界面缩放",
-						Description: "快捷键 Ctrl+= / Ctrl+- / Ctrl+0",
-						Keywords:    []string{"font", "scale", "zoom", "字号", "图标", "缩放"},
+						ID:    "text-scale",
+						Title: "界面缩放",
+						Description: func() string {
+							if isMobile {
+								return "调整文字与控件显示比例"
+							}
+							return "快捷键 Ctrl+= / Ctrl+- / Ctrl+0"
+						}(),
+						Keywords: []string{"font", "scale", "zoom", "字号", "图标", "缩放"},
 						Build: func(c *ui.Context) {
 							scaleStr := fmt.Sprintf("%.2f", s.TextScale)
 							if s.TextScale <= 0 {
@@ -1211,6 +1243,93 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 		Groups:  hotkeyGroups,
 	}
 
+	aboutAppItems := []components.SettingsItem{
+		{
+			ID:       "update-status",
+			Title:    "当前版本",
+			Keywords: []string{"update", "version", "release", "升级", "更新", "版本"},
+			Stacked:  true,
+			Build: func(c *ui.Context) {
+				curVer := firstNonEmptyStr(s.AppVersion, "0.1.0-dev")
+				commitStr := strings.TrimSpace(s.BuildCommit)
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+						verLabel := "v" + strings.TrimPrefix(curVer, "v")
+						if commitStr != "" && commitStr != "dev" {
+							verLabel += " (" + commitStr + ")"
+						}
+						components.Badge(c, verLabel)
+						switch s.UpdateStatus {
+						case "checking":
+							components.Text(c, "正在检查更新…").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
+						case "up_to_date":
+							components.Text(c, "已是最新版本").FontSize(float32(tok.TextData)).TextColor(tok.Success)
+						case "available":
+							components.Badge(c, "发现新版本 "+s.UpdateLatestVersion)
+						case "downloading":
+							components.Text(c, "正在下载更新…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+						case "restarting":
+							components.Text(c, "正在重启…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
+						case "error":
+							if s.UpdateErr != "" {
+								components.Text(c, s.UpdateErr).FontSize(float32(tok.TextData)).TextColor(tok.Danger)
+							}
+						}
+					})
+					ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
+						chkBtn := components.Button(c, "检查更新", components.ButtonSecondary)
+						if s.UpdateStatus == "checking" || s.UpdateStatus == "downloading" || s.UpdateStatus == "restarting" {
+							chkBtn.Disabled(true)
+						}
+						if chkBtn.Clicked() && s.OnCheckUpdate != nil {
+							s.OnCheckUpdate()
+						}
+						if !isMobileOS && s.UpdateStatus == "available" && s.OnInstallUpdate != nil {
+							if components.Button(c, "立即更新并重启", components.ButtonPrimary).Clicked() {
+								s.OnInstallUpdate()
+							}
+						}
+						if s.UpdateDownloadURL != "" && s.OnOpenUpdatePage != nil {
+							if components.Button(c, "发布说明", components.ButtonGhost).Clicked() {
+								s.OnOpenUpdatePage()
+							}
+						}
+					})
+					if strings.TrimSpace(s.UpdateNotes) != "" && s.UpdateStatus == "available" {
+						ui.Box(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+							Background(tok.Elevated).Children(func() {
+							ui.Text(c, s.UpdateNotes).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						})
+					}
+				})
+			},
+		},
+	}
+	if !isMobileOS {
+		aboutAppItems = append(aboutAppItems,
+			components.SettingsItem{
+				ID:       "update-auto-check",
+				Title:    "启动时检查更新",
+				Keywords: []string{"auto update", "自动检查"},
+				Build: func(c *ui.Context) {
+					if components.Switch(c, &s.UpdateAutoCheck, "自动检查", components.SwitchOptions{HideLabel: true}).Changed() {
+						s.notifySettingsChanged()
+					}
+				},
+			},
+			components.SettingsItem{
+				ID:       "update-prerelease",
+				Title:    "接收预发布版本",
+				Keywords: []string{"prerelease", "beta", "rc", "预发布"},
+				Build: func(c *ui.Context) {
+					if components.Switch(c, &s.UpdateIncludePre, "预发布", components.SwitchOptions{HideLabel: true}).Changed() {
+						s.notifySettingsChanged()
+					}
+				},
+			},
+		)
+	}
+
 	aboutCat := components.SettingsCategory{
 		ID:      "about",
 		Title:   "关于",
@@ -1219,99 +1338,23 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 		Groups: []components.SettingsGroup{
 			{
 				ID:    "app-update",
-				Title: "软件版本与自动更新",
-				Items: []components.SettingsItem{
-					{
-						ID:       "update-status",
-						Title:    "当前版本",
-						Keywords: []string{"update", "version", "release", "升级", "更新", "版本"},
-						Stacked:  true,
-						Build: func(c *ui.Context) {
-							curVer := firstNonEmptyStr(s.AppVersion, "0.1.0-dev")
-							commitStr := strings.TrimSpace(s.BuildCommit)
-							ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-									verLabel := "v" + strings.TrimPrefix(curVer, "v")
-									if commitStr != "" && commitStr != "dev" {
-										verLabel += " (" + commitStr + ")"
-									}
-									components.Badge(c, verLabel)
-									switch s.UpdateStatus {
-									case "checking":
-										components.Text(c, "正在检查更新…").FontSize(float32(tok.TextData)).TextColor(tok.TextMuted)
-									case "up_to_date":
-										components.Text(c, "已是最新版本").FontSize(float32(tok.TextData)).TextColor(tok.Success)
-									case "available":
-										components.Badge(c, "发现新版本 "+s.UpdateLatestVersion)
-									case "downloading":
-										components.Text(c, "正在下载更新…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
-									case "restarting":
-										components.Text(c, "正在重启…").FontSize(float32(tok.TextData)).TextColor(tok.Accent)
-									case "error":
-										if s.UpdateErr != "" {
-											components.Text(c, s.UpdateErr).FontSize(float32(tok.TextData)).TextColor(tok.Danger)
-										}
-									}
-								})
-								ui.Row(c).Wrap().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {
-									chkBtn := components.Button(c, "检查更新", components.ButtonSecondary)
-									if s.UpdateStatus == "checking" || s.UpdateStatus == "downloading" || s.UpdateStatus == "restarting" {
-										chkBtn.Disabled(true)
-									}
-									if chkBtn.Clicked() && s.OnCheckUpdate != nil {
-										s.OnCheckUpdate()
-									}
-									if s.UpdateStatus == "available" && s.OnInstallUpdate != nil {
-										if components.Button(c, "立即更新并重启", components.ButtonPrimary).Clicked() {
-											s.OnInstallUpdate()
-										}
-									}
-									if s.UpdateDownloadURL != "" && s.OnOpenUpdatePage != nil {
-										if components.Button(c, "发布说明", components.ButtonGhost).Clicked() {
-											s.OnOpenUpdatePage()
-										}
-									}
-								})
-								if strings.TrimSpace(s.UpdateNotes) != "" && s.UpdateStatus == "available" {
-									ui.Box(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-										Background(tok.Elevated).Children(func() {
-										ui.Text(c, s.UpdateNotes).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-									})
-								}
-							})
-						},
-					},
-					{
-						ID:       "update-auto-check",
-						Title:    "启动时检查更新",
-						Keywords: []string{"auto update", "自动检查"},
-						Build: func(c *ui.Context) {
-							if components.Switch(c, &s.UpdateAutoCheck, "自动检查", components.SwitchOptions{HideLabel: true}).Changed() {
-								s.notifySettingsChanged()
-							}
-						},
-					},
-					{
-						ID:       "update-prerelease",
-						Title:    "接收预发布版本",
-						Keywords: []string{"prerelease", "beta", "rc", "预发布"},
-						Build: func(c *ui.Context) {
-							if components.Switch(c, &s.UpdateIncludePre, "预发布", components.SwitchOptions{HideLabel: true}).Changed() {
-								s.notifySettingsChanged()
-							}
-						},
-					},
-				},
+				Title: "软件版本与更新",
+				Items: aboutAppItems,
 			},
 			{
 				ID:    "diag-feedback",
 				Title: "诊断与反馈",
 				Items: []components.SettingsItem{
 					{
-						ID:          "feedback-mode",
-						Title:       "可视化截图标注反馈模式",
-						Description: "开启右下角悬浮反馈条，随时红框截图批注并一键直传开发者（Ctrl+Shift+D）",
-						Keywords:    []string{"feedback", "beta", "反馈模式", "截图标注", "红框"},
+						ID:    "feedback-mode",
+						Title: "可视化截图标注反馈模式",
+						Description: func() string {
+							if isMobile {
+								return "开启悬浮反馈条，随时框选截图批注并一键直传开发者"
+							}
+							return "开启右下角悬浮反馈条，随时红框截图批注并一键直传开发者（Ctrl+Shift+D）"
+						}(),
+						Keywords: []string{"feedback", "beta", "反馈模式", "截图标注", "红框"},
 						Build: func(c *ui.Context) {
 							if components.Switch(c, &s.FeedbackMode, "反馈模式", components.SwitchOptions{HideLabel: true}).Changed() {
 								s.notifySettingsChanged()
@@ -1359,14 +1402,17 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 
 	syncCat := s.buildSyncSettingsCategory(c, tok)
 
-	return []components.SettingsCategory{
+	cats := []components.SettingsCategory{
 		vaultCat,
 		syncCat,
 		appearanceCat,
 		editorCat,
-		hotkeysCat,
-		aboutCat,
 	}
+	if !isMobile {
+		cats = append(cats, hotkeysCat)
+	}
+	cats = append(cats, aboutCat)
+	return cats
 }
 
 func (s *Shell) buildSyncSettingsCategory(c *ui.Context, tok theme.Tokens) components.SettingsCategory {
@@ -1411,215 +1457,338 @@ func (s *Shell) buildSyncSettingsCategory(c *ui.Context, tok theme.Tokens) compo
 		}
 	}
 
+	provider := NormalizeSyncProvider(s.SyncSettings.Provider)
+	groupTitle := "WebDAV 多端同步"
+	if provider == SyncProviderOneDrive {
+		groupTitle = "OneDrive 云端同步"
+	} else if provider == SyncProviderGDrive {
+		groupTitle = "Google Drive 云端同步"
+	}
+
+	syncBackendItems := []components.SettingsItem{
+		{
+			ID:          "sync-provider",
+			Title:       "同步后端",
+			Description: "同一份清单增量协议支持 WebDAV（坚果云 / NAS）与 OneDrive / Google Drive 云盘",
+			Keywords:    []string{"provider", "webdav", "onedrive", "google drive", "后端", "云盘", "网盘"},
+			Stacked:     true,
+			Build: func(c *ui.Context) {
+				ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					for _, opt := range []struct {
+						key, lbl string
+					}{
+						{SyncProviderWebDAV, "WebDAV"},
+						{SyncProviderOneDrive, "OneDrive"},
+						{SyncProviderGDrive, "Google Drive"},
+					} {
+						opt := opt
+						renderPillChoice("sync-prov-"+opt.key, opt.lbl, provider == opt.key, func() {
+							s.SyncSettings.Provider = opt.key
+							s.SyncSettings.OAuthPending = false
+							s.SyncSettings.OAuthUserCode = ""
+							s.saveSyncSettings()
+						})
+					}
+				})
+			},
+		},
+		{
+			ID:          "sync-enabled",
+			Title:       "启用多端同步",
+			Description: "基于单文件清单索引增量同步，避免目录遍历触发限流",
+			Keywords:    []string{"sync", "webdav", "同步", "启用", "多端"},
+			Build: func(c *ui.Context) {
+				if components.Switch(c, &s.SyncSettings.Enabled, "启用多端同步", components.SwitchOptions{HideLabel: true}).Changed() {
+					s.saveSyncSettings()
+				}
+			},
+		},
+		{
+			ID:       "sync-status-summary",
+			Title:    "同步状态",
+			Keywords: []string{"sync", "status", "状态", "同步", "待同步"},
+			Stacked:  true,
+			Build: func(c *ui.Context) {
+				ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						badgeText := "未启用"
+						tone := components.BadgeNeutral
+						switch {
+						case len(s.SyncConflicts) > 0:
+							badgeText = fmt.Sprintf("存在 %d 项冲突", len(s.SyncConflicts))
+							tone = components.BadgeWarning
+						case s.SyncState.Status == "error":
+							badgeText = "同步异常"
+							tone = components.BadgeDanger
+						case s.SyncState.Status == "syncing":
+							badgeText = "同步中…"
+							tone = components.BadgeAccent
+						case s.SyncState.Status == "synced":
+							badgeText = "已同步"
+							tone = components.BadgeSuccess
+						case s.SyncSettings.Enabled:
+							badgeText = "已就绪"
+							tone = components.BadgeSuccess
+						}
+						kit.Badge(c, badgeText, components.BadgeOptions{Tone: tone})
+						if strings.TrimSpace(s.SyncState.LastSyncText) != "" {
+							components.Text(c, "上次同步: "+s.SyncState.LastSyncText).
+								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+						}
+						if s.SyncState.PendingCount > 0 {
+							kit.Badge(c, fmt.Sprintf("待同步 %d 项", s.SyncState.PendingCount), components.BadgeOptions{Tone: components.BadgeWarning})
+						}
+					})
+					if strings.TrimSpace(s.SyncState.ErrorText) != "" {
+						kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, s.SyncState.ErrorText, "重试", func() {
+							s.saveSyncSettings()
+							if s.OnTriggerSyncNow != nil {
+								s.OnTriggerSyncNow()
+							}
+						})
+					}
+				})
+			},
+		},
+	}
+
+	if provider == SyncProviderWebDAV {
+		syncBackendItems = append(syncBackendItems,
+			components.SettingsItem{
+				ID:          "sync-endpoint",
+				Title:       "服务器地址 (WebDAV)",
+				Description: "支持坚果云、群晖 NAS、Nextcloud 与 Alist；识别坚果云后自动启用防限流保护",
+				Keywords:    []string{"webdav", "url", "endpoint", "nutstore", "坚果云", "群晖", "nextcloud"},
+				Stacked:     true,
+				Build: func(c *ui.Context) {
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+						prev := s.SyncSettings.Endpoint
+						ui.Box(c.Key("sync-endpoint-box")).FillWidth().Children(func() {
+							components.TextBox(c, &s.SyncSettings.Endpoint, components.TextBoxOptions{LeadingIcon: lucide.Cloud()}).
+								Label("WebDAV 服务器地址").
+								Placeholder("https://dav.jianguoyun.com/dav/")
+						})
+						if s.SyncSettings.Endpoint != prev {
+							s.saveSyncSettings()
+						}
+						if s.SyncSettings.IsNutstore() {
+							ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+								kit.Badge(c, "坚果云自动限流保护 · 单线程并发", components.BadgeOptions{
+									Tone: components.BadgeAccent,
+									Icon: lucide.ShieldCheck(),
+								})
+							})
+						}
+					})
+				},
+			},
+			components.SettingsItem{
+				ID:       "sync-username",
+				Title:    "用户名",
+				Keywords: []string{"username", "account", "账号", "用户名"},
+				Stacked:  true,
+				Build: func(c *ui.Context) {
+					prev := s.SyncSettings.Username
+					ui.Box(c.Key("sync-username-box")).FillWidth().Children(func() {
+						components.TextBox(c, &s.SyncSettings.Username, components.TextBoxOptions{}).
+							Label("WebDAV 用户名").
+							Placeholder("账号邮箱或用户名")
+					})
+					if s.SyncSettings.Username != prev {
+						s.saveSyncSettings()
+					}
+				},
+			},
+			components.SettingsItem{
+				ID:       "sync-password",
+				Title:    "应用密码",
+				Keywords: []string{"password", "secret", "token", "密码", "应用密码"},
+				Stacked:  true,
+				Build: func(c *ui.Context) {
+					prev := s.SyncSettings.Password
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Box(c.Key("sync-password-box")).Grow(1).MinWidth(0).Children(func() {
+							tb := components.TextBox(c, &s.SyncSettings.Password, components.TextBoxOptions{LeadingIcon: lucide.Lock()}).
+								Label("WebDAV 应用密码").
+								Placeholder("输入 WebDAV 专用应用密码")
+							if !s.syncPasswordVisible {
+								tb.Password()
+							}
+						})
+						eyeIcon := lucide.Eye()
+						eyeLabel := "显示密码"
+						if s.syncPasswordVisible {
+							eyeIcon = lucide.EyeOff()
+							eyeLabel = "隐藏密码"
+						}
+						if components.IconButton(c.Key("sync-password-eye"), eyeIcon, eyeLabel, components.IconButtonCompact).Clicked() {
+							s.syncPasswordVisible = !s.syncPasswordVisible
+						}
+					})
+					if s.SyncSettings.Password != prev {
+						s.saveSyncSettings()
+					}
+				},
+			},
+		)
+	} else {
+		cloudLabel := "OneDrive"
+		clientIDPlaceholder := "输入 Azure 应用 Client ID (Device Code 授权)"
+		if provider == SyncProviderGDrive {
+			cloudLabel = "Google Drive"
+			clientIDPlaceholder = "输入 Google OAuth Desktop Client ID"
+		}
+		syncBackendItems = append(syncBackendItems,
+			components.SettingsItem{
+				ID:          "sync-oauth-client-id",
+				Title:       cloudLabel + " OAuth Client ID",
+				Description: "使用 RFC 8628 设备码免回调授权，仅访问应用隔离目录；Token 仅存本机系统钥匙串",
+				Keywords:    []string{"oauth", "client", "onedrive", "google drive", "授权"},
+				Stacked:     true,
+				Build: func(c *ui.Context) {
+					prev := s.SyncSettings.OAuthClientID
+					ui.Box(c.Key("sync-oauth-cid-box")).FillWidth().Children(func() {
+						components.TextBox(c, &s.SyncSettings.OAuthClientID, components.TextBoxOptions{LeadingIcon: lucide.KeyRound()}).
+							Label(cloudLabel + " Client ID").
+							Placeholder(clientIDPlaceholder)
+					})
+					if s.SyncSettings.OAuthClientID != prev {
+						s.saveSyncSettings()
+					}
+				},
+			},
+			components.SettingsItem{
+				ID:       "sync-oauth-auth",
+				Title:    cloudLabel + " 账号授权",
+				Keywords: []string{"auth", "login", "onedrive", "google drive", "登录", "授权"},
+				Stacked:  true,
+				Build: func(c *ui.Context) {
+					ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							if s.SyncSettings.OAuthAuthorized {
+								lbl := "已授权 " + cloudLabel
+								if strings.TrimSpace(s.SyncSettings.OAuthAccountHint) != "" {
+									lbl += " · " + s.SyncSettings.OAuthAccountHint
+								}
+								kit.Badge(c, lbl, components.BadgeOptions{Tone: components.BadgeSuccess, Icon: lucide.ShieldCheck()})
+							} else if s.SyncSettings.OAuthPending {
+								kit.Badge(c, "等待浏览器授权确认…", components.BadgeOptions{Tone: components.BadgeAccent})
+							} else {
+								kit.Badge(c, "尚未授权", components.BadgeOptions{Tone: components.BadgeNeutral})
+							}
+						})
+						if s.SyncSettings.OAuthPending && strings.TrimSpace(s.SyncSettings.OAuthUserCode) != "" {
+							msg := fmt.Sprintf("请在浏览器打开 %s 并输入授权码：%s",
+								firstNonEmptyStr(s.SyncSettings.OAuthVerifyURL, "验证页面"), s.SyncSettings.OAuthUserCode)
+							kit.InlineBanner(c, tok, lucide.KeyRound(), kit.BannerInfo, msg, "", nil)
+						}
+						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							if !s.SyncSettings.OAuthAuthorized {
+								authBtn := components.Button(c, "开始授权登录", components.ButtonPrimary)
+								if s.SyncSettings.OAuthPending {
+									authBtn.Disabled(true)
+								}
+								if authBtn.Clicked() {
+									s.saveSyncSettings()
+									if s.OnStartCloudOAuth != nil {
+										s.OnStartCloudOAuth(provider)
+									}
+								}
+							} else {
+								if components.Button(c, "重新授权", components.ButtonOutline).Clicked() {
+									s.saveSyncSettings()
+									if s.OnStartCloudOAuth != nil {
+										s.OnStartCloudOAuth(provider)
+									}
+								}
+								if components.Button(c, "断开连接", components.ButtonGhost).Clicked() && s.OnDisconnectCloudOAuth != nil {
+									s.OnDisconnectCloudOAuth(provider)
+								}
+							}
+						})
+					})
+				},
+			},
+		)
+	}
+
+	syncBackendItems = append(syncBackendItems,
+		components.SettingsItem{
+			ID:       "sync-remote-path",
+			Title:    "远端目录路径",
+			Keywords: []string{"remote", "path", "目录", "远端"},
+			Stacked:  true,
+			Build: func(c *ui.Context) {
+				prev := s.SyncSettings.RemotePath
+				ui.Box(c.Key("sync-remote-path-box")).FillWidth().Children(func() {
+					components.TextBox(c, &s.SyncSettings.RemotePath, components.TextBoxOptions{}).
+						Label("远端同步目录").
+						Placeholder("/AsterLab")
+				})
+				if s.SyncSettings.RemotePath != prev {
+					s.saveSyncSettings()
+				}
+			},
+		},
+		components.SettingsItem{
+			ID:       "sync-interval",
+			Title:    "自动同步间隔",
+			Keywords: []string{"interval", "auto", "同步间隔", "频率"},
+			Build: func(c *ui.Context) {
+				opts := []int{0, 1, 5, 15, 30}
+				sel := components.Select(c, &s.SyncSettings.AutoIntervalMin)
+				sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
+					components.Text(c, intervalLabel).SingleLine()
+				})
+				sel.Popup(func(ui.Element) {
+					for _, opt := range opts {
+						opt := opt
+						sel.Item(opt).Children(func() {
+							components.Text(c, intervalLabels[opt]).SingleLine()
+						})
+					}
+				})
+				if sel.Trigger.Changed() {
+					s.saveSyncSettings()
+				}
+			},
+		},
+		components.SettingsItem{
+			ID:       "sync-actions",
+			Title:    "连接测试与手动同步",
+			Keywords: []string{"test", "sync", "测试连接", "立即同步"},
+			Stacked:  true,
+			Build: func(c *ui.Context) {
+				ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					if components.Button(c, "测试连接", components.ButtonOutline).Clicked() {
+						s.saveSyncSettings()
+						if s.OnTestSyncConnection != nil {
+							s.OnTestSyncConnection()
+						}
+					}
+					syncNowBtn := components.Button(c, "立即同步", components.ButtonPrimary)
+					if s.SyncState.Status == "syncing" {
+						syncNowBtn.Disabled(true)
+					}
+					if syncNowBtn.Clicked() {
+						s.saveSyncSettings()
+						if s.OnTriggerSyncNow != nil {
+							s.OnTriggerSyncNow()
+						}
+					}
+					if components.Button(c, "保存设置", components.ButtonSecondary).Clicked() {
+						s.saveSyncSettings()
+					}
+				})
+			},
+		},
+	)
+
 	groups := []components.SettingsGroup{
 		{
 			ID:    "sync-webdav",
-			Title: "WebDAV 多端同步",
-			Items: []components.SettingsItem{
-				{
-					ID:          "sync-enabled",
-					Title:       "启用多端同步",
-					Description: "基于单文件清单索引增量同步，避免目录遍历触发限流",
-					Keywords:    []string{"sync", "webdav", "同步", "启用", "多端"},
-					Build: func(c *ui.Context) {
-						if components.Switch(c, &s.SyncSettings.Enabled, "启用多端同步", components.SwitchOptions{HideLabel: true}).Changed() {
-							s.saveSyncSettings()
-						}
-					},
-				},
-				{
-					ID:       "sync-status-summary",
-					Title:    "同步状态",
-					Keywords: []string{"sync", "status", "状态", "同步", "待同步"},
-					Stacked:  true,
-					Build: func(c *ui.Context) {
-						ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-								badgeText := "未启用"
-								tone := components.BadgeNeutral
-								switch {
-								case len(s.SyncConflicts) > 0:
-									badgeText = fmt.Sprintf("存在 %d 项冲突", len(s.SyncConflicts))
-									tone = components.BadgeWarning
-								case s.SyncState.Status == "error":
-									badgeText = "同步异常"
-									tone = components.BadgeDanger
-								case s.SyncState.Status == "syncing":
-									badgeText = "同步中…"
-									tone = components.BadgeAccent
-								case s.SyncState.Status == "synced":
-									badgeText = "已同步"
-									tone = components.BadgeSuccess
-								case s.SyncSettings.Enabled:
-									badgeText = "已就绪"
-									tone = components.BadgeSuccess
-								}
-								kit.Badge(c, badgeText, components.BadgeOptions{Tone: tone})
-								if strings.TrimSpace(s.SyncState.LastSyncText) != "" {
-									components.Text(c, "上次同步: "+s.SyncState.LastSyncText).
-										FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
-								}
-								if s.SyncState.PendingCount > 0 {
-									kit.Badge(c, fmt.Sprintf("待同步 %d 项", s.SyncState.PendingCount), components.BadgeOptions{Tone: components.BadgeWarning})
-								}
-							})
-							if strings.TrimSpace(s.SyncState.ErrorText) != "" {
-								kit.InlineBanner(c, tok, lucide.CircleAlert(), kit.BannerDanger, s.SyncState.ErrorText, "重试", func() {
-									s.saveSyncSettings()
-									if s.OnTriggerSyncNow != nil {
-										s.OnTriggerSyncNow()
-									}
-								})
-							}
-						})
-					},
-				},
-				{
-					ID:          "sync-endpoint",
-					Title:       "服务器地址 (WebDAV)",
-					Description: "支持坚果云、群晖 NAS、Nextcloud 与 Alist；识别坚果云后自动启用防限流保护",
-					Keywords:    []string{"webdav", "url", "endpoint", "nutstore", "坚果云", "群晖", "nextcloud"},
-					Stacked:     true,
-					Build: func(c *ui.Context) {
-						ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
-							prev := s.SyncSettings.Endpoint
-							ui.Box(c.Key("sync-endpoint-box")).FillWidth().Children(func() {
-								components.TextBox(c, &s.SyncSettings.Endpoint, components.TextBoxOptions{LeadingIcon: lucide.Cloud()}).
-									Label("WebDAV 服务器地址").
-									Placeholder("https://dav.jianguoyun.com/dav/")
-							})
-							if s.SyncSettings.Endpoint != prev {
-								s.saveSyncSettings()
-							}
-							if s.SyncSettings.IsNutstore() {
-								ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-									kit.Badge(c, "坚果云自动限流保护 · 单线程并发", components.BadgeOptions{
-										Tone: components.BadgeAccent,
-										Icon: lucide.ShieldCheck(),
-									})
-								})
-							}
-						})
-					},
-				},
-				{
-					ID:       "sync-username",
-					Title:    "用户名",
-					Keywords: []string{"username", "account", "账号", "用户名"},
-					Stacked:  true,
-					Build: func(c *ui.Context) {
-						prev := s.SyncSettings.Username
-						ui.Box(c.Key("sync-username-box")).FillWidth().Children(func() {
-							components.TextBox(c, &s.SyncSettings.Username, components.TextBoxOptions{}).
-								Label("WebDAV 用户名").
-								Placeholder("账号邮箱或用户名")
-						})
-						if s.SyncSettings.Username != prev {
-							s.saveSyncSettings()
-						}
-					},
-				},
-				{
-					ID:       "sync-password",
-					Title:    "应用密码",
-					Keywords: []string{"password", "secret", "token", "密码", "应用密码"},
-					Stacked:  true,
-					Build: func(c *ui.Context) {
-						prev := s.SyncSettings.Password
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Box(c.Key("sync-password-box")).Grow(1).MinWidth(0).Children(func() {
-								tb := components.TextBox(c, &s.SyncSettings.Password, components.TextBoxOptions{LeadingIcon: lucide.Lock()}).
-									Label("WebDAV 应用密码").
-									Placeholder("输入 WebDAV 专用应用密码")
-								if !s.syncPasswordVisible {
-									tb.Password()
-								}
-							})
-							eyeIcon := lucide.Eye()
-							eyeLabel := "显示密码"
-							if s.syncPasswordVisible {
-								eyeIcon = lucide.EyeOff()
-								eyeLabel = "隐藏密码"
-							}
-							if components.IconButton(c.Key("sync-password-eye"), eyeIcon, eyeLabel, components.IconButtonCompact).Clicked() {
-								s.syncPasswordVisible = !s.syncPasswordVisible
-							}
-						})
-						if s.SyncSettings.Password != prev {
-							s.saveSyncSettings()
-						}
-					},
-				},
-				{
-					ID:       "sync-remote-path",
-					Title:    "远端目录路径",
-					Keywords: []string{"remote", "path", "目录", "远端"},
-					Stacked:  true,
-					Build: func(c *ui.Context) {
-						prev := s.SyncSettings.RemotePath
-						ui.Box(c.Key("sync-remote-path-box")).FillWidth().Children(func() {
-							components.TextBox(c, &s.SyncSettings.RemotePath, components.TextBoxOptions{}).
-								Label("远端同步目录").
-								Placeholder("/AsterLab")
-						})
-						if s.SyncSettings.RemotePath != prev {
-							s.saveSyncSettings()
-						}
-					},
-				},
-				{
-					ID:       "sync-interval",
-					Title:    "自动同步间隔",
-					Keywords: []string{"interval", "auto", "同步间隔", "频率"},
-					Build: func(c *ui.Context) {
-						opts := []int{0, 1, 5, 15, 30}
-						sel := components.Select(c, &s.SyncSettings.AutoIntervalMin)
-						sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
-							components.Text(c, intervalLabel).SingleLine()
-						})
-						sel.Popup(func(ui.Element) {
-							for _, opt := range opts {
-								opt := opt
-								sel.Item(opt).Children(func() {
-									components.Text(c, intervalLabels[opt]).SingleLine()
-								})
-							}
-						})
-						if sel.Trigger.Changed() {
-							s.saveSyncSettings()
-						}
-					},
-				},
-				{
-					ID:       "sync-actions",
-					Title:    "连接测试与手动同步",
-					Keywords: []string{"test", "sync", "测试连接", "立即同步"},
-					Stacked:  true,
-					Build: func(c *ui.Context) {
-						ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-							if components.Button(c, "测试连接", components.ButtonOutline).Clicked() {
-								s.saveSyncSettings()
-								if s.OnTestSyncConnection != nil {
-									s.OnTestSyncConnection()
-								}
-							}
-							syncNowBtn := components.Button(c, "立即同步", components.ButtonPrimary)
-							if s.SyncState.Status == "syncing" {
-								syncNowBtn.Disabled(true)
-							}
-							if syncNowBtn.Clicked() {
-								s.saveSyncSettings()
-								if s.OnTriggerSyncNow != nil {
-									s.OnTriggerSyncNow()
-								}
-							}
-							if components.Button(c, "保存设置", components.ButtonSecondary).Clicked() {
-								s.saveSyncSettings()
-							}
-						})
-					},
-				},
-			},
+			Title: groupTitle,
+			Items: syncBackendItems,
 		},
 		{
 			ID:    "sync-image-policy",

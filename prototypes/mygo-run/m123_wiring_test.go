@@ -746,3 +746,88 @@ func TestM123ShellSyncAndBackupCallbackGlue(t *testing.T) {
 		t.Fatalf("expected use_remote to promote remote content, got %s", string(updated))
 	}
 }
+
+func TestSyncHostConfigPersistenceAndEffectiveWebDAVURL(t *testing.T) {
+	if got := effectiveWebDAVBaseURL("https://dav.jianguoyun.com/dav", ""); got != "https://dav.jianguoyun.com/dav" {
+		t.Fatalf("empty remotePath mutated baseURL: %q", got)
+	}
+	if got := effectiveWebDAVBaseURL("https://dav.jianguoyun.com/dav", "/AsterLab"); got != "https://dav.jianguoyun.com/dav/AsterLab/" {
+		t.Fatalf("non-empty remotePath not joined: %q", got)
+	}
+	if got := effectiveWebDAVBaseURL("https://dav.jianguoyun.com/dav/AsterLab", "/AsterLab"); got != "https://dav.jianguoyun.com/dav/AsterLab" {
+		t.Fatalf("duplicate /AsterLab doubled: %q", got)
+	}
+
+	vRoot := t.TempDir()
+	sh := &shell.Shell{TodayDate: "2026-11-27", SelectedDate: "2026-11-27"}
+	a := &app{shell: sh}
+	if err := a.initVaultWorkspace(vRoot); err != nil {
+		t.Fatal(err)
+	}
+	a.wireSyncAndBackupShellCallbacks()
+
+	sh.SyncSettings = shell.SyncSettings{
+		Provider:          shell.SyncProviderOneDrive,
+		Enabled:           true,
+		RemotePath:        "/LabVault-B",
+		AutoIntervalMin:   15,
+		OAuthClientID:     "azure-app-123",
+		ImagePolicy:       shell.SyncImagePolicyThreshold,
+		ImageThresholdMB:  2,
+		WiFiOnlyOriginals: true,
+	}
+	sh.OnSaveSyncSettings()
+
+	// Fresh app reading persisted config should hydrate RemotePath, AutoIntervalMin, Provider, and OAuthClientID.
+	sh2 := &shell.Shell{TodayDate: "2026-11-27", SelectedDate: "2026-11-27"}
+	a2 := &app{shell: sh2}
+	if err := a2.initVaultWorkspace(vRoot); err != nil {
+		t.Fatal(err)
+	}
+	a2.wireSyncAndBackupShellCallbacks()
+	if sh2.SyncSettings.Provider != shell.SyncProviderOneDrive ||
+		sh2.SyncSettings.RemotePath != "/LabVault-B" ||
+		sh2.SyncSettings.AutoIntervalMin != 15 ||
+		sh2.SyncSettings.OAuthClientID != "azure-app-123" {
+		t.Fatalf("sync settings did not round-trip: %+v", sh2.SyncSettings)
+	}
+}
+
+func TestSwitchVaultRootErrValidationAndToast(t *testing.T) {
+	vRoot1 := t.TempDir()
+	vRoot2 := t.TempDir()
+	sh := &shell.Shell{TodayDate: "2026-11-27", SelectedDate: "2026-11-27"}
+	a := &app{shell: sh}
+	if err := a.initVaultWorkspace(vRoot1); err != nil {
+		t.Fatal(err)
+	}
+	a.wireRecoveryHost()
+	a.wireSyncAndBackupShellCallbacks()
+
+	if err := a.switchVaultRootErr("   "); err == nil {
+		t.Fatalf("expected error on empty vault path")
+	}
+	// Passing a file path as vault directory fails writable directory probe without tearing down active vault.
+	blockerFile := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(blockerFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.switchVaultRootErr(blockerFile); err == nil {
+		t.Fatalf("expected writable probe error when path is a regular file")
+	}
+	if a.vault == nil || filepath.Clean(a.vault.Root) != filepath.Clean(vRoot1) {
+		t.Fatalf("expected original vault preserved after failed switch, got %v", a.vault)
+	}
+
+	// Valid switch succeeds, updates shell VaultPathInput, ensures tab, and pushes success toast.
+	if err := a.switchVaultRootErr(vRoot2); err != nil {
+		t.Fatalf("switchVaultRootErr valid path failed: %v", err)
+	}
+	if filepath.Clean(sh.VaultPathInput) != filepath.Clean(vRoot2) {
+		t.Fatalf("expected VaultPathInput=%s, got %s", vRoot2, sh.VaultPathInput)
+	}
+	if sh.ActiveTab() == nil {
+		t.Fatalf("expected ActiveTab ensured after vault switch")
+	}
+}
+

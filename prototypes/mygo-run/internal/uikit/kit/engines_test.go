@@ -94,6 +94,57 @@ func TestScrubNumberDeadzoneShiftEscapeAndCommit(t *testing.T) {
 	if st.mode != scrubIdle || !rCommit.Committed {
 		t.Fatalf("expected single atomic commit on PointerUp, mode=%v committed=%v", st.mode, rCommit.Committed)
 	}
+
+	// 3. Mobile 8px touch deadzone ignores micro-jitter (< 8px), then commits cleanly beyond 8px.
+	*st = scrubState{}
+	val = 20.0
+	applyScrubDeltaDeadzone(st, ui.InputEvent{Kind: ui.InputPointerDown, X: 50, Button: 0}, &val, opts, 8)
+	rJitter := applyScrubDeltaDeadzone(st, ui.InputEvent{Kind: ui.InputPointerMove, X: 56}, &val, opts, 8) // 6px < 8px
+	if st.mode != scrubPointing || rJitter.Changed || val != 20.0 {
+		t.Fatalf("expected 6px jitter inside 8px mobile deadzone to be ignored, mode=%v val=%.1f", st.mode, val)
+	}
+	rMobileDrag := applyScrubDeltaDeadzone(st, ui.InputEvent{Kind: ui.InputPointerMove, X: 65}, &val, opts, 8) // +15px / 5 = +3
+	if st.mode != scrubDragging || !rMobileDrag.Changed || val != 23.0 {
+		t.Fatalf("expected drag beyond 8px deadzone to scrub to 23.0, mode=%v val=%.1f", st.mode, val)
+	}
+
+	// 4. Inline edit mode shows ✓ confirm button and commits typed value cleanly.
+	liveVal := 25.0
+	var committed float64
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		tok := theme.GetTokens(c.Theme())
+		ui.Box(c).Padding(12).Children(func() {
+			r := ScrubNumber(c, "mobile-scrub", tok, &liveVal, ScrubOptions{
+				Label: "体积", Unit: "mL", Min: 0, Max: 500, Step: 1, Decimals: 0, Width: 180,
+			})
+			if r.Committed {
+				committed = liveVal
+			}
+		})
+	}, 402, 200)
+	tt.Frame()
+	if err := tt.Click("体积 25 mL"); err != nil {
+		t.Fatalf("tap scrub pill to enter edit mode: %v", err)
+	}
+	tt.Frame()
+	rOk, ok := tt.Find("确认")
+	if !ok {
+		t.Fatalf("expected inline 确认 button in scrub edit mode, texts=%v", tt.Texts())
+	}
+	// Focus the inline TextBox to the left of the confirm button before typing.
+	tt.ClickAt(48, rOk.Y+rOk.H/2)
+	tt.Frame()
+	tt.Command("selectAll")
+	tt.Type("42")
+	tt.Frame()
+	if err := tt.Click("确认"); err != nil {
+		t.Fatalf("click inline 确认 button: %v", err)
+	}
+	tt.Frame()
+	if liveVal != 42 || committed != 42 {
+		t.Fatalf("expected inline confirm button to commit 42, liveVal=%.1f committed=%.1f", liveVal, committed)
+	}
 }
 
 func TestToastQueuePushUndoAndPrune(t *testing.T) {

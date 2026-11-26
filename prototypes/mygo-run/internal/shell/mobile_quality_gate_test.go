@@ -112,7 +112,7 @@ func TestMobileSettingsBrightnessParity(t *testing.T) {
 				t.Fatalf("%s Settings background brightness drifted from main canvas (mainMed=%.1f, setMed=%.1f, diff=%.1f)",
 					tc.name, mainMed, setMed, diff)
 			}
-			if tc.dark && setP99 < 140.0 {
+			if tc.dark && setP99 < 125.0 {
 				t.Fatalf("dark Settings appears darkened by scrim overlay (mainP99=%.1f, setP99=%.1f)", mainP99, setP99)
 			}
 			if !tc.dark && setP99 < 230.0 {

@@ -1899,29 +1899,44 @@ func renderMobilePlateSheet(
 		}
 
 		ui.Column(c).FillWidth().Height(sheetBodyH).Padding(float32(t.Spacing12)).Gap(float32(t.Spacing8)).Children(func() {
-			// Header bar
+			// Header Row 1: Geometry title + well count + Done CTA (never clipped on narrow phones)
 			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
-				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(t.Spacing4)).Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(t.Spacing4)*0.5).Children(func() {
 					ui.Text(c, plateGeometryLabel(rows, cols, props.Topology)).
-						FontSize(float32(t.TextSection)).Bold().TextColor(t.Text).SingleLine()
+						FontSize(float32(t.TextSection)).Bold().TextColor(t.Text).SingleLine().Ellipsis("…")
 					sub := fmt.Sprintf("已排 %d / %d 孔 · 已选 %d 孔", len(props.Wells), rows*cols, len(props.SelectedIDs))
-					ui.Text(c, sub).FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).SingleLine()
+					ui.Text(c, sub).FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).SingleLine().Ellipsis("…")
 				})
-				if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() {
-					st.ZoomState.Scale = max(1, st.ZoomState.Scale-0.5)
-				}
-				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
-					FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted)
-				if components.IconButton(c, lucide.ZoomIn(), "放大孔板", components.IconButtonCompact).Clicked() {
-					st.ZoomState.Scale = min(maxZoom, st.ZoomState.Scale+0.5)
-				}
-				if components.Button(c, "重置", components.ButtonGhost).Clicked() {
-					st.ZoomState.Reset()
-				}
-				doneBtn := components.Button(c, "完成", components.ButtonPrimary).MinHeight(float32(t.ButtonHeight))
+				doneBtn := components.Button(c, "完成", components.ButtonPrimary).MinHeight(float32(t.Spacing32) + float32(t.Spacing8))
 				if doneBtn.Clicked() {
 					mygo.Haptics.Light()
 					st.MobileSheetOpen = false
+				}
+			})
+			// Header Row 2: Dedicated thumb-friendly Zoom Bar [- | 100% | + | 重置]
+			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Gap(float32(t.Spacing8)).
+				Padding(float32(t.Spacing4), float32(t.Spacing8)).
+				Radius(float32(t.ControlRadius)).Background(t.Elevated).Border(1, t.BorderSubtle).Children(func() {
+				zoomBtnH := float32(t.Spacing32) + float32(t.Spacing4)
+				zoomOutBtn := ui.ButtonBase(c.Key("plate-zoom-out")).Size(zoomBtnH, zoomBtnH).Radius(float32(t.ControlRadius)).Center().Label("缩小孔板")
+				zoomOutBtn.Children(func() {
+					ui.Icon(c, lucide.ZoomOut()).Size(float32(t.IconMd), float32(t.IconMd)).TextColor(t.Text)
+				})
+				if zoomOutBtn.Clicked() {
+					st.ZoomState.Scale = max(1, st.ZoomState.Scale-0.5)
+				}
+				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
+					FontSize(float32(t.TextData)).Bold().FontFeatures("tnum").TextColor(t.Text).
+					MinWidth(float32(t.Spacing48)).Center()
+				zoomInBtn := ui.ButtonBase(c.Key("plate-zoom-in")).Size(zoomBtnH, zoomBtnH).Radius(float32(t.ControlRadius)).Center().Label("放大孔板")
+				zoomInBtn.Children(func() {
+					ui.Icon(c, lucide.ZoomIn()).Size(float32(t.IconMd), float32(t.IconMd)).TextColor(t.Text)
+				})
+				if zoomInBtn.Clicked() {
+					st.ZoomState.Scale = min(maxZoom, st.ZoomState.Scale+0.5)
+				}
+				if components.Button(c, "重置", components.ButtonGhost).MinHeight(zoomBtnH).Clicked() {
+					st.ZoomState.Reset()
 				}
 			})
 

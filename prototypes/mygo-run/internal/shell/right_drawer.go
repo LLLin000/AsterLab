@@ -88,15 +88,42 @@ func (s *Shell) activeDrawerContext() drawerContextKind {
 	return drawerCtxDocument
 }
 
-func (s *Shell) drawerTabsForContext(ctx drawerContextKind) (shortLabels, fullTitles []string) {
+type rightDrawerTabSpec struct {
+	short string
+	title string
+	icon  *ui.SVG
+}
+
+func (s *Shell) drawerTabSpecsForContext(ctx drawerContextKind) []rightDrawerTabSpec {
 	switch ctx {
 	case drawerCtxCalendar:
-		return []string{"日程概览", "速算计时"}, []string{"日程概览", "速算与计时"}
+		return []rightDrawerTabSpec{
+			{short: "日程概览", title: "日程概览", icon: lucide.CalendarDays()},
+			{short: "速算计时", title: "速算与计时", icon: lucide.Calculator()},
+		}
 	case drawerCtxPantry:
-		return []string{"库存概览", "速算计时"}, []string{"试剂库存概览", "速算与计时"}
+		return []rightDrawerTabSpec{
+			{short: "库存概览", title: "试剂库存概览", icon: lucide.Package()},
+			{short: "速算计时", title: "速算与计时", icon: lucide.Calculator()},
+		}
 	default:
-		return []string{"大纲", "速算计时", "关联体检"}, []string{"步骤大纲", "速算与计时", "关联与诊断"}
+		return []rightDrawerTabSpec{
+			{short: "大纲", title: "步骤大纲", icon: lucide.ListTree()},
+			{short: "速算计时", title: "速算与计时", icon: lucide.Calculator()},
+			{short: "关联体检", title: "关联与诊断", icon: lucide.Link2()},
+		}
 	}
+}
+
+func (s *Shell) drawerTabsForContext(ctx drawerContextKind) (shortLabels, fullTitles []string) {
+	specs := s.drawerTabSpecsForContext(ctx)
+	shortLabels = make([]string, len(specs))
+	fullTitles = make([]string, len(specs))
+	for i, sp := range specs {
+		shortLabels[i] = sp.short
+		fullTitles[i] = sp.title
+	}
+	return shortLabels, fullTitles
 }
 
 func (s *Shell) rightDrawerHeader(c *ui.Context) {
@@ -159,33 +186,42 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 			})
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+		s.rightDrawerBodyOnly(c, tok)
+	})
+}
 
-		ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
-			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
-				switch ctx {
-				case drawerCtxCalendar:
-					if s.RightTab == 0 {
-						s.renderDrawerCalendarSummary(c, tok)
-					} else {
-						s.renderDrawerTimerAndCalc(c, tok)
-					}
-				case drawerCtxPantry:
-					if s.RightTab == 0 {
-						s.renderDrawerPantrySummary(c, tok)
-					} else {
-						s.renderDrawerTimerAndCalc(c, tok)
-					}
-				default:
-					switch s.RightTab {
-					case 0:
-						s.renderDrawerOutline(c, tok)
-					case 1:
-						s.renderDrawerTimerAndCalc(c, tok)
-					case 2:
-						s.renderDrawerLinksAndDiagnostics(c, tok)
-					}
+func (s *Shell) rightDrawerBodyOnly(c *ui.Context, tok theme.Tokens) {
+	s.ensureRightDrawerDefaults()
+	ctx := s.activeDrawerContext()
+	specs := s.drawerTabSpecsForContext(ctx)
+	if s.RightTab >= len(specs) {
+		s.RightTab = 0
+	}
+	ui.Scroll(c.Key("rd-body-scroll")).FillWidth().Grow(1).MinHeight(0).Children(func() {
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+			switch ctx {
+			case drawerCtxCalendar:
+				if s.RightTab == 0 {
+					s.renderDrawerCalendarSummary(c, tok)
+				} else {
+					s.renderDrawerTimerAndCalc(c, tok)
 				}
-			})
+			case drawerCtxPantry:
+				if s.RightTab == 0 {
+					s.renderDrawerPantrySummary(c, tok)
+				} else {
+					s.renderDrawerTimerAndCalc(c, tok)
+				}
+			default:
+				switch s.RightTab {
+				case 0:
+					s.renderDrawerOutline(c, tok)
+				case 1:
+					s.renderDrawerTimerAndCalc(c, tok)
+				case 2:
+					s.renderDrawerLinksAndDiagnostics(c, tok)
+				}
+			}
 		})
 	})
 }

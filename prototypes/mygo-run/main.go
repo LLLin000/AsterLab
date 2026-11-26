@@ -276,6 +276,9 @@ type app struct {
 	syncPolicyOverride  *syncengine.DownloadPolicy
 	syncSecretsMu       sync.Mutex
 	syncSecretsFallback map[string]string
+	syncRunMu           sync.Mutex
+	syncAutoStop        chan struct{}
+	syncOAuthCancel     context.CancelFunc
 	recoveryHistory     *recovery.HistoryManager
 	crashGuardLogDir    string
 	crashGuardInstalled bool
@@ -4957,11 +4960,19 @@ func main() {
 		OnSwitchVaultPath: func(newPath string) {
 			a.switchVaultRoot(newPath)
 		},
+		OnSwitchVaultPathErr: func(newPath string) error {
+			return a.switchVaultRootErr(newPath)
+		},
 		OnCreateVault: func(targetPath string, seedDemo bool) error {
 			return a.createVaultAt(targetPath, seedDemo)
 		},
 		OnOpenSandboxVault: func() {
 			a.openSandboxVault()
+		},
+		OnDismissVaultLauncher: func() {
+			if a.vault != nil && loadLastVaultRoot() == "" {
+				saveLastVaultRoot(a.vault.Root)
+			}
 		},
 		OnRemoveRecentVault: func(vaultPath string) {
 			a.removeRecentVault(vaultPath)

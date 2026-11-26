@@ -49,22 +49,23 @@ type CacheClearResult struct {
 	ClearedPaths []string `json:"clearedPaths,omitempty"`
 }
 
-// Engine orchestrates manifest-driven WebDAV sync for a local AsterLab Vault.
+// Engine orchestrates manifest-driven sync for a local AsterLab Vault across
+// WebDAV, OneDrive, and Google Drive RemoteStore backends.
 type Engine struct {
 	VaultRoot string
-	Client    *WebDAVClient
+	Client    RemoteStore
 	Policy    DownloadPolicy
 	DeviceID  string
 	NowFn     func() time.Time
 }
 
-// NewEngine constructs a Sync Engine bound to vaultRoot and a configured WebDAVClient.
-func NewEngine(vaultRoot string, client *WebDAVClient, policy DownloadPolicy, deviceID string) (*Engine, error) {
+// NewEngine constructs a Sync Engine bound to vaultRoot and a configured RemoteStore.
+func NewEngine(vaultRoot string, client RemoteStore, policy DownloadPolicy, deviceID string) (*Engine, error) {
 	if strings.TrimSpace(vaultRoot) == "" {
 		return nil, errors.New("syncengine: VaultRoot is required")
 	}
 	if client == nil {
-		return nil, errors.New("syncengine: WebDAVClient is required")
+		return nil, errors.New("syncengine: RemoteStore client is required")
 	}
 	if strings.TrimSpace(deviceID) == "" {
 		deviceID = "device"
@@ -109,12 +110,24 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 		return report, err
 	}
 
-	remoteManifest, err := e.fetchRemoteManifest(ctx)
+	remoteManifest, manifestETag, err := e.fetchRemoteManifestWithETag(ctx)
 	if err != nil {
 		return report, err
 	}
+	baseEntries := make(map[string]ManifestEntry, len(remoteManifest.Entries))
+	for k, v := range remoteManifest.Entries {
+		baseEntries[k] = v
+	}
 
 	manifestDirty := false
+	localMutations := map[string]ManifestEntry{}
+	dirtyStateOps := 0
+	checkpointState := func() {
+		if dirtyStateOps > 0 {
+			_ = SaveLocalSyncStateAtomic(e.VaultRoot, state)
+			dirtyStateOps = 0
+		}
+	}
 	pathSet := map[string]struct{}{}
 	for p := range localFiles {
 		pathSet[p] = struct{}{}
@@ -136,10 +149,14 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 
 	for _, relPath := range paths {
 		if err := ctx.Err(); err != nil {
+			checkpointState()
 			return report, err
 		}
 		if IsSyncIgnored(relPath) || IsConflictCopyPath(relPath) {
 			continue
+		}
+		if dirtyStateOps >= 5 {
+			checkpointState()
 		}
 
 		localInfo, hasLocal := localFiles[relPath]
@@ -216,28 +233,35 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 				if relPath == PantryLedgerRelPath {
 					updatedEntry, err := e.mergeAndUploadPantry(ctx, localInfo, remoteEntry, &report)
 					if err != nil {
+						checkpointState()
 						return report, err
 					}
 					remoteManifest.Entries[relPath] = updatedEntry
+					localMutations[relPath] = updatedEntry
 					manifestDirty = true
 					state.Files[relPath] = LocalFileState{
 						RelPath:      relPath,
 						BaseSHA256:   updatedEntry.SHA256,
 						BaseRevision: updatedEntry.Revision,
 					}
+					dirtyStateOps++
 					continue
 				}
 				// Non-mergeable concurrent edit (e.g. .asterml): preserve local + write conflict copy.
 				if err := e.handleConcurrentConflict(ctx, relPath, localInfo, remoteEntry, state, &report); err != nil {
+					checkpointState()
 					return report, err
 				}
+				dirtyStateOps++
 				continue
 			}
 			// If one side deleted and other modified, preserve existing content rather than silently deleting.
 			if !hasLocal && hasRemote && !remoteEntry.Deleted {
 				if err := e.pullRemoteEntry(ctx, relPath, remoteEntry, state, &report); err != nil {
+					checkpointState()
 					return report, err
 				}
+				dirtyStateOps++
 				continue
 			}
 		}
@@ -247,9 +271,11 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 			if hasLocal {
 				entry, err := e.pushLocalFile(ctx, relPath, localInfo, remoteEntry, &report)
 				if err != nil {
+					checkpointState()
 					return report, err
 				}
 				remoteManifest.Entries[relPath] = entry
+				localMutations[relPath] = entry
 				manifestDirty = true
 				origCached := IsAssetPath(relPath)
 				needsOrig := false
@@ -272,13 +298,17 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 					PreviewPath:           entry.PreviewPath,
 					PreviewSHA256:         entry.PreviewSHA256,
 				}
+				dirtyStateOps++
 			} else {
 				// Local file was deleted.
 				if err := e.pushLocalDelete(ctx, relPath, remoteEntry, remoteManifest, &report); err != nil {
+					checkpointState()
 					return report, err
 				}
+				localMutations[relPath] = remoteManifest.Entries[relPath]
 				manifestDirty = true
 				delete(state.Files, relPath)
+				dirtyStateOps++
 			}
 			continue
 		}
@@ -288,28 +318,26 @@ func (e *Engine) Sync(ctx context.Context) (SyncReport, error) {
 			if remoteEntry.Deleted {
 				if hasLocal {
 					if err := os.Remove(localInfo.absPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+						checkpointState()
 						return report, err
 					}
 					report.DeletedLocal = append(report.DeletedLocal, relPath)
 				}
 				delete(state.Files, relPath)
+				dirtyStateOps++
 				continue
 			}
 			if err := e.pullRemoteEntry(ctx, relPath, remoteEntry, state, &report); err != nil {
+				checkpointState()
 				return report, err
 			}
+			dirtyStateOps++
 		}
 	}
 
 	if manifestDirty {
-		remoteManifest.VaultRevision++
-		remoteManifest.UpdatedAt = e.nowUTC().Format(time.RFC3339)
-		remoteManifest.UpdatedByDevice = e.DeviceID
-		manifestBytes, err := MarshalManifest(remoteManifest)
-		if err != nil {
-			return report, err
-		}
-		if err := e.Client.Put(ctx, ManifestRelPath, manifestBytes, "application/json; charset=utf-8"); err != nil {
+		if err := e.commitManifestWithCAS(ctx, remoteManifest, manifestETag, baseEntries, localMutations, localFiles, state, &report); err != nil {
+			checkpointState()
 			return report, err
 		}
 		report.ManifestUpdated = true
@@ -504,14 +532,96 @@ func (e *Engine) scanLocalVault() (map[string]localFileInfo, error) {
 }
 
 func (e *Engine) fetchRemoteManifest(ctx context.Context) (*SyncManifest, error) {
-	raw, err := e.Client.Get(ctx, ManifestRelPath)
+	m, _, err := e.fetchRemoteManifestWithETag(ctx)
+	return m, err
+}
+
+func (e *Engine) fetchRemoteManifestWithETag(ctx context.Context) (*SyncManifest, string, error) {
+	raw, etag, err := e.Client.GetWithETag(ctx, ManifestRelPath)
 	if errors.Is(err, ErrNotFound) {
-		return NewSyncManifest(e.DeviceID), nil
+		return NewSyncManifest(e.DeviceID), "", nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return ParseManifest(raw)
+	m, err := ParseManifest(raw)
+	return m, etag, err
+}
+
+func (e *Engine) commitManifestWithCAS(
+	ctx context.Context,
+	candidate *SyncManifest,
+	expectedETag string,
+	baseEntries map[string]ManifestEntry,
+	localMutations map[string]ManifestEntry,
+	localFiles map[string]localFileInfo,
+	state *LocalSyncState,
+	report *SyncReport,
+) error {
+	curManifest := candidate
+	curETag := expectedETag
+	for attempt := 0; attempt < 3; attempt++ {
+		curManifest.VaultRevision++
+		curManifest.UpdatedAt = e.nowUTC().Format(time.RFC3339)
+		curManifest.UpdatedByDevice = e.DeviceID
+		manifestBytes, err := MarshalManifest(curManifest)
+		if err != nil {
+			return err
+		}
+		_, putErr := e.Client.PutIfMatch(ctx, ManifestRelPath, manifestBytes, "application/json; charset=utf-8", curETag)
+		if putErr == nil {
+			return nil
+		}
+		if !errors.Is(putErr, ErrPreconditionFailed) {
+			return putErr
+		}
+		latest, latestETag, fErr := e.fetchRemoteManifestWithETag(ctx)
+		if fErr != nil {
+			return fErr
+		}
+		// 3-way merge our non-overlapping local mutations into latest remote manifest.
+		for relPath, myEntry := range localMutations {
+			origEntry, hadOrig := baseEntries[relPath]
+			latestEntry, hasLatest := latest.Entries[relPath]
+			remoteUntouched := !hasLatest || (hadOrig &&
+				latestEntry.SHA256 == origEntry.SHA256 &&
+				latestEntry.Revision == origEntry.Revision &&
+				latestEntry.Deleted == origEntry.Deleted)
+			if remoteUntouched {
+				latest.Entries[relPath] = myEntry
+				continue
+			}
+			if myEntry.Deleted {
+				// Remote concurrently updated while we deleted: preserve remote entry.
+				continue
+			}
+			if relPath == PantryLedgerRelPath {
+				if localInfo, ok := localFiles[relPath]; ok {
+					if mergedEntry, mErr := e.mergeAndUploadPantry(ctx, localInfo, latestEntry, report); mErr == nil {
+						latest.Entries[relPath] = mergedEntry
+						state.Files[relPath] = LocalFileState{
+							RelPath:      relPath,
+							BaseSHA256:   mergedEntry.SHA256,
+							BaseRevision: mergedEntry.Revision,
+						}
+					}
+				}
+				continue
+			}
+			// Concurrent edit race on same file: preserve remote as .sync-conflict-... if content differs,
+			// while keeping manifest consistent with our just-uploaded object bytes.
+			if !latestEntry.Deleted && latestEntry.SHA256 != myEntry.SHA256 {
+				if localInfo, ok := localFiles[relPath]; ok {
+					_ = e.handleConcurrentConflict(ctx, relPath, localInfo, latestEntry, state, report)
+				}
+				myEntry.Revision = latestEntry.Revision + 1
+				latest.Entries[relPath] = myEntry
+			}
+		}
+		curManifest = latest
+		curETag = latestETag
+	}
+	return ErrPreconditionFailed
 }
 
 func (e *Engine) pushLocalFile(ctx context.Context, relPath string, info localFileInfo, prev ManifestEntry, report *SyncReport) (ManifestEntry, error) {

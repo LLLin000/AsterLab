@@ -1,6 +1,9 @@
 package plate
 
 import (
+	"image/png"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -281,3 +284,60 @@ func TestMobilePlateFullscreenSheetAndTouchModes(t *testing.T) {
 		t.Fatalf("expected compact summary card updated to 2/96 wells, texts=%v", tt.Texts())
 	}
 }
+
+func TestMobilePlateSheetTwoRowHeader402x874(t *testing.T) {
+	st := &InteractionState{MobileSheetOpen: true}
+	wells := map[string]WellState{
+		"A1": {Group: "g-ctrl", SampleID: "Ctrl-1"},
+		"A2": {Group: "g-ctrl", SampleID: "Ctrl-2"},
+		"B1": {Group: "g-drug", SampleID: "VEGF-10"},
+	}
+	labels := map[string]string{
+		"g-ctrl": "空白对照组",
+		"g-drug": "VEGF 10ng/mL",
+	}
+	idxMap := map[string]int{"g-ctrl": 0, "g-drug": 1}
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		View(c, Props{
+			Rows:        8,
+			Cols:        12,
+			Interactive: true,
+			Wells:       wells,
+			GroupIndex:  idxMap,
+			GroupLabels: labels,
+			State:       st,
+		})
+	}, 402, 874)
+	tt.SetInsets(44, 0, 34, 0)
+	tt.Frame()
+	settleSheetAnim(tt)
+
+	rTitle, okTitle := tt.Find("96 孔板 · 8×12")
+	rDone, okDone := tt.Find("完成")
+	rZoom, okZoom := tt.Find("100%")
+	if !okTitle || !okDone || !okZoom {
+		t.Fatalf("expected two-row header controls present, title=%v done=%v zoom=%v texts=%v", okTitle, okDone, okZoom, tt.Texts())
+	}
+	if rTitle.X+rTitle.W > rDone.X {
+		t.Fatalf("header row 1 title overlaps Done button: title=%+v done=%+v", rTitle, rDone)
+	}
+	if rZoom.Y < rDone.Y+rDone.H-2 {
+		t.Fatalf("expected zoom bar on row 2 cleanly below Done button, done=%+v zoom=%+v", rDone, rZoom)
+	}
+
+	if dir := os.Getenv("ASTERLAB_MOBILE_VERIFY_DIR"); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir verify dir: %v", err)
+		}
+		f, err := os.Create(filepath.Join(dir, "09_mobile_plate_sheet_402x874.png"))
+		if err != nil {
+			t.Fatalf("create png: %v", err)
+		}
+		defer f.Close()
+		if err := png.Encode(f, tt.Image()); err != nil {
+			t.Fatalf("encode png: %v", err)
+		}
+	}
+}
+

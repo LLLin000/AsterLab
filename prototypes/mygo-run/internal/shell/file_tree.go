@@ -127,15 +127,86 @@ func (s *Shell) renderFileTreePane(c *ui.Context, tok theme.Tokens) {
 		if components.IconButton(c, lucide.FolderPlus(), "新建项目文件夹", components.IconButtonPlain).Clicked() {
 			s.startNewFolderPrompt("")
 		}
-		if components.IconButton(c, lucide.ChevronsDownUp(), "折叠全部文件夹", components.IconButtonPlain).Clicked() {
-			for k := range s.folderOpen {
-				s.folderOpen[k] = false
-			}
+		collapseIcon, collapseLabel := s.collapseAllFolderButtonMeta(true)
+		if components.IconButton(c, collapseIcon, collapseLabel, components.IconButtonPlain).Clicked() {
+			s.toggleAllVaultFolders()
 		}
 	})
 	ui.Divider(c)
 	s.renderFileTreeScrollBody(c, tok)
 	s.renderVaultSwitcherFooter(c, tok)
+}
+
+func (s *Shell) collectVaultFolderNodes() []*vault.TreeNode {
+	var out []*vault.TreeNode
+	var walk func(nodes []*vault.TreeNode)
+	walk = func(nodes []*vault.TreeNode) {
+		for _, n := range nodes {
+			if n == nil || !n.IsDir {
+				continue
+			}
+			if s.HideAssetsInTree && n.Name == vault.AssetsDirName {
+				continue
+			}
+			out = append(out, n)
+			walk(n.Children)
+		}
+	}
+	if s.VaultTree != nil {
+		walk(s.VaultTree.Children)
+	}
+	return out
+}
+
+func (s *Shell) anyVaultFolderOpen() bool {
+	if s.folderOpen == nil {
+		s.folderOpen = map[string]bool{}
+	}
+	nodes := s.collectVaultFolderNodes()
+	if len(nodes) == 0 {
+		for _, open := range s.folderOpen {
+			if open {
+				return true
+			}
+		}
+		return false
+	}
+	for _, n := range nodes {
+		open, seen := s.folderOpen[n.RelPath]
+		if !seen {
+			open = n.Name != vault.AssetsDirName
+		}
+		if open {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Shell) collapseAllFolderButtonMeta(desktop bool) (*ui.SVG, string) {
+	if s.anyVaultFolderOpen() {
+		if desktop {
+			return lucide.ChevronsDownUp(), "折叠全部文件夹"
+		}
+		return lucide.ChevronsDownUp(), "折叠全部"
+	}
+	if desktop {
+		return lucide.ChevronsUpDown(), "展开全部文件夹"
+	}
+	return lucide.ChevronsUpDown(), "展开全部"
+}
+
+func (s *Shell) toggleAllVaultFolders() {
+	if s.folderOpen == nil {
+		s.folderOpen = map[string]bool{}
+	}
+	nextOpen := !s.anyVaultFolderOpen()
+	for k := range s.folderOpen {
+		s.folderOpen[k] = nextOpen
+	}
+	for _, n := range s.collectVaultFolderNodes() {
+		s.folderOpen[n.RelPath] = nextOpen
+	}
 }
 
 func (s *Shell) renderFileTreeScrollBody(c *ui.Context, tok theme.Tokens) {

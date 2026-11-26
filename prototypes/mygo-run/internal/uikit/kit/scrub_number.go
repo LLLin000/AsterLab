@@ -3,6 +3,7 @@ package kit
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -76,6 +77,10 @@ func formatScrubValue(v float64, decimals int) string {
 
 // applyScrubDelta applies a 3px deadzone pointer delta with Shift (0.1x) & Cmd (5x) modifiers.
 func applyScrubDelta(st *scrubState, ev ui.InputEvent, val *float64, opts ScrubOptions) ScrubResult {
+	return applyScrubDeltaDeadzone(st, ev, val, opts, 3)
+}
+
+func applyScrubDeltaDeadzone(st *scrubState, ev ui.InputEvent, val *float64, opts ScrubOptions, deadzonePx float32) ScrubResult {
 	var res ScrubResult
 	step := opts.Step
 	if step <= 0 {
@@ -84,6 +89,9 @@ func applyScrubDelta(st *scrubState, ev ui.InputEvent, val *float64, opts ScrubO
 	sens := opts.Sensitivity
 	if sens <= 0 {
 		sens = 6
+	}
+	if deadzonePx <= 0 {
+		deadzonePx = 3
 	}
 	switch ev.Kind {
 	case ui.InputPointerDown:
@@ -99,7 +107,7 @@ func applyScrubDelta(st *scrubState, ev ui.InputEvent, val *float64, opts ScrubO
 		}
 		dx := ev.X - st.downX
 		if st.mode == scrubPointing {
-			if math.Abs(float64(dx)) < 3 {
+			if math.Abs(float64(dx)) < float64(deadzonePx) {
 				return res
 			}
 			st.mode = scrubDragging
@@ -168,21 +176,8 @@ func ScrubNumber(c *ui.Context, key any, tok theme.Tokens, val *float64, opts Sc
 	}
 
 	if st.mode == scrubEditing {
-		host.Gap(float32(tok.Spacing4)).Children(func() {
-			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-				components.TextBox(c, &st.editBuf, components.TextBoxOptions{
-					LeadingText: opts.Label,
-				})
-			})
-			if opts.Unit != "" {
-				ui.Text(c, opts.Unit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Shrink(0)
-			}
-		})
-		if c.Shortcut(0, ui.KeyEscape) {
-			st.mode = scrubIdle
-			return res
-		}
-		if c.Shortcut(0, ui.KeyEnter) {
+		focPtr := ui.Local(host, "kit-scrub-foc", func() bool { return false })
+		commitEdit := func() {
 			if parsed, err := strconv.ParseFloat(strings.TrimSpace(st.editBuf), 64); err == nil {
 				clamped := clampScrub(roundScrubDecimals(parsed, decimals), opts.Min, opts.Max)
 				if clamped != *val {
@@ -191,11 +186,50 @@ func ScrubNumber(c *ui.Context, key any, tok theme.Tokens, val *float64, opts Sc
 				}
 				res.Committed = true
 			}
+			*focPtr = false
 			st.mode = scrubIdle
+		}
+		var tb ui.Element
+		okClicked := false
+		host.Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+				tb = components.TextBox(c, &st.editBuf, components.TextBoxOptions{
+					LeadingText: opts.Label,
+				}).Keyboard(ui.KeyboardDecimal)
+			})
+			if opts.Unit != "" {
+				ui.Text(c, opts.Unit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Shrink(0)
+			}
+			okBtn := ui.ButtonBase(c.Key("kit-scrub-ok")).
+				Size(float32(tok.Spacing32), float32(tok.Spacing32)).
+				Radius(float32(tok.ControlRadius)).
+				Background(tok.AccentSoftBg).
+				Border(1, tok.Accent.Alpha(0.35)).
+				Center().Label("确认")
+			okBtn.Children(func() {
+				ui.Icon(c, lucide.Check()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+			})
+			okClicked = okBtn.Clicked()
+		})
+		focusedNow := tb.Focused()
+		wasFocused := *focPtr
+		*focPtr = focusedNow
+		if c.Shortcut(0, ui.KeyEscape) {
+			*focPtr = false
+			st.mode = scrubIdle
+			return res
+		}
+		if okClicked || c.Shortcut(0, ui.KeyEnter) || tb.Submitted() || (wasFocused && !focusedNow) {
+			commitEdit()
 		}
 		return res
 	}
 
+	vw, _ := c.Size()
+	deadzonePx := float32(3)
+	if runtime.GOOS == "ios" || runtime.GOOS == "android" || (vw > 0 && vw < 680) {
+		deadzonePx = 8
+	}
 	host.Children(func() {
 		pill := ui.ButtonBase(c).
 			FillWidth().
@@ -219,7 +253,7 @@ func ScrubNumber(c *ui.Context, key any, tok theme.Tokens, val *float64, opts Sc
 		}
 
 		pill.HandleInput(func(ev ui.InputEvent) bool {
-			evRes := applyScrubDelta(st, ev, val, opts)
+			evRes := applyScrubDeltaDeadzone(st, ev, val, opts, deadzonePx)
 			if evRes.Changed {
 				res.Changed = true
 			}

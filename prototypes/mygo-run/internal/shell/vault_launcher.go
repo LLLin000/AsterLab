@@ -3,6 +3,7 @@ package shell
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -11,6 +12,7 @@ import (
 
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/uikit/kit"
+	"asterlab-mygo-prototype/internal/vault"
 )
 
 // RecentVaultEntry represents one remembered local Vault directory shown in the
@@ -101,6 +103,16 @@ func (s *Shell) openVaultLauncher() {
 }
 
 func defaultSuggestedVaultParent() string {
+	if runtime.GOOS == "ios" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, "Documents")
+		}
+	}
+	if runtime.GOOS == "android" {
+		if def := strings.TrimSpace(vault.DefaultVaultDir()); def != "" {
+			return filepath.Dir(def)
+		}
+	}
 	// Prefer D:\ on Windows if it exists and is writable so user data stays off C:\AppData
 	if info, err := os.Stat(`D:\`); err == nil && info.IsDir() {
 		return `D:\`
@@ -113,6 +125,28 @@ func defaultSuggestedVaultParent() string {
 		return home
 	}
 	return ""
+}
+
+func (s *Shell) switchVaultFromLauncher(targetPath string) bool {
+	clean := strings.TrimSpace(targetPath)
+	if clean == "" {
+		s.VaultLauncherErr = "请先选择或填写有效的实验库路径"
+		return false
+	}
+	if s.OnSwitchVaultPathErr != nil {
+		if err := s.OnSwitchVaultPathErr(clean); err != nil {
+			s.VaultLauncherErr = err.Error()
+			return false
+		}
+		s.VaultLauncherErr = ""
+		return true
+	}
+	if s.OnSwitchVaultPath != nil {
+		s.OnSwitchVaultPath(clean)
+		s.VaultLauncherErr = ""
+		return true
+	}
+	return false
 }
 
 // renderVaultLauncherDialog renders the Obsidian-style Vault Launcher & Switcher modal.
@@ -193,8 +227,7 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 										AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 										pick := ui.ButtonBase(c.Key("rv-open-"+rv.Path)).Label("打开 "+rv.Name).
 											Grow(1).MinWidth(0).Justify(ui.Start).OnClick(func() {
-											if s.OnSwitchVaultPath != nil {
-												s.OnSwitchVaultPath(rv.Path)
+											if s.switchVaultFromLauncher(rv.Path) {
 												open = false
 											}
 										})
@@ -240,6 +273,9 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 						ui.Spacer(c)
 						if components.IconButton(c.Key("vault-launcher-x"), lucide.X(), "关闭", components.IconButtonCompact).Clicked() {
 							open = false
+							if s.OnDismissVaultLauncher != nil {
+								s.OnDismissVaultLauncher()
+							}
 						}
 					})
 
@@ -313,9 +349,7 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 						})
 						if s.OnPickVaultPath != nil && components.Button(c.Key("vl-open-existing"), "选择文件夹…", components.ButtonSecondary).Clicked() {
 							if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
-								if s.OnSwitchVaultPath != nil {
-									s.OnSwitchVaultPath(picked)
-									s.VaultLauncherErr = ""
+								if s.switchVaultFromLauncher(picked) {
 									open = false
 								}
 							}
@@ -342,16 +376,25 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 			})
 		})
 	})
+	wasOpen := s.VaultLauncherOpen
 	s.VaultLauncherOpen = open
+	if wasOpen && !open && s.VaultLauncherErr == "" && s.OnDismissVaultLauncher != nil {
+		s.OnDismissVaultLauncher()
+	}
 }
 
 func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 	ui.Overlay(c, func() {
 		t := c.Theme()
 		topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	s.renderMobileSwipeBackContainer(c, "mb-vl-root", tok, func() {
-		s.VaultLauncherOpen = false
-	}, func() {
+		isNativeMobileOS := runtime.GOOS == "ios" || runtime.GOOS == "android"
+		dismissLauncher := func() {
+			s.VaultLauncherOpen = false
+			if s.OnDismissVaultLauncher != nil {
+				s.OnDismissVaultLauncher()
+			}
+		}
+	s.renderMobileSwipeBackContainer(c, "mb-vl-root", tok, dismissLauncher, func() {
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 			MinHeight(t.Space(12)+topSafe).
@@ -362,7 +405,7 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 				components.Text(c, "AsterLab · 本地优先实验工作台").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 			})
 			if components.Button(c.Key("mb-vl-close"), "完成", components.ButtonGhost).Label("关闭").Shrink(0).Clicked() {
-				s.VaultLauncherOpen = false
+				dismissLauncher()
 			}
 		})
 		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
@@ -386,23 +429,32 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 							Placeholder("AsterLab").FillWidth()
 					})
 
-					ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
-						components.Text(c, "存放位置").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-						ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
-							ui.Box(c).Grow(1).MinWidth(0).Children(func() {
-								components.TextBox(c.Key("mb-vl-parent"), &s.VaultLauncherParent, components.TextBoxOptions{}).
-									Placeholder("Documents 目录").FillWidth()
-							})
-							if s.OnPickVaultPath != nil && components.Button(c.Key("mb-vl-browse"), "浏览…", components.ButtonSecondary).Shrink(0).Clicked() {
-								if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
-									s.VaultLauncherParent = picked
+					if !isNativeMobileOS {
+						ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
+							components.Text(c, "存放位置").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+							ui.Row(c).FillWidth().Gap(t.Space(2)).AlignItems(ui.Center).Children(func() {
+								ui.Box(c).Grow(1).MinWidth(0).Children(func() {
+									components.TextBox(c.Key("mb-vl-parent"), &s.VaultLauncherParent, components.TextBoxOptions{}).
+										Placeholder("Documents 目录").FillWidth()
+								})
+								if s.OnPickVaultPath != nil && components.Button(c.Key("mb-vl-browse"), "浏览…", components.ButtonSecondary).Shrink(0).Clicked() {
+									if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
+										s.VaultLauncherParent = picked
+									}
 								}
-							}
+							})
 						})
-					})
+					} else {
+						dispName := strings.TrimSpace(s.VaultLauncherName)
+						if dispName == "" {
+							dispName = "AsterLab"
+						}
+						components.Text(c, "存放位置：本机文档 / "+dispName).
+							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+					}
 
 					previewPath := filepath.Join(strings.TrimSpace(s.VaultLauncherParent), strings.TrimSpace(s.VaultLauncherName))
-					if strings.TrimSpace(s.VaultLauncherParent) != "" && strings.TrimSpace(s.VaultLauncherName) != "" {
+					if !isNativeMobileOS && strings.TrimSpace(s.VaultLauncherParent) != "" && strings.TrimSpace(s.VaultLauncherName) != "" {
 						components.Text(c, "将创建目录："+previewPath).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
 							SingleLine().Ellipsis("…")
 					}
@@ -411,6 +463,10 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 					if components.Button(c.Key("mb-vl-create"), "创建并打开", components.ButtonPrimary).FillWidth().Clicked() {
 						name := strings.TrimSpace(s.VaultLauncherName)
 						parent := strings.TrimSpace(s.VaultLauncherParent)
+						if parent == "" {
+							parent = defaultSuggestedVaultParent()
+							s.VaultLauncherParent = parent
+						}
 						if name == "" || parent == "" {
 							s.VaultLauncherErr = "请先填写实验库名称和存放位置"
 						} else if s.OnCreateVault != nil {
@@ -447,8 +503,7 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 									Background(bg).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 									pick := ui.ButtonBase(c.Key("mb-rv-open-"+rv.Path)).Label("打开 "+rv.Name).
 										Grow(1).MinWidth(0).Justify(ui.Start).OnClick(func() {
-										if s.OnSwitchVaultPath != nil {
-											s.OnSwitchVaultPath(rv.Path)
+										if s.switchVaultFromLauncher(rv.Path) {
 											s.VaultLauncherOpen = false
 										}
 									})
@@ -478,18 +533,24 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 					}
 				})
 
-				// 3. Existing directory & Sandbox fallback
+				// 3. Existing directory, Cloud Sync & Sandbox fallback
 				ui.Column(c).FillWidth().Padding(t.Space(3)).Radius(float32(tok.PanelRadius)).
 					Background(tok.Surface).Border(1, tok.Border).Gap(t.Space(2)).Children(func() {
 					components.Text(c, "其他入口").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 					if s.OnPickVaultPath != nil && components.Button(c.Key("mb-vl-open-existing"), "打开已有文件夹…", components.ButtonSecondary).FillWidth().Clicked() {
 						if picked := strings.TrimSpace(s.OnPickVaultPath()); picked != "" {
-							if s.OnSwitchVaultPath != nil {
-								s.OnSwitchVaultPath(picked)
-								s.VaultLauncherErr = ""
+							if s.switchVaultFromLauncher(picked) {
 								s.VaultLauncherOpen = false
 							}
+						} else {
+							s.VaultLauncherErr = "未选择文件夹；可直接新建本机实验库或连接云端同步"
 						}
+					}
+					if components.Button(c.Key("mb-vl-cloud-sync"), "连接云端同步库", components.ButtonOutline).FillWidth().Clicked() {
+						s.VaultLauncherOpen = false
+						s.SettingsView.Category = "sync"
+						s.mobileExtra().mobileSettingsDetail = true
+						s.VaultSettingsOpen = true
 					}
 					if components.Button(c.Key("mb-vl-sandbox"), "进入临时体验库", components.ButtonGhost).FillWidth().Clicked() {
 						if s.OnOpenSandboxVault != nil {

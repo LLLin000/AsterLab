@@ -726,13 +726,18 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 		})
 	}
 
+	mobileCalc := isMobileAsterdocViewport(c, v)
+	calcPillH := float32(tok.Spacing24)
+	if mobileCalc {
+		calcPillH = float32(tok.Spacing32) + float32(tok.Spacing4)
+	}
 	renderUnifiedModuleShell(v, c, lucide.Calculator(), moduleID, title, "", editableDesign, func() {
 		// UI-06 & UI-07: Do NOT repeat the bench summary pill in the header (it already appears
 		// cleanly once below the 2D equation). Replace the bloated 9-formula dictionary menu
 		// with a focused 4+1 wet-lab scenario switcher.
 		if editableDesign {
 			tplBtn := ui.ButtonBase(c.Key("calc-tpl-menu:"+moduleID)).
-				Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+				Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 				AlignItems(ui.Center).AlignSelf(ui.Center).
 				Radius(float32(tok.ControlRadius)).Border(1, tok.Border.Alpha(0.75)).
 				Label("切换计算场景")
@@ -873,7 +878,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								}
 								isSel := fPos == activeFPos
 								tab := ui.ButtonBase(c.Key(fmt.Sprintf("calc-ftab:%s:%d", moduleID, fPos))).
-									Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+									Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 									AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("查看公式：" + fLbl)
 								tfg := tok.TextMuted
 								if isSel {
@@ -1027,7 +1032,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						for _, sn := range snippets {
 							sn := sn
 							sBtn := ui.ButtonBase(c.Key("calc-sym:"+moduleID+":"+sn.label)).
-								Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+								Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 								AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).
 								Background(tok.Elevated).Border(1, tok.Border).Label(sn.tip)
 							if sBtn.Hovered() {
@@ -1044,8 +1049,8 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 					})
 
 					// Linear LaTeX Formula Input + Output Name & Unit
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Box(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+					ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Box(c).Grow(1).MinWidth(float32(tok.Spacing48)*3).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
 							Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderStrong.Alpha(0.65)).Children(func() {
 							tb := BorderlessTextInput(c, tok, fBuf, float32(tok.TextData), false, `输入 LaTeX 公式，如 \frac{C_{2} \times V_{2}}{C_{1}}，点击下方变量即可插入`).
 								Font("monospace").TextColor(tok.Text)
@@ -1112,7 +1117,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								for _, m := range matched {
 									m := m
 									cBtn := ui.ButtonBase(c.Key("calc-ac:"+moduleID+":"+m.cmd)).
-										Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
+										Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 										AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).
 										Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.3)).Label("补全 " + m.cmd)
 									cBtn.Children(func() {
@@ -1149,7 +1154,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 						for _, mv := range missingVars {
 							mv := mv
 							addV := ui.ButtonBase(c.Key("calc-addmv:"+moduleID+":"+mv)).
-								Height(float32(tok.Spacing24)-2).Padding(0, float32(tok.Spacing8)).
+								Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 								AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).
 								Background(tok.Surface).Border(1, tok.Warning.Alpha(0.55)).Label("添加变量 " + mv)
 							addV.Children(func() {
@@ -1190,7 +1195,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 					ui.Spacer(c)
 					if editableDesign {
 						addVarBtn := ui.ButtonBase(c.Key("calc-addvar-menu:"+moduleID)).
-							Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+							Height(calcPillH).Padding(0, float32(tok.Spacing8)).
 							AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("添加或引用变量")
 						if addVarBtn.Hovered() {
 							addVarBtn.Background(tok.Text.Alpha(0.05))
@@ -1329,7 +1334,7 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 					rowBox.Children(func() {
 						// Clickable Math Symbol Pill -> inserts `C_{1}` into active formula on click!
 						symPill := ui.ButtonBase(c.Key(fmt.Sprintf("calc-ins:%s:%d", moduleID, idx))).
-							Height(float32(tok.Spacing24)).MinWidth(float32(tok.Spacing32)+float32(tok.Spacing12)).
+							Height(calcPillH).MinWidth(float32(tok.Spacing32)+float32(tok.Spacing12)).
 							Padding(0, float32(tok.Spacing8)).Center().
 							Radius(float32(tok.ControlRadius)).
 							Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.32)).
@@ -1442,8 +1447,12 @@ func (v *View) renderUnifiedCalculator(c *ui.Context, tok theme.Tokens, moduleID
 								ui.Text(c, dispVal).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).
 									FontFeatures("tnum").SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 								if !v.ReadOnly {
+									unlinkSz := float32(tok.Spacing16)
+									if mobileCalc {
+										unlinkSz = float32(tok.Spacing24) + float32(tok.Spacing4)
+									}
 									unlinkBtn := ui.ButtonBase(c.Key(fmt.Sprintf("calc-unlink:%s:%d", moduleID, idx))).
-										Size(float32(tok.Spacing16), float32(tok.Spacing16)).Center().
+										Size(unlinkSz, unlinkSz).Center().
 										Radius(float32(tok.ControlRadius)).Label("解除联动改手动输入")
 									if unlinkBtn.Hovered() {
 										unlinkBtn.Background(tok.Accent.Alpha(0.15))
@@ -1913,6 +1922,133 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 		rowHover := timerWrap.Hovered()
 
 		timerWrap.Children(func() {
+			mobileTimer := isMobileAsterdocViewport(c, v)
+			hasClockAnchor := false
+			renderTimerConfigFields := func() {
+				qRaw := data["duration"]
+				if mode == "window" && data["offset"] != nil {
+					qRaw = data["offset"]
+				}
+				qv, qu, qErr := quantityParts(qRaw)
+				if qErr != nil || qu == "" {
+					qv, qu = 10, "min"
+				}
+				ui.Text(c, "计时设置").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", mode)
+				*tmMode = mode
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
+					mSel := components.Select(c, tmMode)
+					StyleSelectQuiet(c, tok, mSel)
+					mSel.Trigger.Children(func() {
+						ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+					})
+					mSel.Popup(func(p ui.Element) {
+						for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
+							opt := opt
+							mSel.Item(opt).Children(func() {
+								ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+							})
+						}
+					})
+					if mSel.Trigger.Changed() && *tmMode != mode {
+						patch := map[string]any{"mode": *tmMode}
+						switch *tmMode {
+						case "countdown":
+							if qv <= 0 {
+								qv, qu = 10, "min"
+							}
+							patch["duration"] = map[string]any{"value": qv, "unit": qu}
+						case "cycle":
+							patch["rounds"] = max(1, rounds)
+							if len(phases) == 0 {
+								patch["phases"] = []any{
+									map[string]any{"name": "阶段 1", "mode": "fixed", "duration": map[string]any{"value": 5, "unit": "min"}},
+									map[string]any{"name": "阶段 2", "mode": "fixed", "duration": map[string]any{"value": 10, "unit": "min"}},
+								}
+							}
+						case "window":
+							patch["anchor"] = firstNonEmpty(anchorVal, "t0")
+							if qv < 0 {
+								qv = 0
+							}
+							patch["offset"] = map[string]any{"value": qv, "unit": firstNonEmpty(qu, "h")}
+						}
+						v.emitAnyModuleEdit(moduleID, patch)
+					}
+				})
+				if mode != "stopwatch" && mode != "cycle" {
+					tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
+					tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
+					if mobileTimer {
+						ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+							for _, preset := range []struct {
+								lbl  string
+								val  float64
+								unit string
+							}{
+								{"5m", 5, "min"}, {"10m", 10, "min"}, {"15m", 15, "min"}, {"30m", 30, "min"}, {"1h", 1, "h"},
+							} {
+								preset := preset
+								btn := ui.ButtonBase(c.Key("tm-pre:"+moduleID+":"+preset.lbl)).
+									Height(float32(tok.Spacing32)).Padding(0, float32(tok.Spacing8)).
+									Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).
+									Center().Label("设置 " + preset.lbl)
+								btn.Children(func() {
+									ui.Text(c, preset.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
+								})
+								if btn.Clicked() {
+									*tmVal = formatNumber(preset.val)
+									*tmUnit = preset.unit
+									field := "duration"
+									if mode == "window" {
+										field = "offset"
+									}
+									v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": preset.val, "unit": preset.unit}})
+								}
+							}
+						})
+					}
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Text(c, "时长").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
+						ui.Box(c).Grow(1).Children(func() {
+							tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum").Keyboard(ui.KeyboardDecimal)
+							if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
+								if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
+									field := "duration"
+									if mode == "window" {
+										field = "offset"
+									}
+									v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+								}
+							}
+						})
+						uSel := components.Select(c, tmUnit)
+						StyleSelectQuiet(c, tok, uSel)
+						uSel.Trigger.Children(func() {
+							ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+						})
+						uSel.Popup(func(p ui.Element) {
+							for _, opt := range []string{"s", "min", "h", "d"} {
+								opt := opt
+								uSel.Item(opt).Children(func() {
+									ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
+								})
+							}
+						})
+						if uSel.Trigger.Changed() && *tmUnit != qu {
+							if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
+								field := "duration"
+								if mode == "window" {
+									field = "offset"
+								}
+								v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
+							}
+						}
+					})
+				}
+			}
+
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				// 1. Tactile Play / Pause pill on the left
 				playBtnSz := float32(tok.Spacing24) + 2
@@ -1976,7 +2112,6 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 
 			// 2. Crisp tabular readout (clicking opens lightweight configuration Popover when idle & editable)
 			var clockAnchor ui.Element
-			hasClockAnchor := false
 			if editableDesign && inlineStatus == "idle" {
 				clkBtn := ui.ButtonBase(c.Key("tm-clk-btn:"+moduleID)).
 					Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
@@ -2025,105 +2160,13 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 						*cfgOpen = !*cfgOpen
 					}
 				})
-				components.Popover(c.Key("tm-pop:"+moduleID), clockAnchor, cfgOpen, func(panel ui.Element) {
-					qRaw := data["duration"]
-					if mode == "window" && data["offset"] != nil {
-						qRaw = data["offset"]
-					}
-					qv, qu, qErr := quantityParts(qRaw)
-					if qErr != nil || qu == "" {
-						qv, qu = 10, "min"
-					}
-					panel.Width(float32(tok.Spacing48)*5.6).Padding(float32(tok.Spacing12)).
-						Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
-						Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Text(c, "计时设置").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
-						tmMode := v.ensureWidgetDraft("tm:"+moduleID+":mode", mode)
-						*tmMode = mode
-						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Text(c, "模式").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
-							mSel := components.Select(c, tmMode)
-							StyleSelectQuiet(c, tok, mSel)
-							mSel.Trigger.Children(func() {
-								ui.Text(c, timerModeLabel(*tmMode)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-							})
-							mSel.Popup(func(p ui.Element) {
-								for _, opt := range []string{"countdown", "stopwatch", "cycle", "window"} {
-									opt := opt
-									mSel.Item(opt).Children(func() {
-										ui.Text(c, timerModeLabel(opt)).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-									})
-								}
-							})
-							if mSel.Trigger.Changed() && *tmMode != mode {
-								patch := map[string]any{"mode": *tmMode}
-								switch *tmMode {
-								case "countdown":
-									if qv <= 0 {
-										qv, qu = 10, "min"
-									}
-									patch["duration"] = map[string]any{"value": qv, "unit": qu}
-								case "cycle":
-									patch["rounds"] = max(1, rounds)
-									if len(phases) == 0 {
-										patch["phases"] = []any{
-											map[string]any{"name": "阶段 1", "mode": "fixed", "duration": map[string]any{"value": 5, "unit": "min"}},
-											map[string]any{"name": "阶段 2", "mode": "fixed", "duration": map[string]any{"value": 10, "unit": "min"}},
-										}
-									}
-								case "window":
-									patch["anchor"] = firstNonEmpty(anchorVal, "t0")
-									if qv < 0 {
-										qv = 0
-									}
-									patch["offset"] = map[string]any{"value": qv, "unit": firstNonEmpty(qu, "h")}
-								}
-								v.emitAnyModuleEdit(moduleID, patch)
-							}
-						})
-						if mode != "stopwatch" && mode != "cycle" {
-							tmVal := v.ensureWidgetDraft("tm:"+moduleID+":val", formatNumber(qv))
-							tmUnit := v.ensureWidgetDraft("tm:"+moduleID+":unit", qu)
-							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-								ui.Text(c, "时长").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Width(float32(tok.Spacing48))
-								ui.Box(c).Grow(1).Children(func() {
-									tb := BorderlessTextInput(c, tok, tmVal, float32(tok.TextBody), false, "时长").FontFeatures("tnum").Keyboard(ui.KeyboardDecimal)
-									if tb.Submitted() || (!tb.Focused() && strings.TrimSpace(*tmVal) != formatNumber(qv)) {
-										if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
-											field := "duration"
-											if mode == "window" {
-												field = "offset"
-											}
-											v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
-										}
-									}
-								})
-								uSel := components.Select(c, tmUnit)
-								StyleSelectQuiet(c, tok, uSel)
-								uSel.Trigger.Children(func() {
-									ui.Text(c, *tmUnit).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-								})
-								uSel.Popup(func(p ui.Element) {
-									for _, opt := range []string{"s", "min", "h", "d"} {
-										opt := opt
-										uSel.Item(opt).Children(func() {
-											ui.Text(c, opt).FontSize(float32(tok.TextMeta)).TextColor(tok.Text)
-										})
-									}
-								})
-								if uSel.Trigger.Changed() && *tmUnit != qu {
-									if nv, err := strconv.ParseFloat(strings.TrimSpace(*tmVal), 64); err == nil && (nv > 0 || (mode == "window" && nv >= 0)) {
-										field := "duration"
-										if mode == "window" {
-											field = "offset"
-										}
-										v.emitAnyModuleEdit(moduleID, map[string]any{field: map[string]any{"value": nv, "unit": *tmUnit}})
-									}
-								}
-							})
-						}
+				if !mobileTimer {
+					components.Popover(c.Key("tm-pop:"+moduleID), clockAnchor, cfgOpen, func(panel ui.Element) {
+						panel.Width(float32(tok.Spacing48)*5.6).Padding(float32(tok.Spacing12)).
+							Background(tok.Surface).Border(1, tok.Border).Radius(float32(tok.PanelRadius)).
+							Gap(float32(tok.Spacing8)).Children(renderTimerConfigFields)
 					})
-				})
+				}
 			}
 
 			if inlineStatus != "idle" {
@@ -2161,6 +2204,20 @@ func (v *View) renderUnifiedTimer(c *ui.Context, tok theme.Tokens, moduleID, tit
 				}
 			}
 		})
+		if editableDesign && inlineStatus == "idle" && hasClockAnchor && mobileTimer && *cfgOpen {
+			ui.Column(c.Key("tm-inline-cfg:"+moduleID)).FillWidth().
+				Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).Border(1, tok.Border).
+				Gap(float32(tok.Spacing8)).Children(func() {
+				renderTimerConfigFields()
+				ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+					if components.Button(c, "完成", components.ButtonGhost).Clicked() {
+						*cfgOpen = false
+					}
+				})
+			})
+		}
 
 		// Multi-stage cycle editor & summary (supports e.g. 80°C 5min -> Ice 10min x 3)
 		if mode == "cycle" {

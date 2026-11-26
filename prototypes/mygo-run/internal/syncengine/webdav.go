@@ -205,19 +205,29 @@ func (c *WebDAVClient) ResetDirCache() {
 
 // Get downloads a remote resource and verifies its HTTP status.
 func (c *WebDAVClient) Get(ctx context.Context, relPath string) ([]byte, error) {
+	data, _, err := c.GetWithETag(ctx, relPath)
+	return data, err
+}
+
+// GetWithETag downloads a remote resource along with its server ETag header (if present).
+func (c *WebDAVClient) GetWithETag(ctx context.Context, relPath string) ([]byte, string, error) {
 	resp, err := c.doWithRetry(ctx, http.MethodGet, relPath, nil, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrNotFound
+		return nil, "", ErrNotFound
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("webdav GET %s failed: HTTP %d (%s)", relPath, resp.StatusCode, strings.TrimSpace(string(msg)))
+		return nil, "", fmt.Errorf("webdav GET %s failed: HTTP %d (%s)", relPath, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, strings.TrimSpace(resp.Header.Get("ETag")), nil
 }
 
 // GetVerified downloads a remote resource and verifies its SHA-256 against wantSHA256
@@ -238,8 +248,15 @@ func (c *WebDAVClient) GetVerified(ctx context.Context, relPath, wantSHA256 stri
 
 // Put ensures parent collections exist and uploads payload atomically to relPath.
 func (c *WebDAVClient) Put(ctx context.Context, relPath string, data []byte, contentType string) error {
+	_, err := c.PutIfMatch(ctx, relPath, data, contentType, "")
+	return err
+}
+
+// PutIfMatch uploads payload and enforces conditional If-Match when ifMatchETag is non-empty,
+// returning ErrPreconditionFailed on HTTP 412.
+func (c *WebDAVClient) PutIfMatch(ctx context.Context, relPath string, data []byte, contentType, ifMatchETag string) (string, error) {
 	if err := c.EnsureParentDirs(ctx, relPath); err != nil {
-		return err
+		return "", err
 	}
 	headers := map[string]string{}
 	if contentType != "" {
@@ -247,16 +264,28 @@ func (c *WebDAVClient) Put(ctx context.Context, relPath string, data []byte, con
 	} else {
 		headers["Content-Type"] = "application/octet-stream"
 	}
+	if strings.TrimSpace(ifMatchETag) != "" {
+		headers["If-Match"] = strings.TrimSpace(ifMatchETag)
+	}
 	resp, err := c.doWithRetry(ctx, http.MethodPut, relPath, data, headers)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		return "", ErrPreconditionFailed
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("webdav PUT %s failed: HTTP %d (%s)", relPath, resp.StatusCode, strings.TrimSpace(string(msg)))
+		return "", fmt.Errorf("webdav PUT %s failed: HTTP %d (%s)", relPath, resp.StatusCode, strings.TrimSpace(string(msg)))
 	}
-	return nil
+	return strings.TrimSpace(resp.Header.Get("ETag")), nil
+}
+
+// TestConnection verifies WebDAV connectivity and credentials via a bounded Depth-0 PROPFIND.
+func (c *WebDAVClient) TestConnection(ctx context.Context) error {
+	_, err := c.Propfind(ctx, "", "0")
+	return err
 }
 
 // Delete removes a remote resource (ignoring 404 Not Found).
