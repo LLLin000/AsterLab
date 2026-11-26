@@ -467,7 +467,15 @@ func TestObsidianMobileV2FloatingDockTabSwitcherAndEditToolbar(t *testing.T) {
 		t.Fatalf("expected active tab L929, got %+v", cur)
 	}
 
-	// 4. Edit mode shows icon-only Mobile Edit Toolbar instead of Nav Dock
+	// 4. Obsidian iOS logic: ModeEdit while browsing (keyboard closed) stays on Navigation Dock;
+	// opening keyboard reveals the icon-only Mobile Edit Toolbar cleanly.
+	if tt.HasText("+步骤") || !tt.HasText("功能菜单") {
+		t.Fatalf("expected Navigation Dock when ModeEdit keyboard is closed, texts=%q", tt.Texts())
+	}
+	s.MobileKeyboardOpen = true
+	tt.Frame()
+	tt.Advance(220 * time.Millisecond)
+	tt.Frame()
 	if err := tt.Click("+步骤"); err != nil {
 		t.Fatalf("click +步骤 in mobile edit toolbar: %v", err)
 	}
@@ -476,10 +484,14 @@ func TestObsidianMobileV2FloatingDockTabSwitcherAndEditToolbar(t *testing.T) {
 		t.Fatalf("expected add_step callback, got %+v", toolbarActs)
 	}
 
-	// 5. Toggle temporarily back to Navigation Dock while staying in Edit mode
+	// 5. Toggle temporarily back to Navigation Dock while staying in Edit mode & keyboard open
 	if err := tt.Click("切换底部导航栏"); err != nil {
 		t.Fatalf("click nav dock toggle: %v", err)
 	}
+	tt.Frame()
+	tt.Advance(220 * time.Millisecond)
+	tt.Frame()
+	s.MobileKeyboardOpen = false
 	tt.Frame()
 	tt.Advance(220 * time.Millisecond)
 	tt.Frame()

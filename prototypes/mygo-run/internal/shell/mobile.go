@@ -70,6 +70,7 @@ type mobileExtraState struct {
 	calStripInited         bool
 	canvasSwipeOffset      ui.Point
 	drawerDragOffset       ui.Point
+	scrimDragOffset        ui.Point
 	drawerDragOpened       string
 	pullRefresh            ui.RefreshState
 	mobileSettingsDetail   bool
@@ -101,13 +102,13 @@ func (s *Shell) mobileExtra() *mobileExtraState {
 func DefaultMobileToolbarSpecs() []MobileToolbarActionSpec {
 	return []MobileToolbarActionSpec{
 		// Scientific quick actions
-		{ID: "at_entity", Group: "科研快捷", Label: "插入实体 @", Icon: lucide.AtSign(), Accent: true},
-		{ID: "slash_module", Group: "科研快捷", Label: "插入模块 /", Icon: lucide.Slash(), Accent: true},
+		{ID: "at_entity", Group: "科研快捷", Label: "插入实体 @", Icon: lucide.AtSign()},
+		{ID: "slash_module", Group: "科研快捷", Label: "插入模块 /", Icon: lucide.Slash()},
 		{ID: "footnote", Group: "科研快捷", Label: "批注 [^]", Icon: lucide.MessageSquareQuote()},
-		{ID: "nl_structure", Group: "科研快捷", Label: "自然语言转结构", Icon: lucide.Sparkles(), Accent: true},
+		{ID: "nl_structure", Group: "科研快捷", Label: "自然语言转结构", Icon: lucide.Sparkles()},
 		{ID: "camera_photo", Group: "科研快捷", Label: "现场拍照", Icon: lucide.Camera()},
 		{ID: "timer", Group: "科研快捷", Label: "快捷计时", Icon: lucide.Timer(), DispatchAction: "open_timer"},
-		{ID: "add_step", Group: "科研快捷", Label: "+步骤", Icon: lucide.ListPlus(), Accent: true},
+		{ID: "add_step", Group: "科研快捷", Label: "+步骤", Icon: lucide.ListPlus()},
 		// Formatting & Structure
 		{ID: "undo", Group: "排版与结构", Label: "撤销", Icon: lucide.Undo2()},
 		{ID: "redo", Group: "排版与结构", Label: "重做", Icon: lucide.Redo2()},
@@ -645,14 +646,18 @@ func (s *Shell) renderMobileSwipeBackContainer(
 	}
 	offset := ui.Local(c.Root(), mobileSwipeBackKey{key}, func() ui.Point { return ui.Point{} })
 	panel := ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).
-		Shadow(0, 8, 32, 0, tok.ShadowColor)
+		Shadow(0, 8, 32, 0, tok.ShadowColor).
+		Transition(theme.MobilePagePushTransition())
+	var shownX float32
 	if onBack != nil {
 		panel.Draggable(offset, ui.DraggableOptions{
-			Axis:   ui.Horizontal,
-			Bounds: &ui.Rect{X: 0, W: vw},
-			Rigid:  true,
-			Snap:   ui.Nearest(ui.Point{}, ui.Point{X: vw}),
+			Axis:      ui.Horizontal,
+			Bounds:    &ui.Rect{X: 0, W: vw},
+			Rigid:     true,
+			Animation: theme.MotionPagePush,
+			Snap:      ui.Nearest(ui.Point{}, ui.Point{X: vw}),
 		})
+		shownX = panel.DragOffset().X
 		if !panel.Dragging() && offset.X > vw*0.45 {
 			*offset = ui.Point{}
 			mygo.Haptics.Light()
@@ -663,6 +668,10 @@ func (s *Shell) renderMobileSwipeBackContainer(
 			*offset = ui.Point{}
 		}
 	}
+	scrimAlpha := float32(1) - max(0, min(1, shownX/max(vw, 1)))
+	ui.Box(c.Key(key + "-scrim")).Absolute().Fill().PassThrough().
+		Background(tok.Scrim.Alpha(scrimAlpha)).
+		Transition(theme.MobileOverlayFadeTransition())
 	panel.Children(content)
 }
 
@@ -704,6 +713,7 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 	extra := s.mobileExtra()
 
 	rootBox := ui.Box(c.Key("mobile-workbench-root")).Fill().Padding(topInset, 0, 0, 0)
+	c.Root().Background(tok.Canvas)
 	theme.PaintCanvasBackground(rootBox, tok)
 	rootBox.Children(func() {
 		ui.Column(c).Fill().Children(func() {
@@ -711,18 +721,20 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 				s.renderMobileDockedTopChrome(c, tok, activeTab)
 			}
 
-			bodyRoot := ui.Box(c.Key("mobile-body-stage")).FillWidth().Grow(1).MinHeight(0).Clip()
+			bodyRoot := ui.Box(c.Key("mobile-body-stage")).FillWidth().Grow(1).MinHeight(0)
 			canSwipeCanvas := s.MobileDrawer == "" && !s.MobileTabSwitcherOpen && !s.MobileMenuSheetOpen && !s.AnyModalOpen()
+			var shownX float32
 			if !canSwipeCanvas {
 				extra.canvasSwipeOffset = ui.Point{}
 			} else {
 				bodyRoot.Draggable(&extra.canvasSwipeOffset, ui.DraggableOptions{
-					Axis:   ui.Horizontal,
-					Bounds: &ui.Rect{X: -sheetMaxW, W: 2 * sheetMaxW},
-					Rigid:  true,
-					Snap:   ui.Nearest(ui.Point{X: -sheetMaxW}, ui.Point{}, ui.Point{X: sheetMaxW}),
+					Axis:      ui.Horizontal,
+					Bounds:    &ui.Rect{X: -sheetMaxW, W: 2 * sheetMaxW},
+					Rigid:     true,
+					Animation: theme.MotionDrawer,
+					Snap:      ui.Nearest(ui.Point{X: -sheetMaxW}, ui.Point{}, ui.Point{X: sheetMaxW}),
 				})
-				shownX := bodyRoot.DragOffset().X
+				shownX = bodyRoot.DragOffset().X
 				if bodyRoot.Dragging() {
 					switch {
 					case shownX > 6:
@@ -757,33 +769,53 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 				}
 			}
 			bodyRoot.Children(func() {
-				// 1A. Primary Tab Content
-				if activeTab != nil {
-					switch activeTab.Kind {
-					case TabCalendar:
-						s.calendarHomeView(c)
-					case TabPantry:
-						if s.RenderPantryContent != nil {
-							s.RenderPantryContent(c)
-						} else if s.Content != nil {
-							s.Content(c)
-						}
-					default:
-						if s.RenderTabContent != nil && activePane != nil {
-							s.RenderTabContent(c, activePane, *activeTab)
-						} else if s.Content != nil {
-							s.Content(c)
+				// Counter-translate horizontal drag offset so document text stays stationary
+				// while the drawer overlay tracks the finger 1:1 from millimeter 1.
+				stage := ui.Box(c.Key("mb-body-static")).Fill()
+				if shownX != 0 {
+					stage.Translate(-shownX, 0)
+				}
+				stage.Children(func() {
+					// 1A. Primary Tab Content
+					if activeTab != nil {
+						switch activeTab.Kind {
+						case TabCalendar:
+							s.calendarHomeView(c)
+						case TabPantry:
+							if s.RenderPantryContent != nil {
+								s.RenderPantryContent(c)
+							} else if s.Content != nil {
+								s.Content(c)
+							}
+						default:
+							if s.RenderTabContent != nil && activePane != nil {
+								s.RenderTabContent(c, activePane, *activeTab)
+							} else if s.Content != nil {
+								s.Content(c)
+							}
 						}
 					}
-				}
+				})
 
 				// 1B. Floating Obsidian iOS 26 Top Bar (Open center, left circular orb + right twin-icon pill)
 				if tok.LiquidGlass {
-					s.renderMobileGlassTopBar(c, tok, activeTab)
+					topBar := ui.Box(c.Key("mb-top-bar-static")).Absolute().Top(0).Left(0).Right(0).PassThrough()
+					if shownX != 0 {
+						topBar.Translate(-shownX, 0)
+					}
+					topBar.Children(func() {
+						s.renderMobileGlassTopBar(c, tok, activeTab)
+					})
 				}
 
 				// 1C. Centered Compact Icon-Only Liquid Glass Bottom Capsule
-				s.renderMobileFloatingBottomBar(c, tok, bodyRoot, activePane, activeTab)
+				dockStatic := ui.Box(c.Key("mb-dock-static")).Absolute().Fill().PassThrough()
+				if shownX != 0 {
+					dockStatic.Translate(-shownX, 0)
+				}
+				dockStatic.Children(func() {
+					s.renderMobileFloatingBottomBar(c, tok, bodyRoot, activePane, activeTab)
+				})
 			})
 		})
 
@@ -1085,19 +1117,21 @@ func (s *Shell) renderMobileFloatingBottomBar(
 	activePane *PaneNode,
 	activeTab *WorkspaceTab,
 ) {
+	_, _, safeBottom, _ := c.SafeArea()
+	keyboardOpen := safeBottom > mobileKeyboardInsetThresh || s.MobileKeyboardOpen
 	editingBar := s.MobileEditToolbar &&
 		activeTab != nil &&
 		activeTab.Kind == TabFile &&
 		activeTab.Mode == ModeEdit &&
-		!s.MobileDockForceNav
+		!s.MobileDockForceNav &&
+		keyboardOpen
 
 	targetHide := float32(0)
 	if s.MobileDockHidden && !editingBar {
 		targetHide = 1
 	}
-	hideT := stage.AnimateTo("mb-dock-hide", targetHide, theme.MotionFluid)
+	hideT := stage.AnimateTo("mb-dock-hide", targetHide, theme.MotionInline)
 
-	_, _, safeBottom, _ := c.SafeArea()
 	if safeBottom > mobileKeyboardInsetThresh && !editingBar {
 		return
 	}
@@ -1136,10 +1170,16 @@ func (s *Shell) renderMobileFloatingBottomBar(
 		theme.ApplyCapsuleGlass(capsule, tok, false)
 		capsule.Children(func() {
 			if editingBar {
-				s.renderMobileEditToolbarCapsule(c, tok, maxCapsuleW-24, activeTab)
+				ui.Row(c.Key("mb-dock-edit-inner")).AlignItems(ui.Center).Gap(4).
+					Transition(theme.MobileDockCrossfadeTransition()).Children(func() {
+					s.renderMobileEditToolbarCapsule(c, tok, maxCapsuleW-24, activeTab)
+				})
 				return
 			}
-			s.renderMobileNavDockItems(c, tok, activeTab, tabCount)
+			ui.Row(c.Key("mb-dock-nav-inner")).AlignItems(ui.Center).Gap(4).
+				Transition(theme.MobileDockCrossfadeTransition()).Children(func() {
+				s.renderMobileNavDockItems(c, tok, activeTab, tabCount)
+			})
 		})
 	})
 }
@@ -1227,9 +1267,17 @@ func (s *Shell) renderMobileEditToolbarCapsule(c *ui.Context, tok theme.Tokens, 
 	showSwitchNav := s.IsMobileToolbarActionVisible("switch_nav")
 	scrollMaxW := innerW
 	if showSwitchNav && innerW > float32(tok.Spacing48) {
-		scrollMaxW = innerW - float32(tok.Spacing48)
+		avail := innerW - float32(tok.Spacing48) - float32(tok.Spacing4)
+		// Align scroll viewport width to full 40dp button strides so the next icon never peeks as a 3px dot.
+		stride := float32(36 + tok.Spacing4)
+		fit := float32(int(avail/stride)) * stride
+		if fit >= stride*3 {
+			scrollMaxW = fit + float32(tok.Spacing4)
+		} else {
+			scrollMaxW = avail
+		}
 	}
-	ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(scrollMaxW).Height(40).Children(func() {
+	ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(scrollMaxW).Height(40).Scrollbars(false).Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 			s.renderMobileEditToolbarItems(c, tok, activeTab)
 		})
@@ -1344,13 +1392,14 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	}
 
 	animHost := ui.Box(c.Key("mb-drawer-host")).Absolute().Size(0, 0).PassThrough()
-	pAnim := animHost.AnimateTo("mb-drawer-p", targetP, theme.MotionFluid)
+	pAnim := animHost.AnimateTo("mb-drawer-p", targetP, theme.MotionDrawer)
 	if s.MobileSwipeKind != "" {
 		pAnim = targetP
 	}
 	if activeKind == "" && pAnim <= 0.01 {
 		s.mobileLastDrawerKind = ""
 		extra.drawerDragOffset = ui.Point{}
+		extra.scrimDragOffset = ui.Point{}
 		extra.drawerDragOpened = ""
 		return
 	}
@@ -1362,15 +1411,36 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 	}
 
 	ui.Overlay(c, func() {
-		root := ui.Box(c.Key("mb-drawer-overlay")).Absolute().Fill().PassThrough()
+		root := ui.Box(c.Key("mb-drawer-overlay")).Absolute().Fill().PassThrough().Clip()
 		root.Children(func() {
 		isLeft := activeKind == "tree"
-		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Fill().Background(tok.Scrim.Alpha(pAnim))
+		backdrop := ui.Box(c.Key("mb-drawer-scrim")).Absolute().Top(0).Bottom(0).Left(-sheetMaxW).Right(-sheetMaxW)
+		var scrimDragX float32
 		if s.MobileDrawer != "" {
-			if dx, _, dragging := backdrop.Dragged(); dragging && ((isLeft && dx < -sheetMaxW*0.24) || (!isLeft && dx > sheetMaxW*0.24)) {
+			gone := -sheetMaxW
+			bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
+			if !isLeft {
+				gone = sheetMaxW
+				bounds = ui.Rect{X: 0, W: sheetMaxW}
+			}
+			if extra.drawerDragOpened != s.MobileDrawer {
+				extra.drawerDragOffset = ui.Point{}
+				extra.scrimDragOffset = ui.Point{}
+				extra.drawerDragOpened = s.MobileDrawer
+			}
+			backdrop.Draggable(&extra.scrimDragOffset, ui.DraggableOptions{
+				Axis:      ui.Horizontal,
+				Bounds:    &bounds,
+				Rigid:     true,
+				Animation: theme.MotionDrawer,
+				Snap:      ui.Nearest(ui.Point{}, ui.Point{X: gone}),
+			})
+			scrimDragX = backdrop.DragOffset().X
+			if !backdrop.Dragging() && math.Abs(float64(extra.scrimDragOffset.X-gone)) < 1.0 {
 				s.MobileDrawer = ""
 				s.MobileDrawerProgress = 0
 				extra.drawerDragOffset = ui.Point{}
+				extra.scrimDragOffset = ui.Point{}
 				extra.drawerDragOpened = ""
 				mygo.Haptics.Light()
 				return
@@ -1379,8 +1449,11 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 				s.MobileDrawer = ""
 				s.MobileDrawerProgress = 0
 				extra.drawerDragOffset = ui.Point{}
+				extra.scrimDragOffset = ui.Point{}
 				extra.drawerDragOpened = ""
 			}
+		} else {
+			extra.scrimDragOffset = ui.Point{}
 		}
 
 		sheet := ui.Column(c.Key("mb-sheet-"+activeKind)).Absolute().Top(0).Bottom(0).Width(sheetMaxW).
@@ -1392,6 +1465,7 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 			sheet.Right(0)
 		}
 
+		var sheetDragX float32
 		if s.MobileDrawer != "" {
 			gone := -sheetMaxW
 			bounds := ui.Rect{X: -sheetMaxW, W: sheetMaxW}
@@ -1399,20 +1473,22 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 				gone = sheetMaxW
 				bounds = ui.Rect{X: 0, W: sheetMaxW}
 			}
-			if extra.drawerDragOpened != s.MobileDrawer {
-				extra.drawerDragOffset = ui.Point{}
-				extra.drawerDragOpened = s.MobileDrawer
-			}
 			sheet.Draggable(&extra.drawerDragOffset, ui.DraggableOptions{
-				Axis:   ui.Horizontal,
-				Bounds: &bounds,
-				Rigid:  true,
-				Snap:   ui.Nearest(ui.Point{}, ui.Point{X: gone}),
+				Axis:      ui.Horizontal,
+				Bounds:    &bounds,
+				Rigid:     true,
+				Animation: theme.MotionDrawer,
+				Snap:      ui.Nearest(ui.Point{}, ui.Point{X: gone}),
 			})
+			sheetDragX = sheet.DragOffset().X
+			if scrimDragX != 0 {
+				sheet.Translate(scrimDragX, 0)
+			}
 			if !sheet.Dragging() && math.Abs(float64(extra.drawerDragOffset.X-gone)) < 1.0 {
 				s.MobileDrawer = ""
 				s.MobileDrawerProgress = 0
 				extra.drawerDragOffset = ui.Point{}
+				extra.scrimDragOffset = ui.Point{}
 				extra.drawerDragOpened = ""
 				mygo.Haptics.Light()
 			}
@@ -1423,6 +1499,8 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 			}
 			sheet.Translate(sheetOffsetX, 0)
 		}
+		dragProgress := float32(math.Min(1, (math.Abs(float64(sheetDragX))+math.Abs(float64(scrimDragX)))/float64(max(sheetMaxW, 1))))
+		backdrop.Background(tok.Scrim.Alpha(max(0, pAnim*(1-dragProgress))))
 
 		safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
 		t := c.Theme()
@@ -1457,11 +1535,6 @@ func (s *Shell) renderMobileSwipeDrawers(c *ui.Context, tok theme.Tokens, sheetM
 					AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
 					ui.Icon(c, lucide.Calculator()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
 					components.Text(c, "步骤与速算").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
-					if components.IconButton(c.Key("mb-right-to-left"), lucide.PanelLeft(), "切换实验库", components.IconButtonCompact).Clicked() {
-						s.MobileDrawer = "tree"
-						extra.drawerDragOffset = ui.Point{}
-						extra.drawerDragOpened = "tree"
-					}
 					if components.IconButton(c.Key("mb-right-close"), lucide.X(), "关闭右侧抽屉", components.IconButtonPlain).Clicked() {
 						s.MobileDrawer = ""
 						s.MobileDrawerProgress = 0
@@ -1934,7 +2007,7 @@ func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, 
 		overlay := ui.Column(c.Key("mb-tab-switcher")).Absolute().Fill().Modal().
 			Padding(float32(tok.Spacing16)+safeTop, float32(tok.Spacing16)+safeRight, float32(tok.Spacing16)+safeBottom, float32(tok.Spacing16)+safeLeft).
 			Gap(float32(tok.Spacing12)).
-			Transition(theme.FloatingBarTransition())
+			Transition(theme.MobileTabOverviewTransition())
 		theme.ApplyPanelGlass(overlay, tok, 0.35)
 		overlay.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {

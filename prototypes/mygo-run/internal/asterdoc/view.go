@@ -546,32 +546,67 @@ func (v *View) renderUnifiedLiveDocument(c *ui.Context) {
 				if isLastVisual && !isReadOnly {
 					renderedTrailingEditableProse = true
 				}
-				v.renderLiveMarkdownSegmentFull(
-					c,
-					segKey,
-					"科学笔记正文",
-					editText,
-					editStart,
-					isReadOnly,
-					!v.ReadOnly,
-					placeholder,
-					"",
-					isLastVisual,
-					func(nextText string) string {
-						if v.Doc == nil || v.OnChange == nil {
+				if v.MobileCompact && HasFootnotes(editText) && strings.Contains(editText, "\n\n") {
+					chunks := splitProseFootnoteChunks(src, editStart, editEnd)
+					for ci, ch := range chunks {
+						ch := ch
+						cKey := fmt.Sprintf("%s:p%d", segKey, ci)
+						cText := src[ch.start:ch.end]
+						v.renderLiveMarkdownSegmentFull(
+							c,
+							cKey,
+							"科学笔记正文",
+							cText,
+							ch.start,
+							isReadOnly,
+							!v.ReadOnly,
+							placeholder,
+							"",
+							isLastVisual && ci == len(chunks)-1,
+							func(nextText string) string {
+								if v.Doc == nil || v.OnChange == nil {
+									return ""
+								}
+								if ch.end < len(v.Doc.Source) && strings.HasPrefix(v.Doc.Source[ch.end:], "[^") && nextText != "" && !strings.HasSuffix(nextText, "\n") {
+									nextText += "\n\n"
+								}
+								if nextSrc, err := ReplaceByteRange(v.Doc.Source, ch.start, ch.end, nextText); err == nil {
+									v.OnChange(nextSrc)
+									return nextSrc
+								}
+								return ""
+							},
+							nil,
+						)
+					}
+				} else {
+					v.renderLiveMarkdownSegmentFull(
+						c,
+						segKey,
+						"科学笔记正文",
+						editText,
+						editStart,
+						isReadOnly,
+						!v.ReadOnly,
+						placeholder,
+						"",
+						isLastVisual,
+						func(nextText string) string {
+							if v.Doc == nil || v.OnChange == nil {
+								return ""
+							}
+							if editEnd < len(v.Doc.Source) && strings.HasPrefix(v.Doc.Source[editEnd:], "[^") && nextText != "" && !strings.HasSuffix(nextText, "\n") {
+								nextText += "\n\n"
+							}
+							if nextSrc, err := ReplaceByteRange(v.Doc.Source, editStart, editEnd, nextText); err == nil {
+								v.OnChange(nextSrc)
+								return nextSrc
+							}
 							return ""
-						}
-						if editEnd < len(v.Doc.Source) && strings.HasPrefix(v.Doc.Source[editEnd:], "[^") && nextText != "" && !strings.HasSuffix(nextText, "\n") {
-							nextText += "\n\n"
-						}
-						if nextSrc, err := ReplaceByteRange(v.Doc.Source, editStart, editEnd, nextText); err == nil {
-							v.OnChange(nextSrc)
-							return nextSrc
-						}
-						return ""
-					},
-					nil,
-				)
+						},
+						nil,
+					)
+				}
 
 			case SegmentEmbed:
 				embedOrdinal++
@@ -3440,7 +3475,8 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 		}
 		maxCardH := max(float32(tok.Spacing48)*3.8, winH-topSafe-bottomSafe-float32(tok.Spacing32))
 
-		scrim := ui.Box(c.Key("mb-fn-composer-scrim")).Absolute().Fill().Background(tok.Scrim)
+		scrim := ui.Box(c.Key("mb-fn-composer-scrim")).Absolute().Fill().Background(tok.Scrim).
+			Transition(theme.MobileOverlayFadeTransition())
 		if scrim.Clicked() || scrim.OverlayShortcut(0, ui.KeyEscape) {
 			v.CloseMobileFootnoteSheet(true)
 			return
@@ -3456,6 +3492,7 @@ func (v *View) renderMobileFootnoteSheet(c *ui.Context, tok theme.Tokens) {
 			Background(tok.Surface).
 			Border(1, tok.Border).
 			Shadow(0, 8, 28, 0, tok.ShadowColor).
+			Transition(theme.MobileComposerCardTransition()).
 			Clip()
 		card.Clicked()
 		card.Children(func() {
@@ -4008,5 +4045,51 @@ func (v *View) toggleFoldActiveBlock() bool {
 	}
 	return false
 }
+
+type proseParagraphChunk struct {
+	start int
+	end   int
+}
+
+// splitProseFootnoteChunks splits a multi-paragraph prose span right after any paragraph
+// that contains an inline `[^id]` reference, keeping byte offsets exact in src so mobile
+// Tufte inline footnotes unfold immediately under their own paragraph instead of far below.
+func splitProseFootnoteChunks(src string, baseStart, baseEnd int) []proseParagraphChunk {
+	if baseEnd <= baseStart {
+		return nil
+	}
+	sub := src[baseStart:baseEnd]
+	var chunks []proseParagraphChunk
+	chunkStart := 0
+	pos := 0
+	for pos < len(sub) {
+		relBreak := strings.Index(sub[pos:], "\n\n")
+		if relBreak < 0 {
+			break
+		}
+		paraEnd := pos + relBreak
+		segText := sub[chunkStart:paraEnd]
+		nextStart := paraEnd + 2
+		for nextStart < len(sub) && sub[nextStart] == '\n' {
+			nextStart++
+		}
+		if reMDFootnoteRef.MatchString(segText) && nextStart < len(sub) {
+			chunks = append(chunks, proseParagraphChunk{
+				start: baseStart + chunkStart,
+				end:   baseStart + paraEnd,
+			})
+			chunkStart = nextStart
+		}
+		pos = nextStart
+	}
+	if chunkStart < len(sub) || len(chunks) == 0 {
+		chunks = append(chunks, proseParagraphChunk{
+			start: baseStart + chunkStart,
+			end:   baseEnd,
+		})
+	}
+	return chunks
+}
+
 
 

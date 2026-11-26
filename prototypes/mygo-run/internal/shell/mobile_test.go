@@ -34,6 +34,7 @@ func TestMobileToolbarCustomizationAndPersistence(t *testing.T) {
 		TodayDate:          "2026-11-20",
 		SelectedDate:       "2026-11-20",
 		ForceMobilePreview: true,
+		MobileKeyboardOpen: true,
 		VaultPathInput:     tmpVault,
 		OnMobileDocToolbarAction: func(tab WorkspaceTab, action string) {
 			fired = append(fired, action)
@@ -297,6 +298,7 @@ func TestMobileSafeAreaAndFileTreeSwipeActions(t *testing.T) {
 		TodayDate:          "2026-11-20",
 		SelectedDate:       "2026-11-20",
 		ForceMobilePreview: true,
+		MobileKeyboardOpen: true,
 		VaultPathInput:     tmpVault,
 		MobileDrawer:       "tree",
 		VaultTree: &vault.TreeNode{

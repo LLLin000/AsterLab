@@ -24,3 +24,28 @@ func TestMotionTokensAndHelpersRenderCleanly(t *testing.T) {
 	nudgeSeq = 1
 	tt.Frame()
 }
+
+func TestMobileMotionTokensAndTransitions(t *testing.T) {
+	if MotionDrawer.Spring.Duration == 0 || MotionPagePush.Spring.Duration == 0 || !MotionEffect.NonMotion {
+		t.Fatalf("expected mobile motion tokens initialized properly")
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(DarkPalette())
+		ui.Box(c).Key("page").Transition(MobilePagePushTransition())
+		ui.Box(c).Key("scrim").Transition(MobileOverlayFadeTransition())
+		ui.Box(c).Key("tabs").Transition(MobileTabOverviewTransition())
+		ui.Box(c).Key("acc").Transition(MobileInlineAccordionTransition())
+		ui.Box(c).Key("comp").Transition(MobileComposerCardTransition())
+		ui.Box(c).Key("dock").Transition(MobileDockCrossfadeTransition())
+	}, 402, 874)
+	tt.Frame()
+
+	SetAccessibilityPrefs(1.0, true)
+	defer SetAccessibilityPrefs(1.0, false)
+	if MotionDrawer.Duration != instantMotion.Duration {
+		t.Fatalf("expected ReduceMotion to collapse MotionDrawer to instant")
+	}
+	if !MotionEffect.NonMotion {
+		t.Fatalf("expected MotionEffect to keep NonMotion=true under ReduceMotion")
+	}
+}

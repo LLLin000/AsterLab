@@ -308,6 +308,35 @@ func TestMobileFootnoteBottomSheetLifecycle(t *testing.T) {
 		t.Fatalf("expected inline Tufte footnote collapsed after clicking 收起")
 	}
 
+	// 1c. Strict read-only ModeLab guard: tapping locked prose must NOT reveal raw `**` or `[^1]:` source lines
+	labSrc := "---\ntitle: Lab Strict\n---\n\n第一段：添加 **PBS** 并参考注脚[^1]。\n\n[^1]: 这是只读隐藏定义。\n"
+	labDoc, lErr := Parse(labSrc)
+	if lErr != nil {
+		t.Fatalf("parse labSrc: %v", lErr)
+	}
+	labView := &View{
+		Doc:           labDoc,
+		Mode:          ModeProtocol,
+		LabMode:       true,
+		UnifiedLive:   true,
+		MobileCompact: true,
+	}
+	labTester := ui.NewTester(func(c *ui.Context) {
+		labView.Render(c)
+	}, 390, 844)
+	settleMobileTester(labTester)
+	// Simulate tap onto first line of prose
+	labTester.FingerDown(80, 30)
+	labTester.FingerUp(80, 30)
+	settleMobileTester(labTester)
+	for _, ent := range labView.liveEditors {
+		if ent != nil && ent.state != nil && ent.state.ReadOnly && ent.state.Theme != nil {
+			if ent.state.Theme.Cursor != ui.Transparent {
+				t.Fatalf("expected transparent cursor in read-only ModeLab prose")
+			}
+		}
+	}
+
 	// 2. Cursor sitting inside existing [^1] re-opens footnote 1 composer instead of inserting [^2]
 	refPos := strings.Index(st.Buffer.String(), "[^1]")
 	if refPos < 0 {

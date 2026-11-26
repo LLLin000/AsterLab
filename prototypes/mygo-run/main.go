@@ -256,8 +256,9 @@ type app struct {
 	newExpOpen       bool
 	newExpFolder     string
 	devInsp          devInspectorState
-	newExpTitle      string
-	newExpDate       string
+	newExpTitle        string
+	newExpDate         string
+	pendingPhotoRoute  *photoRouteRequest
 	newExpStartTime  string
 	newExpTemplate   string
 	newExpTplQuery   string
@@ -5060,10 +5061,12 @@ func main() {
 			a.renderSyncErrorBanner(c)
 			a.renderVaultNewExperimentDialog(c)
 			a.renderImportDialog(c)
+			a.renderPhotoRouteSheet(c)
 			a.renderDevInspectorOverlay(c)
 		},
 		IsExternalModalOpen: func() bool {
 			return a.newExpOpen || a.importOpen || a.linkDialogOpen || a.confirmDesignSwitch ||
+				(a.pendingPhotoRoute != nil && a.pendingPhotoRoute.open) ||
 				(a.tools != nil && (a.tools.PantryDialogOpen || a.tools.PantryBoxDialogOpen || a.tools.VivariumDialogOpen || a.tools.VivariumPeekOpen))
 		},
 		PaletteCommands: append([]shell.PaletteCommand{

@@ -308,6 +308,7 @@ type Shell struct {
 	MobileEditToolbar   bool
 	MobileTabSwitcherOpen bool
 	MobileMenuSheetOpen   bool
+	MobileKeyboardOpen    bool
 	MobileDockForceNav    bool
 	MobileDockHidden      bool
 	MobileDrawerProgress  float32
@@ -737,7 +738,9 @@ func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 	theme.SetAccessibilityPrefs(s.TextScale, s.ReduceMotion)
 	if c != nil {
 		c.SetTheme(theme.Window(c))
-		return theme.GetTokens(c.Theme())
+		tok := theme.GetTokens(c.Theme())
+		c.Root().Background(tok.Canvas)
+		return tok
 	}
 	return theme.LightTokens()
 }

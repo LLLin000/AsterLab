@@ -191,6 +191,7 @@ func computeLivePreviewDecorationsFull(
 	lineStart := 0
 	inCodeFence := false
 	fenceTicks := 0
+	inFootnoteDef := false
 	activeCalloutTone := ""
 
 	var resolvedAll []ResolvedRelation
@@ -406,6 +407,42 @@ func computeLivePreviewDecorationsFull(
 				continue
 			}
 		}
+
+		// 1a-fndef. Markdown footnote definition lines (`[^1]: ...` + indented continuation)
+		if reFootnoteDefLine.FindStringIndex(lineText) != nil {
+			inFootnoteDef = true
+			if !isActive {
+				styles = append(styles, editor.LineStyle{
+					Line:       lineIdx,
+					Font:       ui.Font{Family: fontFamily, Size: 1},
+					LineHeight: 0.01,
+				})
+				repls = append(repls, editor.Replacement{
+					Start: lineStart,
+					End:   lineStart + len(lineText),
+					Text:  "",
+				})
+			}
+			lineStart += len(rawLine)
+			continue
+		}
+		if inFootnoteDef && (strings.HasPrefix(lineText, "  ") || strings.HasPrefix(lineText, "\t")) {
+			if !isActive {
+				styles = append(styles, editor.LineStyle{
+					Line:       lineIdx,
+					Font:       ui.Font{Family: fontFamily, Size: 1},
+					LineHeight: 0.01,
+				})
+				repls = append(repls, editor.Replacement{
+					Start: lineStart,
+					End:   lineStart + len(lineText),
+					Text:  "",
+				})
+			}
+			lineStart += len(rawLine)
+			continue
+		}
+		inFootnoteDef = false
 
 		// 1a-hr. Thematic break (`---`) -> sleek horizontal divider closing preceding step cleanly
 		if reThematicBreakLine.MatchString(lineText) && !isActive {
@@ -874,7 +911,7 @@ func computeLivePreviewDecorationsFull(
 									tip = fmt.Sprintf("批注 %s（点击补充内容）", dispNum)
 								}
 								components.Tooltip(c, pill, tip)
-								if pill.Clicked() && fnHooks != nil && fnHooks.onClickFN != nil {
+								if pill.Clicked() && !pill.Dragging() && fnHooks != nil && fnHooks.onClickFN != nil {
 									fnHooks.onClickFN(fnID)
 								}
 								if fnHooks != nil && fnHooks.isPopOpen != nil && fnHooks.isPopOpen(fnID) && fnHooks.renderPop != nil {
@@ -1284,7 +1321,12 @@ func (v *View) renderLiveMarkdownSegmentFull(
 
 	st.ReadOnly = readOnly
 	st.Placeholder = placeholder
-	st.Theme = liveEditorTheme(t, tok)
+	edTheme := liveEditorTheme(t, tok)
+	if readOnly {
+		// In strict read-only ModeLab/Read views, hide the edit caret completely.
+		edTheme.Cursor = ui.Transparent
+	}
+	st.Theme = edTheme
 	fontFamily := "sans-serif"
 	if t != nil && t.Font != "" {
 		fontFamily = t.Font
@@ -1704,7 +1746,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		styles, repls, diags := computeLivePreviewDecorationsFull(
 			curBuf,
 			activeLine,
-			focused,
+			focused && !readOnly,
 			t,
 			tok,
 			v.Doc,
@@ -1782,7 +1824,7 @@ func (v *View) renderLiveMarkdownSegmentFull(
 		entry.lastNLTextSig = ""
 	}
 
-	ui.Box(c.Key("live-md:" + key)).FillWidth().Children(func() {
+	ui.Column(c.Key("live-md:" + key)).FillWidth().Children(func() {
 		edEl := editor.View(c, st).FillWidth()
 
 		// Record rendered line Y-offsets of inline `[^id]` refs for wide-screen right-margin collision avoidance
@@ -2037,14 +2079,13 @@ func (v *View) renderLiveMarkdownSegmentFull(
 			v.pendingFocusLiveKey = ""
 			v.pendingInjectSlash = false
 		}
-	})
-
-	// Mobile Scheme A: Silky animated inline Tufte accordion note directly beneath the paragraph (zero heavy chrome).
-	if v.MobileCompact && strings.Contains(curBuf, "[^") && v.Doc != nil && HasFootnotes(v.Doc.Source) {
-		if mbDocFN := ParseFootnotes(v.Doc.Source); mbDocFN != nil {
-			v.renderMobileInlineFootnotes(c, tok, key, curBuf, mbDocFN)
+		// Mobile Scheme A: Silky animated inline Tufte accordion note directly beneath the paragraph (zero heavy chrome).
+		if v.MobileCompact && strings.Contains(curBuf, "[^") && v.Doc != nil && HasFootnotes(v.Doc.Source) {
+			if mbDocFN := ParseFootnotes(v.Doc.Source); mbDocFN != nil {
+				v.renderMobileInlineFootnotes(c, tok, key, curBuf, mbDocFN)
+			}
 		}
-	}
+	})
 }
 
 func (v *View) renderMobileInlineFootnotes(c *ui.Context, tok theme.Tokens, key, curBuf string, docFN *FootnoteDoc) {
@@ -2079,85 +2120,54 @@ func (v *View) renderMobileInlineFootnotes(c *ui.Context, tok theme.Tokens, key,
 	if len(ids) == 0 {
 		return
 	}
-	if v.footnoteNoteH == nil {
-		v.footnoteNoteH = map[string]float32{}
-	}
 	for _, fid := range ids {
 		fn := docFN.ByID[fid]
-		if fn == nil {
+		if fn == nil || !v.MobileInlineFootnoteExpanded(fn.ID) {
 			continue
 		}
-		expanded := v.MobileInlineFootnoteExpanded(fn.ID)
-		animHost := ui.Box(c.Key("mb-fn-anim:" + key + ":" + fn.ID)).FillWidth()
-		target := float32(0)
-		if expanded {
-			target = 1
-		}
-		tAnim := animHost.AnimateTo("open", target, theme.MotionFluid)
-		if tAnim <= 0.01 && !expanded {
-			continue
-		}
-		clipBox := ui.Box(c.Key("mb-fn-clip:" + key + ":" + fn.ID)).FillWidth().Clip()
-		cachedH := v.footnoteNoteH[fn.ID]
-		if cachedH <= 0 {
-			cachedH = float32(tok.Spacing48) + float32(tok.Spacing16)
-		}
-		if tAnim < 0.995 {
-			clipBox.Height(max(1, cachedH*tAnim))
-		}
-		var innerEl ui.Element
-		hasInner := false
-		clipBox.Children(func() {
-			inner := ui.Row(c.Key("mb-fn-card:" + key + ":" + fn.ID)).FillWidth().
-				Margin(float32(tok.Spacing4), 0, float32(tok.Spacing4), 0).
-				Radius(float32(tok.ControlRadius)).
-				Background(tok.Elevated).
-				Opacity(tAnim).
-				Translate(0, (1-tAnim)*-6).
-				Clip()
-			innerEl = inner
-			hasInner = true
-			inner.Children(func() {
-				ui.Box(c).Width(2).FillHeight().Background(tok.Accent.Alpha(0.75))
-				ui.Column(c).Grow(1).MinWidth(0).
-					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-					Gap(float32(tok.Spacing4)).Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d", fn.Number)).
-							FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
-						ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
-							FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
-					})
-					ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
-						if !v.ReadOnly && v.Can(PermDocumentEdit) {
-							editBtn := ui.ButtonBase(c.Key("mb-fn-edit:" + key + ":" + fn.ID)).
-								Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-								Center().Label("编辑批注")
-							editBtn.Children(func() {
-								ui.Text(c, "编辑").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
-							})
-							if editBtn.Clicked() {
-								v.OpenMobileFootnoteSheet(fn.ID)
-								mygo.Haptics.Selection()
-							}
-						}
-						foldBtn := ui.ButtonBase(c.Key("mb-fn-fold:" + key + ":" + fn.ID)).
+		inner := ui.Row(c.Key("mb-fn-card:" + key + ":" + fn.ID)).FillWidth().
+			Margin(float32(tok.Spacing4), 0, float32(tok.Spacing4), 0).
+			Radius(float32(tok.ControlRadius)).
+			Background(tok.Elevated).
+			Transition(theme.MobileInlineAccordionTransition()).
+			Clip()
+		inner.Children(func() {
+			ui.Box(c).Width(2).FillHeight().Background(tok.Accent.Alpha(0.75))
+			ui.Column(c).Grow(1).MinWidth(0).
+				Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+				Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, fmt.Sprintf("%d", fn.Number)).
+						FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).FontFeatures("tnum").Shrink(0)
+					ui.Text(c, firstNonEmpty(strings.TrimSpace(fn.Body), "暂无批注内容")).
+						FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
+				})
+				ui.Row(c).FillWidth().Justify(ui.End).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+					if !v.ReadOnly && v.Can(PermDocumentEdit) {
+						editBtn := ui.ButtonBase(c.Key("mb-fn-edit:" + key + ":" + fn.ID)).
 							Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-							Center().Label("收起批注")
-						foldBtn.Children(func() {
-							ui.Text(c, "收起").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+							Center().Label("编辑批注")
+						editBtn.Children(func() {
+							ui.Text(c, "编辑").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
 						})
-						if foldBtn.Clicked() {
-							v.mobileExpandedFootnotes[fn.ID] = false
-							mygo.Haptics.Light()
+						if editBtn.Clicked() {
+							v.OpenMobileFootnoteSheet(fn.ID)
+							mygo.Haptics.Selection()
 						}
+					}
+					foldBtn := ui.ButtonBase(c.Key("mb-fn-fold:" + key + ":" + fn.ID)).
+						Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
+						Center().Label("收起批注")
+					foldBtn.Children(func() {
+						ui.Text(c, "收起").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 					})
+					if foldBtn.Clicked() {
+						v.mobileExpandedFootnotes[fn.ID] = false
+						mygo.Haptics.Light()
+					}
 				})
 			})
 		})
-		if hasInner && tAnim >= 0.995 && innerEl.Bounds().H > 0 {
-			v.footnoteNoteH[fn.ID] = innerEl.Bounds().H + float32(tok.Spacing8)
-		}
 	}
 }
 

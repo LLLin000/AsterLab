@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui/mobile"
 
 	"asterlab-mygo-prototype/internal/asterdoc"
+	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
 	"asterlab-mygo-prototype/internal/tools"
 	"asterlab-mygo-prototype/internal/uikit/labsticker"
@@ -575,6 +576,9 @@ func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
 	if sh.MobileDrawer != "outline" {
 		t.Fatalf("expected full-canvas left swipe from x=290->70 to open Right Drawer, got %q", sh.MobileDrawer)
 	}
+	if tt.HasText("切换实验库") {
+		t.Fatalf("expected redundant 切换实验库 button removed from Right Drawer header")
+	}
 	swipeHorizontal(tt, 40, 280, 460)
 	settleIPhoneFrames(tt, 260)
 	if sh.MobileDrawer != "" {
@@ -593,6 +597,23 @@ func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
 	assertBoundsWithinWidth(t, tt, "RibbonMenuSheetDark", 402)
 	sh.MobileMenuSheetOpen = false
 	settleIPhoneFrames(tt, 240)
+
+	// 2b. Verify Obsidian Edit Toolbar opens ONLY when keyboard inset is active & icons are uniform neutral (no scrollbar/icon peek)
+	paneID := ""
+	if p := sh.ActivePane(); p != nil {
+		paneID = p.ID
+	}
+	sh.OpenFileInPane(paneID, "实验模板/空白实验.asterml", "空白实验", shell.ModeEdit, false)
+	sh.MobileDockForceNav = false
+	tt.SetInsets(59, 0, 336, 0)
+	settleIPhoneFrames(tt, 260)
+	saveAuditSnapshot(t, tt, "mobile_edit_toolbar_keyboard_336.png")
+	if !tt.HasText("+步骤") {
+		t.Fatalf("expected Mobile Edit Toolbar visible when ModeEdit keyboard is open")
+	}
+	sh.OpenCalendarTab()
+	tt.SetInsets(59, 0, 34, 0)
+	settleIPhoneFrames(tt, 220)
 
 	// 3. Full-screen Settings two-level swipe-back closure
 	darkMode = false
@@ -616,8 +637,8 @@ func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
 		t.Fatalf("expected second right swipe-back to close Settings")
 	}
 
-	// 4. Mobile inline Tufte footnote accordion + keyboard-docked composer check
-	fnSrc := "---\ntitle: 批注测试实验\ndate: 2026-11-26\n---\n\n#@ step-1 细胞润洗\n按 1:10 比例配制 PBS 缓冲液，沿孔壁缓慢加液[^1]，避免直接冲击细胞层。\n\n[^1]: 建议先 37°C 预热 15 min，冷液直冲容易造成贴壁细胞整片起皱。\n"
+	// 4. Mobile inline Tufte footnote accordion attached directly beneath paragraph 1 (above paragraph 2) + keyboard-docked composer check
+	fnSrc := "---\ntitle: 批注测试实验\ndate: 2026-11-26\n---\n\n#@ step-1 细胞润洗\n第一段：按 1:10 比例配制 PBS 缓冲液，沿孔壁缓慢加液[^1]，避免直接冲击细胞层。\n\n第二段跟随文字：静置 2 分钟后观察贴壁完整度。\n\n[^1]: 建议先 37°C 预热 15 min，冷液直冲容易造成贴壁细胞整片起皱。\n"
 	fnDoc, err := asterdoc.Parse(fnSrc)
 	if err != nil {
 		t.Fatalf("parse footnote sample: %v", err)
@@ -647,10 +668,17 @@ func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
 	settleIPhoneFrames(fnTester, 160)
 
 	fnView.ToggleMobileInlineFootnote("1")
-	settleIPhoneFrames(fnTester, 320)
+	settleIPhoneFrames(fnTester, 360)
 	saveAuditSnapshot(t, fnTester, "mobile_footnote_inline_expanded.png")
 	if !fnTester.HasText("建议先 37°C 预热 15 min") || !fnTester.HasText("编辑") || !fnTester.HasText("收起") {
 		t.Fatalf("expected inline Tufte footnote expanded, texts=%v", fnTester.Texts())
+	}
+	if fnR, ok1 := fnTester.Find("编辑批注"); ok1 {
+		if p2R, ok2 := fnTester.Find("第二段跟随文字：静置 2 分钟后观察贴壁完整度。"); ok2 {
+			if fnR.Y >= p2R.Y {
+				t.Fatalf("expected footnote accordion below paragraph 1 (above paragraph 2), fnR.Y=%v >= p2R.Y=%v", fnR.Y, p2R.Y)
+			}
+		}
 	}
 	assertBoundsWithinWidth(t, fnTester, "InlineFootnoteExpanded", 402)
 
@@ -668,4 +696,40 @@ func TestMobileNativeGesturesScrimAndFootnoteUX402x874(t *testing.T) {
 		t.Fatalf("composer header overlaps SafeArea or 336dp keyboard: %+v", saveR)
 	}
 	assertBoundsWithinWidth(t, fnTester, "FootnoteComposerKeyboard", 402)
+}
+
+func TestPhotoRouteOptionsAndSafeWikiEmbed(t *testing.T) {
+	src := "---\ntitle: 拍照路由测试\n---\n\n#@ step-1 细胞成像\n观察贴壁状态。\n\n```asterlab\nkind: figure\nid: fig-slot-1\nschema: 1\ntitle: 显微镜 10x 视野\nsvg: \"<svg viewBox='0 0 360 160'></svg>\"\n```\n\n```asterlab\nkind: group_table\nid: gt-1\nschema: 1\nrows:\n  - {id: ctrl, name: 对照组, role: control}\n```\n\n```asterlab\nkind: plate\nid: plate-1\nschema: 1\ntitle: 96孔板A\nformat: 96\ngroups:\n  ctrl: [A1, A2]\n```\n"
+	doc, err := asterdoc.Parse(src)
+	if err != nil {
+		t.Fatalf("parse doc: %v", err)
+	}
+	opts := collectPhotoRouteOptions(doc)
+	if len(opts) < 3 {
+		t.Fatalf("expected slot + plate + inline options, got %+v", opts)
+	}
+	if opts[0].Kind != "figure_slot" || opts[0].ModuleID != "fig-slot-1" {
+		t.Fatalf("expected first option to be empty figure slot, got %+v", opts[0])
+	}
+
+	safe := sanitizeWikiAssetPath(`assets\photo[1]|test.png`)
+	if safe != "./assets/photo1test.png" {
+		t.Fatalf("unexpected sanitized asset path %q", safe)
+	}
+
+	// Verify inline ![[...]] insertion & figure_slot backfill both produce valid ASTs.
+	resInline := executePhotoRouteChoice(src, "edit", 96, 10, safe, photoRouteOption{Kind: "inline_embed"})
+	if !resInline.OK {
+		t.Fatalf("inline embed failed: %+v", resInline.Error)
+	}
+	if _, err := asterdoc.Parse(resInline.NextSource); err != nil {
+		t.Fatalf("inline embed produced invalid AsterML: %v\n%s", err, resInline.NextSource)
+	}
+	resSlot := executePhotoRouteChoice(src, "edit", 96, 10, safe, opts[0])
+	if !resSlot.OK {
+		t.Fatalf("slot update failed: %+v", resSlot.Error)
+	}
+	if _, err := asterdoc.Parse(resSlot.NextSource); err != nil {
+		t.Fatalf("slot update produced invalid AsterML: %v\n%s", err, resSlot.NextSource)
+	}
 }

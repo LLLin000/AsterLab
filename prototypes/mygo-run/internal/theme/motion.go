@@ -53,6 +53,47 @@ var (
 		Oklab:    true,
 	}
 
+	// Mobile Motion System tokens (Spatial vs Effects dual-track).
+	baseMotionTouchPress = ui.Animation{
+		Duration: 90 * time.Millisecond,
+		Ease:     ui.EaseOut,
+		Oklab:    true,
+	}
+	baseMotionEffect = ui.Animation{
+		Duration:  180 * time.Millisecond,
+		Ease:      ui.EaseOut,
+		Oklab:     true,
+		NonMotion: true,
+	}
+	baseMotionInline = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 260 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+	baseMotionDrawer = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 300 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+	baseMotionPagePush = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 330 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+	baseMotionSheet = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 340 * time.Millisecond,
+			Bounce:   0.04,
+		},
+		Oklab: true,
+	}
+
 	// MotionInstant drives high-frequency hover/tab color snaps per the frequency-tiered motion law.
 	MotionInstant = baseMotionInstant
 
@@ -72,6 +113,24 @@ var (
 
 	// MotionHero drives spatial continuity across larger distances (figure & plate lightbox zoom).
 	MotionHero = baseMotionHero
+
+	// MotionTouchPress drives mobile 90ms :active press feedback.
+	MotionTouchPress = baseMotionTouchPress
+
+	// MotionEffect drives pure opacity/scrim/color transitions (zero spatial overshoot, NonMotion).
+	MotionEffect = baseMotionEffect
+
+	// MotionInline drives mobile compact inline accordions and dock <-> edit bar crossfades.
+	MotionInline = baseMotionInline
+
+	// MotionDrawer drives symmetric 1:1 mobile drawer open/close settle springs.
+	MotionDrawer = baseMotionDrawer
+
+	// MotionPagePush drives full-screen mobile page push/pop transitions.
+	MotionPagePush = baseMotionPagePush
+
+	// MotionSheet drives mobile bottom sheets and tab overview spatial scaling.
+	MotionSheet = baseMotionSheet
 )
 
 func applyMotionPreference(reduce bool) {
@@ -81,6 +140,11 @@ func applyMotionPreference(reduce bool) {
 		MotionSnappy = instantMotion
 		MotionFluid = instantMotion
 		MotionHero = instantMotion
+		MotionTouchPress = instantMotion
+		MotionInline = instantMotion
+		MotionDrawer = instantMotion
+		MotionPagePush = instantMotion
+		MotionSheet = instantMotion
 		return
 	}
 	MotionInstant = baseMotionInstant
@@ -88,6 +152,12 @@ func applyMotionPreference(reduce bool) {
 	MotionSnappy = baseMotionSnappy
 	MotionFluid = baseMotionFluid
 	MotionHero = baseMotionHero
+	MotionTouchPress = baseMotionTouchPress
+	MotionEffect = baseMotionEffect
+	MotionInline = baseMotionInline
+	MotionDrawer = baseMotionDrawer
+	MotionPagePush = baseMotionPagePush
+	MotionSheet = baseMotionSheet
 }
 
 // ReducedMotionEnabled reports whether in-app reduced motion is active.
@@ -161,6 +231,73 @@ func HeroFlyTransition(matchKey any) ui.ElementTransition {
 		Fly:          true,
 		ScaleContent: true,
 		Animation:    &MotionHero,
+	}
+}
+
+// MobilePagePushTransition pushes full-screen mobile overlay views in from the trailing
+// edge with a critically damped MotionPagePush spring and exits swiftly in 200ms.
+func MobilePagePushTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionPagePush,
+		ExitDuration: 200 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{XPercent: 1.0, Opacity: 1},
+		Exit:         &ui.Motion{XPercent: 1.0, Opacity: 1},
+	}
+}
+
+// MobileOverlayFadeTransition drives pure scrim/backdrop opacity without spatial overshoot.
+func MobileOverlayFadeTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionEffect,
+		ExitDuration: 150 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0},
+		Exit:         &ui.Motion{Opacity: 0},
+	}
+}
+
+// MobileTabOverviewTransition scales the mobile tab switcher cleanly into view.
+func MobileTabOverviewTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionSheet,
+		ExitDuration: 180 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.94},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.96},
+	}
+}
+
+// MobileInlineAccordionTransition collapses/expands inline mobile footnotes cleanly.
+func MobileInlineAccordionTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionInline,
+		ExitDuration: 170 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Collapse: true, Opacity: 0, Y: -4},
+		Exit:         &ui.Motion{Collapse: true, Opacity: 0, Y: -4},
+	}
+}
+
+// MobileComposerCardTransition lifts keyboard-docked mobile floating composers cleanly.
+func MobileComposerCardTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionInline,
+		ExitDuration: 160 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Y: 14, Scale: 0.97},
+		Exit:         &ui.Motion{Opacity: 0, Y: 10, Scale: 0.98},
+	}
+}
+
+// MobileDockCrossfadeTransition crossfades between Navigation Dock and Keyboard Edit Toolbar.
+func MobileDockCrossfadeTransition() ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    &MotionInline,
+		ExitDuration: 140 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Y: 8},
+		Exit:         &ui.Motion{Opacity: 0, Y: 6},
 	}
 }
 

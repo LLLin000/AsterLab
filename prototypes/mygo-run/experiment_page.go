@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/editor"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 
@@ -22,6 +23,7 @@ import (
 	"asterlab-mygo-prototype/internal/labio"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	"asterlab-mygo-prototype/internal/vault"
 )
 
@@ -1592,6 +1594,188 @@ func (a *app) handleMobileDocToolbarAction(c *ui.Context, curTab shell.Workspace
 	}
 }
 
+type photoRouteOption struct {
+	Kind     string // "figure_slot" | "plate_embed" | "inline_embed"
+	Label    string
+	Detail   string
+	ModuleID string
+	StepID   string
+	PlateID  string
+}
+
+type photoRouteRequest struct {
+	open     bool
+	asset    string
+	tabPath  string
+	options  []photoRouteOption
+	applyDoc func(string)
+}
+
+func sanitizeWikiAssetPath(relAsset string) string {
+	clean := filepath.ToSlash(strings.TrimSpace(relAsset))
+	clean = strings.ReplaceAll(clean, "[", "")
+	clean = strings.ReplaceAll(clean, "]", "")
+	clean = strings.ReplaceAll(clean, "|", "")
+	clean = strings.ReplaceAll(clean, "\r", "")
+	clean = strings.ReplaceAll(clean, "\n", "")
+	clean = strings.TrimLeft(clean, "/")
+	if clean == "" {
+		return ""
+	}
+	if !strings.HasPrefix(clean, "./") {
+		clean = "./" + clean
+	}
+	return clean
+}
+
+func isEmptyPlaceholderSVG(svg string) bool {
+	s := strings.ToLower(strings.TrimSpace(svg))
+	if s == "" {
+		return true
+	}
+	for _, shape := range []string{"<path", "<rect", "<circle", "<ellipse", "<line", "<polyline", "<polygon", "<text", "<image"} {
+		if strings.Contains(s, shape) {
+			return false
+		}
+	}
+	return true
+}
+
+func collectPhotoRouteOptions(doc *asterdoc.Document) []photoRouteOption {
+	if doc == nil {
+		return nil
+	}
+	var slots []photoRouteOption
+	var plates []photoRouteOption
+	inspectMod := func(kind, id, stepID, stepTitle string, data map[string]any) {
+		switch kind {
+		case "figure":
+			src := strings.TrimSpace(fmt.Sprint(data["src"]))
+			if src == "<nil>" {
+				src = ""
+			}
+			svg := strings.TrimSpace(fmt.Sprint(data["svg"]))
+			if svg == "<nil>" {
+				svg = ""
+			}
+			if src == "" && isEmptyPlaceholderSVG(svg) && id != "" {
+				title := strings.TrimSpace(fmt.Sprint(data["title"]))
+				if title == "" || title == "<nil>" {
+					title = "待拍照片槽位 (" + id + ")"
+				}
+				detail := "填入该照片槽位（figure@1）"
+				if stepTitle != "" {
+					detail = "步骤「" + stepTitle + "」照片槽位"
+				}
+				slots = append(slots, photoRouteOption{
+					Kind:     "figure_slot",
+					Label:    "填入照片槽位 · " + title,
+					Detail:   detail,
+					ModuleID: id,
+					StepID:   stepID,
+				})
+			}
+		case "plate":
+			if id != "" {
+				title := strings.TrimSpace(fmt.Sprint(data["title"]))
+				if title == "" || title == "<nil>" {
+					title = id
+				}
+				plates = append(plates, photoRouteOption{
+					Kind:    "plate_embed",
+					Label:   "以 ![[]] 嵌入并关联孔板 · " + title,
+					Detail:  "插入 ![[...]]{@" + id + "}，可在卡片中再点选具体孔位",
+					PlateID: id,
+				})
+			}
+		}
+	}
+	for _, m := range doc.Modules {
+		inspectMod(m.Kind, m.ID, "", "", m.Data)
+		if m.Kind == "step" {
+			stTitle := strings.TrimSpace(fmt.Sprint(m.Data["title"]))
+			if stTitle == "<nil>" {
+				stTitle = ""
+			}
+			if blks, ok := m.Data["blocks"].([]any); ok {
+				for _, raw := range blks {
+					if bm, ok := raw.(map[string]any); ok {
+						inspectMod(
+							strings.TrimSpace(fmt.Sprint(bm["kind"])),
+							strings.TrimSpace(fmt.Sprint(bm["id"])),
+							m.ID,
+							stTitle,
+							bm,
+						)
+					}
+				}
+			}
+		}
+	}
+	out := make([]photoRouteOption, 0, len(slots)+len(plates)+1)
+	out = append(out, slots...)
+	out = append(out, plates...)
+	if len(out) > 0 {
+		out = append(out, photoRouteOption{
+			Kind:   "inline_embed",
+			Label:  "直接以 ![[]] 插入文档正文",
+			Detail: "生成标准可关联图片卡片，不占用既有槽位",
+		})
+	}
+	return out
+}
+
+func executePhotoRouteChoice(source string, mode astercmd.ExecMode, platFmt, excPct int, relAsset string, opt photoRouteOption) astercmd.BatchResult {
+	safeAsset := sanitizeWikiAssetPath(relAsset)
+	if safeAsset == "" {
+		return astercmd.BatchResult{Error: &astercmd.CommandError{Code: "INVALID_ARGS", Message: "无效的照片路径"}}
+	}
+	switch opt.Kind {
+	case "figure_slot":
+		return astercmd.ExecuteBatch(source, astercmd.BatchRequest{
+			Mode:        astercmd.ModeEdit,
+			PlateFormat: platFmt,
+			ExcessPct:   excPct,
+			Operations: []astercmd.Operation{{
+				CommandID: "block.update",
+				Args: map[string]any{
+					"module_id": opt.ModuleID,
+					"step_id":   opt.StepID,
+					"props": map[string]any{
+						"src":     safeAsset,
+						"svg":     "",
+						"caption": "现场实验照片（原图已无损归档）",
+					},
+				},
+			}},
+		})
+	default:
+		atOff := -1
+		if fnDoc := asterdoc.ParseFootnotes(source); fnDoc != nil && fnDoc.TrailingDefStart >= 0 {
+			atOff = fnDoc.TrailingDefStart
+			for atOff > 0 && (source[atOff-1] == '\n' || source[atOff-1] == '\r') {
+				atOff--
+			}
+		}
+		args := map[string]any{
+			"asset":     safeAsset,
+			"at_offset": atOff,
+		}
+		if opt.Kind == "plate_embed" && opt.PlateID != "" {
+			args["targets"] = []string{opt.PlateID}
+		}
+		return astercmd.ExecuteBatch(source, astercmd.BatchRequest{
+			Mode:        mode,
+			PlateFormat: platFmt,
+			ExcessPct:   excPct,
+			Operations: []astercmd.Operation{{
+				CommandID: "asset.embed",
+				Args:      args,
+			}},
+		})
+	}
+}
+
 func (a *app) importCameraPhotoIntoDoc(c *ui.Context, curTab shell.WorkspaceTab, curLD *vault.LiveDocument, applyDoc func(string)) {
 	photoPath, err := a.CaptureLabPhoto(context.Background())
 	if errors.Is(err, errors.ErrUnsupported) {
@@ -1620,34 +1804,97 @@ func (a *app) importCameraPhotoIntoDoc(c *ui.Context, curTab shell.WorkspaceTab,
 	}
 	_, _ = a.generateAssetPreviewSidecar(relAsset)
 
+	safeAsset := sanitizeWikiAssetPath(relAsset)
 	var platFmt, excPct int
 	if a.shell != nil {
 		platFmt = a.shell.DefaultPlateFormat
 		excPct = a.shell.DefaultExcessPct
 	}
-	res := astercmd.ExecuteBatch(curLD.Source, astercmd.BatchRequest{
-		Mode:        astercmd.ModeEdit,
-		PlateFormat: platFmt,
-		ExcessPct:   excPct,
-		Operations: []astercmd.Operation{{
-			CommandID: "block.insert",
-			Args: map[string]any{
-				"kind":  "figure",
-				"title": "现场实验拍照",
-				"props": map[string]any{
-					"src":     relAsset,
-					"caption": "现场实验照片（原图已无损归档）",
-					"svg":     "",
-				},
-			},
-		}},
-	})
+	opts := collectPhotoRouteOptions(curLD.Parsed)
+	if len(opts) > 0 {
+		a.pendingPhotoRoute = &photoRouteRequest{
+			open:     true,
+			asset:    safeAsset,
+			tabPath:  curTab.FilePath,
+			options:  opts,
+			applyDoc: applyDoc,
+		}
+		return
+	}
+
+	res := executePhotoRouteChoice(curLD.Source, astercmd.ModeEdit, platFmt, excPct, safeAsset, photoRouteOption{Kind: "inline_embed"})
 	if res.OK {
 		applyDoc(res.NextSource)
-		addPageToast(c, "已无损归档照片并插入 figure@1", components.ToastSuccess)
+		addPageToast(c, "已无损归档照片并插入 ![[...]] 图片卡片", components.ToastSuccess)
 	} else if res.Error != nil {
 		addPageToast(c, res.Error.Message, components.ToastWarning)
 	}
+}
+
+func (a *app) renderPhotoRouteSheet(c *ui.Context) {
+	if a == nil || a.pendingPhotoRoute == nil || a.docStore == nil {
+		return
+	}
+	req := a.pendingPhotoRoute
+	tok := theme.GetTokens(c.Theme())
+	mobile.Sheet(c, &req.open, mobile.SheetOptions{
+		Detents:    []float32{0.50, 0.80},
+		Background: &tok.Surface,
+		Label:      "选择照片归档位置",
+	}, func() {
+		ui.Column(c.Key("photo-route-sheet")).FillWidth().
+			Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing24), float32(tok.Spacing16)).
+			Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				kit.IconBox(c, tok, lucide.Camera(), tok.Accent)
+				ui.Text(c, "选择照片归档位置").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+			})
+			ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Clip().Children(func() {
+				for i, opt := range req.options {
+					opt := opt
+					if i > 0 {
+						ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+					}
+					row := ui.ButtonBase(c.Key(fmt.Sprintf("photo-route-%d-%s-%s", i, opt.Kind, opt.ModuleID+opt.PlateID))).
+						FillWidth().MinHeight(float32(tok.Spacing48)).
+						Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+						Justify(ui.Start).Label(opt.Label).
+						OnClick(func() {
+							ld, lErr := a.docStore.Open(req.tabPath)
+							if lErr != nil || ld == nil {
+								req.open = false
+								return
+							}
+							var platFmt, excPct int
+							if a.shell != nil {
+								platFmt = a.shell.DefaultPlateFormat
+								excPct = a.shell.DefaultExcessPct
+							}
+							res := executePhotoRouteChoice(ld.Source, astercmd.ModeEdit, platFmt, excPct, req.asset, opt)
+							req.open = false
+							if res.OK {
+								if req.applyDoc != nil {
+									req.applyDoc(res.NextSource)
+								}
+								mygo.Haptics.Success()
+								addPageToast(c, "已归档现场照片", components.ToastSuccess)
+							} else if res.Error != nil {
+								addPageToast(c, res.Error.Message, components.ToastWarning)
+							}
+						})
+					theme.ApplyTactilePress(row)
+					row.Children(func() {
+						ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)*0.5).Children(func() {
+							ui.Text(c, opt.Label).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+							if opt.Detail != "" {
+								ui.Text(c, opt.Detail).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
+							}
+						})
+					})
+				}
+			})
+		})
+	})
 }
 
 func (a *app) saveExportBytes(c *ui.Context, defaultName, title string, filter mygo.FileFilter, data []byte) (string, error) {

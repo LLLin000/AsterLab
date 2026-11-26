@@ -37,6 +37,29 @@
 - **编辑与新建态（键盘顶部悬浮极简输入卡）**：
   - 点击便签右侧轻文字「编辑」或工具栏 `[^]` 新建批注时，在 `ui.Overlay` 内呈现悬浮输入卡，严格贴靠于 `safeBottom + tok.Spacing8`（软键盘正上方），顶部仅保留纯文字 `取消 | 批注 N | 删除图标 / 保存`，无嵌套边框，确保输入法与批注正文零重叠。
 
-## 6. 多设备 SafeArea 契约
+## 6. 多设备 SafeArea 契约与真全面屏（Edge-to-Edge）
 
-- 遵循 MyGo 单次 `SafeArea` 原则：主窗口根部已由 `padInsets` 扣除系统安全区，仅 `ui.Overlay` 全屏浮层/抽屉读取 1 次 `c.SafeArea()`。详情与设备矩阵见 `mobile_overflow_audit_test.go`。
+- 遵循 MyGo 单次 `SafeArea` 原则：主窗口根部由 `padInsets` 处理系统安全区，仅 `ui.Overlay` 全屏浮层/抽屉读取 1 次 `c.SafeArea()`。详情与设备矩阵见 `mobile_overflow_audit_test.go`。
+- **真全面屏流淌**：主滚动舞台不得用硬 `.Clip()` 截断 `extendUnderBottom` 对底部弧形 Home Indicator 区域的自然延伸，同时 `c.Root().Background(tok.Canvas)` 与宿主背景必须同步当前画布色，消除屏幕底部弯曲区露出的纯黑 `#000000` 边。
+
+## 7. 移动端统一物理动效体系（Mobile Motion System）
+
+基于 Apple WWDC *Designing Fluid Interfaces*、Material Design 3 Expressive（Spatial vs Effects 双轨）与现代触控交互工程（Emil Kowalski / Rauno Freiberg）：
+
+1. **Spatial / Effects 双轨分离**：空间位移动画（抽屉、页面推入、Sheet、手风琴高度）统一使用弹簧物理；光学渐变（暗幕 `alpha`、颜色、透明淡入）统一使用纯无回弹 `EaseOut`（`NonMotion: true`）。
+2. **手势 1:1 跟手与速度继承**：抽屉与右滑返回从手指接触第 1 毫米起直接驱动目标面板本身（正文固定不偏移回弹）；松手瞬间将甩动速度注入 `Draggable` 弹簧，开合手感完全对称且随时可反向打断。
+3. **非阻塞式利落退场**：入场给足空间方向感（`260–340ms`），退场干脆利落（`140–220ms`）；触发关闭时遮罩立即切至 `PassThrough()`，绝不锁死后续点击。
+4. **高频零阻力**：打字、切换光标与微缩按压不做拖泥带水的过渡；系统开启 `ReduceMotion` 时所有空间位自动退化为瞬时切换。
+
+| Token | 类型 | MyGo 物理参数 | 使用范围 |
+|---|---|---|---|
+| `MotionTouchPress` | Micro Spatial | `90ms EaseOut` | 按钮/胶囊/列表行 `:active 0.97` 按压微缩 |
+| `MotionEffect` | Pure Effects | `180ms EaseOut (NonMotion)` | 暗幕遮罩透明度、图标/激活色彩交叉渐变 |
+| `MotionInline` | Compact Spatial | `Spring(260ms, bounce: 0)` | 批注手风琴折叠展开、导航胶囊 ↔ 键盘工具栏过渡 |
+| `MotionDrawer` | Gesture Spatial | `Spring(300ms, bounce: 0)` | 左右全高抽屉滑入/滑出（开合双侧一致） |
+| `MotionPagePush` | Navigation Spatial | `Spring(330ms, bounce: 0)` | 全屏二级页面 Push / 右滑 Pop 退回 |
+| `MotionSheet` | Overlay Spatial | `Spring(340ms, bounce: 0.04)` | 底部功能 Sheet、拍照归宿 Sheet、AI 预览 Sheet、标签概览缩放 |
+
+### 七类标准场景编排 & 底部双栏 Obsidian 规则
+- **底部双栏 Obsidian 逻辑**：软键盘未弹出时底部**始终呈现导航胶囊**（含 `ModeEdit` 浏览态）；软键盘弹出进入实际输入态时平滑交叉过渡（`MotionInline`）为**键盘编辑工具栏**（图标一律中性色 `tok.Text`，仅激活状态亮 `tok.Accent`，隐藏水平滚动条避免残影）。
+- **AI 转结构预览卡后续迭代纪律（Tap-to-Edit Parameter Chip）**：未来在 `✨` 预览卡补充参数微调时，严禁在原胶囊坐标下就地弹出局部浮窗（会被移动端软键盘直接遮挡），**必须点按参数胶囊后复用第 5 节的「键盘顶栏悬浮输入卡（严格锚定 `safeBottom + Spacing8`）」**，既保持预览卡默认极简零冗余控件，又彻底规避输入法遮挡。
