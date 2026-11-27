@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,12 +19,43 @@ import (
 	"asterlab-mygo-prototype/internal/theme"
 )
 
-func writeSamplePNG(t *testing.T, path string) {
+func imageMeanLuma(img image.Image) float64 {
+	if img == nil {
+		return 255
+	}
+	b := img.Bounds()
+	var sum float64
+	var count int
+	for y := b.Min.Y; y < b.Max.Y; y += 2 {
+		for x := b.Min.X; x < b.Max.X; x += 2 {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			lum := 0.2126*float64(r>>8) + 0.7152*float64(g>>8) + 0.0722*float64(bl>>8)
+			sum += lum
+			count++
+		}
+	}
+	if count == 0 {
+		return 255
+	}
+	return sum / float64(count)
+}
+
+func writeSpecimenPNG(t *testing.T, path string, rBase, gBase, bBase uint8) {
 	t.Helper()
-	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
-	for y := 0; y < 48; y++ {
-		for x := 0; x < 64; x++ {
-			img.Set(x, y, color.RGBA{R: 70, G: 165, B: 210, A: 255})
+	img := image.NewRGBA(image.Rect(0, 0, 128, 128))
+	for y := 0; y < 128; y++ {
+		for x := 0; x < 128; x++ {
+			dx := float64(x-64) / 48.0
+			dy := float64(y-64) / 48.0
+			dist := dx*dx + dy*dy
+			glow := 0.25
+			if dist < 0.7 {
+				glow = 1.0 - dist*0.8
+			}
+			r := uint8(float64(rBase) * glow)
+			g := uint8(float64(gBase) * glow)
+			b := uint8(float64(bBase) * glow)
+			img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
 		}
 	}
 	var buf bytes.Buffer
@@ -33,6 +65,10 @@ func writeSamplePNG(t *testing.T, path string) {
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatalf("write sample png %s: %v", path, err)
 	}
+}
+
+func writeSamplePNG(t *testing.T, path string) {
+	writeSpecimenPNG(t, path, 70, 165, 210)
 }
 
 func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
@@ -215,15 +251,256 @@ func TestScientificCameraHUDCaptureAndLabGallery402x874(t *testing.T) {
 		t.Fatalf("expected DigitalZoomFactor=2.0 in sidecar, got %.2f (err=%v)", metaRead.Geometry.DigitalZoomFactor, err)
 	}
 
-	// 2. Flow A: Lab Gallery
+	// 2. Flow A: Contact-Sheet Lab Gallery + DarkroomLightbox
 	tt.Click("打开科研图库")
-	settleIPhoneFrames(tt, 220)
+	settleIPhoneFrames(tt, 260)
 	assertNoHorizontalOverflow402(t, tt, "LabGallery402v5")
 	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_v5_402x874.png")
 
-	for _, want := range []string{"返回拍摄", "科研图库", "Bayer DNG", "用途标注"} {
+	for _, want := range []string{"返回拍摄", "科研图库", "RAW+JPG", "1 张"} {
 		if !tt.HasText(want) {
-			t.Fatalf("expected %q in Lab Gallery Flow A", want)
+			t.Fatalf("expected %q in Contact-Sheet Lab Gallery, texts=%v", want, tt.Texts())
 		}
+	}
+
+	// Tap captured tile -> opens DarkroomLightbox directly over Lab Gallery
+	g := a.ensureLabGallery()
+	if len(g.items) == 0 {
+		t.Fatalf("expected captured item in lab gallery")
+	}
+	capturedID := g.items[0].LabPhotoID
+	if err := tt.Click(capturedID); err != nil {
+		t.Fatalf("click tile %s: %v", capturedID, err)
+	}
+	settleIPhoneFrames(tt, 260)
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryLightbox402")
+	for _, want := range []string{"100%", "ISO 200", "4900K", "用途标注", "插入当前实验", "导出原片 (.DNG)", "设为叠影参考"} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q in DarkroomLightbox, texts=%v", want, tt.Texts())
+		}
+	}
+	if err := tt.Click("标注 灰卡"); err != nil {
+		t.Fatalf("click role pill 灰卡: %v", err)
+	}
+	settleIPhoneFrames(tt, 120)
+	if !tt.HasText("灰卡") {
+		t.Fatalf("expected updated role 灰卡 in lightbox, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("设为叠影参考"); err != nil {
+		t.Fatalf("click 设为叠影参考: %v", err)
+	}
+	settleIPhoneFrames(tt, 140)
+	if !sess.ghostEnabled || sess.ghostImagePath == "" || g.open {
+		t.Fatalf("expected ghost reference applied and returned to camera, ghost=%v path=%q galOpen=%v", sess.ghostEnabled, sess.ghostImagePath, g.open)
+	}
+}
+
+func TestScientificCameraLabGalleryContactSheetAndLightbox402x874(t *testing.T) {
+	vaultRoot := filepath.Join(t.TempDir(), "LabGalleryDarkroomVault")
+	a, sh := newWiredFSMTestApp(t, vaultRoot)
+	sh.ForceMobilePreview = true
+
+	origOverlays := sh.RenderOverlays
+	sh.RenderOverlays = func(c *ui.Context) {
+		if origOverlays != nil {
+			origOverlays(c)
+		}
+		a.renderSciCameraOverlay(c)
+		a.renderLabGalleryOverlay(c)
+	}
+	sh.OnOpenLabGallery = func() {
+		a.openLabGallery(sh.ActiveTab(), nil)
+	}
+	sh.IsExternalModalOpen = func() bool {
+		return a.isExternalModalOrGalleryOpen()
+	}
+
+	expPath := "HUVEC-Tube.asterml"
+	if err := os.WriteFile(filepath.Join(vaultRoot, expPath), []byte("---\ntitle: HUVEC-Tube\n---\n\n# HUVEC-Tube\n\n## 步骤 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	curTab := shell.WorkspaceTab{Kind: shell.TabFile, FilePath: expPath, Title: "HUVEC-Tube"}
+	curLD, _ := a.docStore.Open(curTab.FilePath)
+	sh.OpenFileInPane("", curTab.FilePath, curTab.Title, shell.ModeEdit, false)
+
+	// Seed multi-batch lab photos with real PNG thumbnails + DNG/JPG variants.
+	tmpDir := t.TempDir()
+	assetsDir := a.vault.AssetsDir()
+	imgCyan := filepath.Join(tmpDir, "cyan.png")
+	imgAmber := filepath.Join(tmpDir, "amber.png")
+	imgGreen := filepath.Join(tmpDir, "green.png")
+	rawDummy := filepath.Join(tmpDir, "dummy.dng")
+	writeSpecimenPNG(t, imgCyan, 60, 210, 195)
+	writeSpecimenPNG(t, imgAmber, 225, 155, 45)
+	writeSpecimenPNG(t, imgGreen, 75, 220, 120)
+	if err := os.WriteFile(rawDummy, []byte("II*\x00SIMULATED_BAYER_DNG"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	seedPhoto := func(id, batchID, role, capturedAt, previewPath, rawPath string, iso, shutter, kelvin, focus, pitch, roll float64) {
+		t.Helper()
+		meta := scicamera.PhotoMetadata{
+			Schema:     scicamera.MetadataSchema,
+			LabPhotoID: id,
+			Raw: scicamera.RawInfo{
+				Format:   "bayer_cfa_dng",
+				BitDepth: 12,
+			},
+			Exposure: scicamera.ExposureInfo{
+				ISO:         iso,
+				ShutterS:    shutter,
+				WBKelvinEst: kelvin,
+			},
+			Geometry: scicamera.GeometryInfo{
+				FocusLensPosition: focus,
+				IMUPitchDeg:       pitch,
+				IMURollDeg:        roll,
+			},
+			Experiment: scicamera.ExperimentInfo{
+				ExperimentID: "HUVECTUBE",
+				BatchID:      batchID,
+				FrameRole:    role,
+				CapturedAt:   capturedAt,
+			},
+		}
+		if _, err := scicamera.SaveCapturedTrio(assetsDir, id, previewPath, rawPath, meta); err != nil {
+			t.Fatalf("seed photo %s: %v", id, err)
+		}
+	}
+
+	seedPhoto("20261127_HUVECTUBE_SMP_001", "B20261127-01", scicamera.RoleSample, "2026-11-27T14:22:00+08:00", imgCyan, rawDummy, 400, 1.0/125.0, 5600, 0.42, -1.2, 0.4)
+	seedPhoto("20261127_HUVECTUBE_REF_002", "B20261127-01", scicamera.RoleWBRef, "2026-11-27T14:21:00+08:00", imgAmber, rawDummy, 200, 1.0/100.0, 5200, 0.42, -0.5, 0.2)
+	seedPhoto("20261127_HUVECTUBE_SMP_003", "B20261127-01", scicamera.RoleSample, "2026-11-27T14:20:00+08:00", "", rawDummy, 100, 1.0/250.0, 5400, 0.40, 0.0, 0.0)
+	seedPhoto("20261126_HUVECTUBE_SMP_001", "B20261126-02", scicamera.RoleSample, "2026-11-26T18:05:00+08:00", imgGreen, "", 800, 1.0/60.0, 4800, 0.38, -2.0, 1.1)
+
+	// Render inside LightTheme to verify Camera -> Lab Gallery has ZERO white flash.
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		sh.RenderSplitView(c)
+	}, 402, 874)
+	tt.SetInsets(59, 0, 34, 0)
+	settleIPhoneFrames(tt, 180)
+
+	a.openSciCamera(nil, curTab, curLD, nil)
+	settleIPhoneFrames(tt, 160)
+	if luma := imageMeanLuma(tt.Image()); luma >= 60 {
+		t.Fatalf("expected darkroom camera canvas in LightTheme (mean_luma < 60), got %.1f", luma)
+	}
+
+	if err := tt.Click("打开科研图库"); err != nil {
+		t.Fatalf("click 打开科研图库: %v", err)
+	}
+	// Check immediate frame AND settled frames for zero white flash
+	tt.Frame()
+	if luma0 := imageMeanLuma(tt.Image()); luma0 >= 60 {
+		t.Fatalf("white flash detected on Camera -> Lab Gallery frame 0: mean_luma=%.1f (want < 60)", luma0)
+	}
+	settleIPhoneFrames(tt, 260)
+	if lumaSettled := imageMeanLuma(tt.Image()); lumaSettled >= 60 {
+		t.Fatalf("expected settled Lab Gallery darkroom canvas mean_luma < 60 in LightTheme, got %.1f", lumaSettled)
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryContactSheet402")
+	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_contact_sheet_402x874.png")
+
+	for _, want := range []string{
+		"科研图库", "4 组原片 · DNG 3", "全部", "DNG 原片",
+		"2026-11-27 · B20261127-01", "3 张",
+		"2026-11-26 · B20261126-02", "1 张",
+		"RAW+JPG", "灰卡 · RAW+JPG", "DNG", "JPG",
+	} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q in contact-sheet gallery, texts=%v", want, tt.Texts())
+		}
+	}
+
+	// Verify filter pill: DNG 原片 hides JPG-only item
+	if err := tt.Click("筛选 DNG 原片"); err != nil {
+		t.Fatalf("click DNG filter: %v", err)
+	}
+	settleIPhoneFrames(tt, 120)
+	if tt.HasText("2026-11-26 · B20261126-02") {
+		t.Fatalf("expected JPG-only batch hidden when filtering DNG 原片, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("筛选 全部"); err != nil {
+		t.Fatalf("click 全部 filter: %v", err)
+	}
+	settleIPhoneFrames(tt, 120)
+
+	// Tap first tile -> opens DarkroomLightbox directly over Lab Gallery
+	if err := tt.Click("20261127_HUVECTUBE_SMP_001"); err != nil {
+		t.Fatalf("click contact sheet tile: %v", err)
+	}
+	settleIPhoneFrames(tt, 260)
+	if lumaLB := imageMeanLuma(tt.Image()); lumaLB >= 60 {
+		t.Fatalf("expected DarkroomLightbox mean_luma < 60, got %.1f", lumaLB)
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryDarkroomLightbox402")
+	maybeSaveIPhoneSnapshot(t, tt, "lab_gallery_darkroom_lightbox_402x874.png")
+
+	for _, want := range []string{
+		"20261127_HUVECTUBE_SMP_001", "100%",
+		"ISO 400 · 1/125 · 5600K · F0.42 · -1.2°/0.4°",
+		"用途标注", "插入当前实验", "导出原片 (.DNG)", "设为叠影参考",
+	} {
+		if !tt.HasText(want) {
+			t.Fatalf("expected %q in DarkroomLightbox, texts=%v", want, tt.Texts())
+		}
+	}
+
+	// Single-tap stage toggles chrome hidden, tap again restores chrome
+	g := a.ensureLabGallery()
+	tt.ClickAt(201, 420)
+	tt.Advance(200 * time.Millisecond)
+	tt.Frame()
+	if !g.lightboxState.ChromeHidden {
+		t.Fatalf("expected single tap on lightbox stage to hide chrome")
+	}
+	tt.ClickAt(201, 420)
+	tt.Advance(200 * time.Millisecond)
+	tt.Frame()
+	if g.lightboxState.ChromeHidden {
+		t.Fatalf("expected second tap on lightbox stage to restore chrome")
+	}
+
+	// Double-click toggles 1.0x <-> 2.0x zoom
+	tt.ClickAt(201, 420)
+	tt.Advance(40 * time.Millisecond)
+	tt.ClickAt(201, 420)
+	tt.Frame()
+	if g.lightboxState.Zoom != 2.0 || !tt.HasText("200%") {
+		t.Fatalf("expected double-click 2.0x zoom, got %.2f texts=%v", g.lightboxState.Zoom, tt.Texts())
+	}
+	tt.Advance(600 * time.Millisecond)
+	tt.ClickAt(201, 420)
+	tt.Advance(40 * time.Millisecond)
+	tt.ClickAt(201, 420)
+	tt.Frame()
+	if g.lightboxState.Zoom != 1.0 {
+		t.Fatalf("expected second double-click back to 1.0x, got %.2f", g.lightboxState.Zoom)
+	}
+
+	// Role tagging updates metadata & badge
+	if err := tt.Click("标注 平场"); err != nil {
+		t.Fatalf("click role pill 平场: %v", err)
+	}
+	settleIPhoneFrames(tt, 120)
+	if !tt.HasText("平场") {
+		t.Fatalf("expected role updated to 平场")
+	}
+
+	// Insert into active experiment document
+	if err := tt.Click("插入当前实验"); err != nil {
+		t.Fatalf("click 插入当前实验: %v", err)
+	}
+	settleIPhoneFrames(tt, 160)
+	if g.open {
+		t.Fatalf("expected gallery closed after inserting photo into document")
+	}
+	updatedLD, err := a.docStore.Open(expPath)
+	if err != nil {
+		t.Fatalf("reopen doc: %v", err)
+	}
+	if !strings.Contains(updatedLD.Source, "20261127_HUVECTUBE_SMP_001") {
+		t.Fatalf("expected inserted photo reference in doc, got:\n%s", updatedLD.Source)
 	}
 }

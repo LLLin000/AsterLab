@@ -108,18 +108,21 @@ type sciCameraSession struct {
 }
 
 type labGalleryState struct {
-	open       bool
-	fromCamera bool
-	filterRole string // "" | sample | flat_field | wb_reference | scale_bar_ref
-	items      []scicamera.GalleryItem
-	selectedID string
-	dirty      bool
-	tabPath    string
-	applyDoc   func(string)
+	open          bool
+	fromCamera    bool
+	filterRole    string // "" | "dng" | sample | flat_field | wb_reference | scale_bar_ref
+	items         []scicamera.GalleryItem
+	selectedID    string
+	lightboxOpen  bool
+	lightboxState kit.DarkroomLightboxState
+	dirty         bool
+	tabPath       string
+	applyDoc      func(string)
 
 	imgMu    sync.Mutex
 	imgCache map[string]ui.ImageSource
 	imgErr   map[string]bool
+	imgOrder []string
 }
 
 func (a *app) ensureSciCamera() *sciCameraSession {
@@ -157,9 +160,16 @@ func (a *app) ensureLabGallery() *labGalleryState {
 }
 
 func (g *labGalleryState) cachedThumb(path string) ui.ImageSource {
-	if g == nil || strings.TrimSpace(path) == "" {
+	cleanPath := strings.TrimSpace(path)
+	if g == nil || cleanPath == "" {
 		return nil
 	}
+	info, statErr := os.Stat(cleanPath)
+	if statErr != nil {
+		return nil
+	}
+	cacheKey := fmt.Sprintf("%s|%d|%d", cleanPath, info.ModTime().UnixNano(), info.Size())
+
 	g.imgMu.Lock()
 	defer g.imgMu.Unlock()
 	if g.imgCache == nil {
@@ -168,26 +178,33 @@ func (g *labGalleryState) cachedThumb(path string) ui.ImageSource {
 	if g.imgErr == nil {
 		g.imgErr = map[string]bool{}
 	}
-	if img, ok := g.imgCache[path]; ok {
+	if img, ok := g.imgCache[cacheKey]; ok {
 		return img
 	}
-	if g.imgErr[path] {
+	if g.imgErr[cacheKey] {
 		return nil
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(cleanPath)
 	if err != nil {
-		g.imgErr[path] = true
+		g.imgErr[cacheKey] = true
 		return nil
 	}
 	img, err := ui.DecodeImage(raw)
 	if err != nil {
-		g.imgErr[path] = true
+		if len(g.imgErr) >= 64 {
+			g.imgErr = map[string]bool{}
+		}
+		g.imgErr[cacheKey] = true
 		return nil
 	}
-	if len(g.imgCache) > 24 {
-		g.imgCache = map[string]ui.ImageSource{}
+	const maxCachedThumbs = 64
+	if len(g.imgCache) >= maxCachedThumbs && len(g.imgOrder) > 0 {
+		oldest := g.imgOrder[0]
+		g.imgOrder = g.imgOrder[1:]
+		delete(g.imgCache, oldest)
 	}
-	g.imgCache[path] = img
+	g.imgCache[cacheKey] = img
+	g.imgOrder = append(g.imgOrder, cacheKey)
 	return img
 }
 
@@ -278,6 +295,8 @@ func (a *app) openLabGallery(curTab *shell.WorkspaceTab, applyDoc func(string)) 
 	g := a.ensureLabGallery()
 	g.open = true
 	g.fromCamera = a.sciCam != nil && a.sciCam.open
+	g.lightboxOpen = false
+	g.lightboxState = kit.DarkroomLightboxState{Zoom: 1.0}
 	g.dirty = true
 	if curTab != nil && curTab.Kind == shell.TabFile {
 		g.tabPath = curTab.FilePath
@@ -1750,6 +1769,40 @@ func (a *app) pickFromAlbumInLabGallery(c *ui.Context) {
 	a.routeArchivedPhotoIntoDoc(c, rel, "", "")
 }
 
+func labPhotoDateYMD(it scicamera.GalleryItem) string {
+	raw := strings.TrimSpace(it.Meta.Experiment.CapturedAt)
+	if len(raw) >= 10 && raw[4] == '-' && raw[7] == '-' {
+		if _, err := time.Parse("2006-01-02", raw[:10]); err == nil {
+			return raw[:10]
+		}
+	}
+	if len(it.LabPhotoID) >= 8 {
+		prefix := it.LabPhotoID[:8]
+		if t, err := time.Parse("20060102", prefix); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return "未归档日期"
+}
+
+func labPhotoFormatBadge(it scicamera.GalleryItem) string {
+	if it.HasRaw && it.PreviewAbs != "" {
+		return "RAW+JPG"
+	}
+	if it.HasRaw {
+		return "DNG"
+	}
+	return "JPG"
+}
+
+func labPhotoRoleBadge(it scicamera.GalleryItem) string {
+	role := strings.TrimSpace(it.Meta.Experiment.FrameRole)
+	if role == "" || role == scicamera.RoleSample {
+		return ""
+	}
+	return scicamera.RoleLabel(role)
+}
+
 func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 	g := a.labGallery
 	if g == nil || !g.open {
@@ -1759,278 +1812,437 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 		a.refreshLabGallery()
 	}
 
-	tok := theme.GetTokens(c.Theme())
+	// Lock darkroom tokens & dark theme so Camera -> Lab Gallery never flashes white in Light mode.
+	tok := theme.DarkTokens()
 	safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
+	vw, _ := c.Size()
+	cols := 4
+	if vw > 0 && vw < 680 {
+		cols = 3
+	}
 
+	rawCount := 0
+	presentRoles := map[string]bool{}
 	filtered := make([]scicamera.GalleryItem, 0, len(g.items))
-	var selectedItem *scicamera.GalleryItem
+	var lightboxItem *scicamera.GalleryItem
 	for i := range g.items {
 		it := &g.items[i]
-		if g.filterRole != "" && it.Meta.Experiment.FrameRole != g.filterRole {
-			continue
+		if it.HasRaw {
+			rawCount++
 		}
-		filtered = append(filtered, *it)
+		if r := strings.TrimSpace(it.Meta.Experiment.FrameRole); r != "" {
+			presentRoles[r] = true
+		}
 		if g.selectedID == it.LabPhotoID {
-			selectedItem = it
+			lightboxItem = it
+		}
+		switch g.filterRole {
+		case "":
+			filtered = append(filtered, *it)
+		case "dng":
+			if it.HasRaw {
+				filtered = append(filtered, *it)
+			}
+		default:
+			if it.Meta.Experiment.FrameRole == g.filterRole {
+				filtered = append(filtered, *it)
+			}
 		}
 	}
-	if selectedItem == nil && len(filtered) > 0 {
-		selectedItem = &filtered[0]
-		g.selectedID = selectedItem.LabPhotoID
+	if lightboxItem == nil && len(g.items) > 0 {
+		lightboxItem = &g.items[0]
+	}
+
+	// Build timeline-grouped museum contact-sheet batches.
+	var batches []kit.ContactSheetBatch
+	batchIndex := map[string]int{}
+	batchRawFiles := map[string][]string{}
+	for _, it := range filtered {
+		dateYMD := labPhotoDateYMD(it)
+		batchID := strings.TrimSpace(it.Meta.Experiment.BatchID)
+		if batchID == "" {
+			batchID = "未分组"
+		}
+		bKey := dateYMD + "|" + batchID
+		idx, exists := batchIndex[bKey]
+		if !exists {
+			idx = len(batches)
+			batchIndex[bKey] = idx
+			sub := ""
+			if expID := strings.TrimSpace(it.Meta.Experiment.ExperimentID); expID != "" {
+				sub = "实验 " + expID
+			}
+			captureBatchID := batchID
+			batches = append(batches, kit.ContactSheetBatch{
+				ID:          bKey,
+				Title:       dateYMD + " · " + batchID,
+				Subtitle:    sub,
+				ActionLabel: "导出本批",
+				OnAction: func() {
+					a.shareLabFiles(c, batchRawFiles[bKey], captureBatchID)
+				},
+			})
+		}
+		if it.RawAbs != "" {
+			batchRawFiles[bKey] = append(batchRawFiles[bKey], it.RawAbs)
+		} else if it.PreviewAbs != "" {
+			batchRawFiles[bKey] = append(batchRawFiles[bKey], it.PreviewAbs)
+		}
+		batches[idx].Items = append(batches[idx].Items, kit.ContactSheetItem{
+			ID:           it.LabPhotoID,
+			Title:        it.LabPhotoID,
+			FormatBadge:  labPhotoFormatBadge(it),
+			RoleBadge:    labPhotoRoleBadge(it),
+			CapturedAt:   it.Meta.Experiment.CapturedAt,
+			Image:        g.cachedThumb(it.PreviewAbs),
+			HeroMatchKey: it.LabPhotoID,
+		})
+	}
+
+	closeGallery := func(closeCam bool) {
+		g.lightboxOpen = false
+		g.open = false
+		if closeCam {
+			a.closeSciCamera()
+		}
 	}
 
 	ui.Overlay(c, func() {
-		page := ui.Column(c.Key("lab-gallery-overlay")).Absolute().Fill().Modal().Background(tok.Canvas)
-		page.Children(func() {
-			// Header
-			ui.Row(c).FillWidth().
-				Padding(safeTop+float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
-				AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Background(tok.Surface).Children(func() {
-				if g.fromCamera {
-					if components.Button(c.Key("gal-back-cam"), "返回拍摄", components.ButtonGhost).Clicked() {
-						g.open = false
-					}
-				} else {
-					kit.IconBox(c, tok, lucide.Images(), tok.Accent)
-				}
-				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-					components.Text(c, "科研图库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine()
-					components.Text(c, fmt.Sprintf("%d 组原片 · DNG", len(g.items))).
-						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Ellipsis("…")
-				})
-				if !g.fromCamera {
-					pickBtn := ui.ButtonBase(c.Key("gal-import-album")).Size(float32(tok.Spacing32)+float32(tok.Spacing4), float32(tok.Spacing32)+float32(tok.Spacing4)).
-						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Center().Label("从相册导入").
-						OnClick(func() { a.pickFromAlbumInLabGallery(c) })
-					pickBtn.Children(func() {
-						ui.Icon(c, lucide.ImagePlus()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Text)
-					})
-				}
-				if len(g.items) > 0 {
-					if components.Button(c.Key("gal-export-all"), "全部导出", components.ButtonSecondary).Clicked() {
-						var allRaw []string
-						for _, it := range g.items {
-							if it.RawAbs != "" {
-								allRaw = append(allRaw, it.RawAbs)
-							} else if it.PreviewAbs != "" {
-								allRaw = append(allRaw, it.PreviewAbs)
-							}
-						}
-						a.shareLabFiles(c, allRaw, "AsterLab 科研原片批导出")
-					}
-				}
-				closeLabel := "关闭"
-				if g.fromCamera {
-					closeLabel = "完成"
-				}
-				if components.Button(c.Key("gal-close"), closeLabel, components.ButtonGhost).Clicked() {
-					g.open = false
+		root := ui.Themed(c, theme.DarkTheme()).Key("lab-gallery-overlay").
+			Absolute().Fill().Modal().Background(tok.DarkroomCanvas)
+		root.Children(func() {
+			stage := ui.Column(c.Key("lab-gallery-stage")).Fill().
+				Background(tok.DarkroomCanvas).
+				Transition(theme.DarkroomLightboxTransition())
+			stage.Children(func() {
+				// Darkroom Header Bar
+				ui.Row(c.Key("gal-header")).FillWidth().
+					Padding(safeTop+float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Background(tok.DarkroomSurface).Children(func() {
 					if g.fromCamera {
-						a.closeSciCamera()
+						backBtn := ui.ButtonBase(c.Key("gal-back-cam")).
+							Height(float32(tok.ButtonHeight)).
+							Padding(0, float32(tok.Spacing8)).
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.DarkroomElevated).
+							Border(1, tok.DarkroomBorder).
+							AlignItems(ui.Center).
+							Gap(float32(tok.Spacing4)).
+							Label("返回拍摄").
+							OnClick(func() {
+								mygo.Haptics.Selection()
+								closeGallery(false)
+							})
+						theme.ApplyTactilePress(backBtn)
+						backBtn.Children(func() {
+							ui.Icon(c, lucide.ChevronLeft()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.DarkroomText)
+							ui.Text(c, "返回拍摄").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.DarkroomText).SingleLine()
+						})
+					} else {
+						kit.IconBox(c, tok, lucide.Images(), tok.DarkroomText)
+					}
+					ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+						ui.Text(c, "科研图库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.DarkroomText).SingleLine().Ellipsis("…")
+						ui.Text(c, fmt.Sprintf("%d 组原片 · DNG %d", len(g.items), rawCount)).
+							FontSize(float32(tok.TextMeta)).TextColor(tok.DarkroomMuted).FontFeatures("tnum").SingleLine().Ellipsis("…")
+					})
+					if !g.fromCamera {
+						pickBtn := ui.ButtonBase(c.Key("gal-import-album")).
+							Size(float32(tok.ButtonHeight), float32(tok.ButtonHeight)).
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.DarkroomElevated).
+							Border(1, tok.DarkroomBorder).
+							Center().Label("从相册导入").
+							OnClick(func() { a.pickFromAlbumInLabGallery(c) })
+						theme.ApplyTactilePress(pickBtn)
+						pickBtn.Children(func() {
+							ui.Icon(c, lucide.ImagePlus()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.DarkroomText)
+						})
+					}
+					if len(g.items) > 0 {
+						expBtn := ui.ButtonBase(c.Key("gal-export-all")).
+							Height(float32(tok.ButtonHeight)).
+							Padding(0, float32(tok.Spacing8)).
+							Radius(float32(tok.ControlRadius)).
+							Background(tok.DarkroomElevated).
+							Border(1, tok.DarkroomBorder).
+							Center().Label("全部导出").
+							OnClick(func() {
+								var allRaw []string
+								for _, it := range g.items {
+									if it.RawAbs != "" {
+										allRaw = append(allRaw, it.RawAbs)
+									} else if it.PreviewAbs != "" {
+										allRaw = append(allRaw, it.PreviewAbs)
+									}
+								}
+								a.shareLabFiles(c, allRaw, "AsterLab 科研原片批导出")
+							})
+						theme.ApplyTactilePress(expBtn)
+						expBtn.Children(func() {
+							ui.Text(c, "全部导出").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.DarkroomText).SingleLine()
+						})
+					}
+					closeLabel := "关闭"
+					if g.fromCamera {
+						closeLabel = "完成"
+					}
+					clsBtn := ui.ButtonBase(c.Key("gal-close")).
+						Height(float32(tok.ButtonHeight)).
+						Padding(0, float32(tok.Spacing8)).
+						Radius(float32(tok.ControlRadius)).
+						Background(ui.Transparent).
+						Center().Label(closeLabel).
+						OnClick(func() {
+							mygo.Haptics.Selection()
+							closeGallery(g.fromCamera)
+						})
+					theme.ApplyTactilePress(clsBtn)
+					clsBtn.Children(func() {
+						ui.Text(c, closeLabel).FontSize(float32(tok.TextData)).Bold().TextColor(tok.DarkroomText).SingleLine()
+					})
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.DarkroomBorder)
+
+				// Lightweight Darkroom Top Filter Pills (全部 / DNG 原片 / present roles)
+				type galFilterPill struct{ id, lbl string }
+				filters := []galFilterPill{
+					{"", "全部"},
+					{"dng", "DNG 原片"},
+				}
+				for _, rf := range []galFilterPill{
+					{scicamera.RoleSample, "样本"},
+					{scicamera.RoleWBRef, "灰卡"},
+					{scicamera.RoleFlat, "平场"},
+					{scicamera.RoleScaleRef, "标尺"},
+				} {
+					if presentRoles[rf.id] || g.filterRole == rf.id {
+						filters = append(filters, rf)
 					}
 				}
-			})
-			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-
-			// Filter bar
-			ui.ScrollHorizontal(c.Key("gal-filter-scroll")).Scrollbars(false).FillWidth().Children(func() {
-				ui.Row(c).Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
-					Gap(float32(tok.Spacing8)).Children(func() {
-					for _, f := range []struct{ id, lbl string }{
-						{"", "全部"},
-						{scicamera.RoleSample, "样本"},
-						{scicamera.RoleWBRef, "灰卡"},
-						{scicamera.RoleFlat, "平场"},
-						{scicamera.RoleScaleRef, "标尺"},
-					} {
-						f := f
-						bg, fg := tok.Elevated, tok.Text
-						if g.filterRole == f.id {
-							bg, fg = tok.Accent, tok.AccentText
+				ui.ScrollHorizontal(c.Key("gal-filter-scroll")).Scrollbars(false).FillWidth().
+					Background(tok.DarkroomCanvas).Children(func() {
+					ui.Row(c).Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
+						Gap(float32(tok.Spacing8)).Children(func() {
+						for _, f := range filters {
+							f := f
+							bg, fg := tok.DarkroomSurface, tok.DarkroomMuted
+							borderCol := tok.DarkroomBorder
+							if g.filterRole == f.id {
+								bg, fg = tok.DarkroomText, tok.DarkroomCanvas
+								borderCol = tok.DarkroomText
+							}
+							b := ui.ButtonBase(c.Key("gal-flt-"+f.id)).Height(float32(tok.ButtonHeight)).
+								Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
+								Background(bg).Border(1, borderCol).Center().Label("筛选 " + f.lbl).
+								OnClick(func() {
+									g.filterRole = f.id
+									mygo.Haptics.Selection()
+								})
+							b.Children(func() {
+								ui.Text(c, f.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+							})
 						}
-						b := ui.ButtonBase(c.Key("gal-flt-"+f.id)).Height(float32(tok.Spacing32)).
-							Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
-							Background(bg).Center().Label("筛选 " + f.lbl).OnClick(func() {
-							g.filterRole = f.id
-						})
-						b.Children(func() {
-							ui.Text(c, f.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-						})
-					}
+					})
 				})
-			})
 
-			// Scrollable photo list + detail actions
-			ui.Scroll(c.Key("gal-body-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Children(func() {
-				ui.Column(c).FillWidth().
-					Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), safeBottom+float32(tok.Spacing24), safeLeft+float32(tok.Spacing16)).
-					Gap(float32(tok.Spacing12)).Children(func() {
-					if len(filtered) == 0 {
-						ui.Column(c).FillWidth().Padding(float32(tok.Spacing24)).Radius(float32(tok.PanelRadius)).
-							Background(tok.Elevated).Center().Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing32), float32(tok.Spacing32)).TextColor(tok.TextMuted)
-							components.Text(c, "暂无带编号的科研原片").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
-							components.Text(c, "拍摄后会自动以规范编号保存 Bayer DNG 与 5 层光学元数据。").
-								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-						})
-						return
-					}
-
-					if selectedItem != nil {
-						it := *selectedItem
-						ui.Column(c.Key("gal-detail-card")).FillWidth().Padding(float32(tok.Spacing12)).
-							Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
-							Gap(float32(tok.Spacing8)).Children(func() {
-							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-								components.Text(c, it.LabPhotoID).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-								if it.HasRaw {
-									kit.Badge(c, "Bayer DNG", components.BadgeOptions{Tone: components.BadgeAccent})
-								}
-								kit.Badge(c, scicamera.RoleLabel(it.Meta.Experiment.FrameRole), components.BadgeOptions{Tone: components.BadgeNeutral})
-							})
-							if thumb := g.cachedThumb(it.PreviewAbs); thumb != nil {
-								ui.Box(c).FillWidth().Height(float32(tok.Spacing48)*3.6).Radius(float32(tok.ControlRadius)).
-									Background(tok.Canvas).Center().Clip().Children(func() {
-									ui.Image(c, thumb).Height(float32(tok.Spacing48) * 3.6)
-								})
-							}
-							expSpec := fmt.Sprintf("ISO %.0f · %s · %.0fK · 对焦 %.2f · 姿态 %.1f°/%.1f°",
-								it.Meta.Exposure.ISO,
-								formatShutterShort(it.Meta.Exposure.ShutterS),
-								it.Meta.Exposure.WBKelvinEst,
-								it.Meta.Geometry.FocusLensPosition,
-								it.Meta.Geometry.IMUPitchDeg,
-								it.Meta.Geometry.IMURollDeg,
-							)
-							components.Text(c, expSpec).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
-
-							// Post-capture purpose/role annotation belongs here in Gallery, never in Camera HUD.
-							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Wrap().Children(func() {
-								components.Text(c, "用途标注").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-								for _, rp := range []struct{ id, lbl string }{
-									{scicamera.RoleSample, "样本"},
-									{scicamera.RoleWBRef, "灰卡"},
-									{scicamera.RoleFlat, "平场"},
-									{scicamera.RoleScaleRef, "标尺"},
-								} {
-									rp := rp
-									bg, fg := tok.Surface, tok.TextMuted
-									if it.Meta.Experiment.FrameRole == rp.id {
-										bg, fg = tok.AccentSoftBg, tok.Accent
-									}
-									tb := ui.ButtonBase(c.Key("gal-tag-"+rp.id)).Height(float32(tok.Spacing24)).
-										Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
-										Background(bg).Center().Label("标注 " + rp.lbl).
-										OnClick(func() {
-											it.Meta.Experiment.FrameRole = rp.id
-											metaPath := filepath.Join(filepath.Dir(it.PreviewAbs), it.LabPhotoID+".asterphoto.json")
-											if err := scicamera.WriteSidecarJSON(metaPath, it.Meta); err == nil {
-												g.dirty = true
-											}
-										})
-									tb.Children(func() {
-										ui.Text(c, rp.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-									})
-								}
-							})
-
-							ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
-								if it.PreviewRel != "" && components.Button(c.Key("gal-act-insert"), "插入当前实验", components.ButtonPrimary).Clicked() {
-									g.open = false
-									a.closeSciCamera()
-									a.routeArchivedPhotoIntoDoc(c, it.PreviewRel, it.RawAbs, it.LabPhotoID)
-								}
-								if components.Button(c.Key("gal-act-export"), "导出原片 (.DNG)", components.ButtonSecondary).Clicked() {
-									var files []string
-									if it.RawAbs != "" {
-										files = append(files, it.RawAbs)
-									}
-									metaAbs := filepath.Join(filepath.Dir(it.PreviewAbs), it.LabPhotoID+".asterphoto.json")
-									if _, err := os.Stat(metaAbs); err == nil {
-										files = append(files, metaAbs)
-									}
-									if len(files) == 0 && it.PreviewAbs != "" {
-										files = append(files, it.PreviewAbs)
-									}
-									a.shareLabFiles(c, files, it.LabPhotoID)
-								}
-								if components.Button(c.Key("gal-act-ghost"), "设为叠影并复用参数", components.ButtonGhost).Clicked() {
-									sess := a.ensureSciCamera()
-									g.open = false
-									if a.shell != nil {
-										if tab := a.shell.ActiveTab(); tab != nil && !sess.open {
-											a.openSciCamera(c, *tab, nil, g.applyDoc)
-										}
-									}
-									sess.ghostEnabled = true
-									sess.ghostImagePath = it.PreviewAbs
-									sess.refPitchDeg = it.Meta.Geometry.IMUPitchDeg
-									sess.refRollDeg = it.Meta.Geometry.IMURollDeg
-									sess.hasRefPose = true
-									sess.isoAuto = false
-									sess.selectedISO = it.Meta.Exposure.ISO
-									sess.shutterAuto = false
-									sess.selectedShutterS = it.Meta.Exposure.ShutterS
-									sess.wbMode = "kelvin"
-									sess.selectedWBKelvin = it.Meta.Exposure.WBKelvinEst
-									sess.focusAuto = false
-									sess.focusLocked = true
-									sess.focusLensPos = it.Meta.Geometry.FocusLensPosition
-									sess.allLocked = true
-									lock := true
-									a.applySciControl(scicamera.ControlRequest{
-										ExposureLocked: &lock,
-										ISO:            it.Meta.Exposure.ISO,
-										ShutterS:       it.Meta.Exposure.ShutterS,
-										WBMode:         "kelvin",
-										WBKelvin:       it.Meta.Exposure.WBKelvinEst,
-										FocusMode:      "lens_pos",
-										FocusLensPos:   it.Meta.Geometry.FocusLensPosition,
-									})
-								}
-							})
-						})
-					}
-
-					// Compact grouped list of all matching lab shots (zero box-in-box)
-					ui.Column(c.Key("gal-list-box")).FillWidth().Radius(float32(tok.PanelRadius)).
-						Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
-						for i, it := range filtered {
-							it := it
-							if i > 0 {
-								ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-							}
-							rowBg := tok.Surface
-							if it.LabPhotoID == g.selectedID {
-								rowBg = tok.AccentSoftBg
-							}
-							row := ui.ButtonBase(c.Key("gal-row-"+it.LabPhotoID)).FillWidth().
-								MinHeight(float32(tok.Spacing48)).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-								Background(rowBg).Justify(ui.Start).Label(it.LabPhotoID).OnClick(func() {
-								g.selectedID = it.LabPhotoID
-							})
-							row.Children(func() {
-								ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-									kit.IconBox(c, tok, lucide.FileImage(), tok.Accent)
-									ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-										ui.Text(c, it.LabPhotoID).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-										ui.Text(c, fmt.Sprintf("%s · ISO %.0f · %s",
-											scicamera.RoleLabel(it.Meta.Experiment.FrameRole),
-											it.Meta.Exposure.ISO,
-											formatShutterShort(it.Meta.Exposure.ShutterS))).
-											FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
-									})
-									if it.HasRaw {
-										kit.Badge(c, "DNG", components.BadgeOptions{Tone: components.BadgeAccent})
-									}
-								})
-							})
+				// Museum Contact-Sheet Grid inside continuous DarkroomCanvas
+				ui.Scroll(c.Key("gal-body-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).
+					Background(tok.DarkroomCanvas).Children(func() {
+					ui.Column(c).FillWidth().
+						Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), safeBottom+float32(tok.Spacing24), safeLeft+float32(tok.Spacing16)).
+						Background(tok.DarkroomCanvas).Children(func() {
+						var activeHero any
+						if g.lightboxOpen && lightboxItem != nil {
+							activeHero = lightboxItem.LabPhotoID
 						}
+						kit.ContactSheetGrid(c, tok, batches, kit.ContactSheetOptions{
+							Darkroom:      true,
+							Columns:       cols,
+							ActiveHeroKey: activeHero,
+							EmptyTitle:    "暂无带编号的科研原片",
+							EmptySub:      "拍摄后会自动以规范编号保存 Bayer DNG 与 5 层光学元数据。",
+							OnItemClick: func(item kit.ContactSheetItem) {
+								g.selectedID = item.ID
+								g.lightboxState = kit.DarkroomLightboxState{Zoom: 1.0}
+								g.lightboxOpen = true
+								mygo.Haptics.Selection()
+							},
+						})
 					})
 				})
 			})
 		})
 	})
+
+	// Tap-to-open DarkroomLightbox directly over Lab Gallery
+	if g.lightboxOpen && lightboxItem != nil {
+		it := *lightboxItem
+		batchID := strings.TrimSpace(it.Meta.Experiment.BatchID)
+		caption := it.LabPhotoID + " · " + scicamera.RoleLabel(it.Meta.Experiment.FrameRole)
+		if batchID != "" && len(it.LabPhotoID) <= 16 {
+			caption += " · " + batchID
+		}
+		metaSummary := fmt.Sprintf("ISO %.0f · %s · %.0fK · F%.2f · %.1f°/%.1f°",
+			it.Meta.Exposure.ISO,
+			formatShutterShort(it.Meta.Exposure.ShutterS),
+			it.Meta.Exposure.WBKelvinEst,
+			it.Meta.Geometry.FocusLensPosition,
+			it.Meta.Geometry.IMUPitchDeg,
+			it.Meta.Geometry.IMURollDeg,
+		)
+		exportLabel := "导出原片"
+		if it.HasRaw {
+			exportLabel = "导出原片 (.DNG)"
+		}
+		actions := make([]kit.DarkroomLightboxAction, 0, 3)
+		if it.PreviewRel != "" {
+			actions = append(actions, kit.DarkroomLightboxAction{
+				ID:      "insert",
+				Label:   "插入当前实验",
+				Icon:    lucide.FilePlus(),
+				Primary: true,
+				OnClick: func() {
+					closeGallery(true)
+					a.routeArchivedPhotoIntoDoc(c, it.PreviewRel, it.RawAbs, it.LabPhotoID)
+				},
+			})
+		}
+		actions = append(actions,
+			kit.DarkroomLightboxAction{
+				ID:    "export",
+				Label: exportLabel,
+				Icon:  lucide.Download(),
+				OnClick: func() {
+					var files []string
+					if it.RawAbs != "" {
+						files = append(files, it.RawAbs)
+					}
+					metaDir := filepath.Dir(it.PreviewAbs)
+					if it.PreviewAbs == "" {
+						metaDir = filepath.Dir(it.RawAbs)
+					}
+					metaAbs := filepath.Join(metaDir, it.LabPhotoID+".asterphoto.json")
+					if _, err := os.Stat(metaAbs); err == nil {
+						files = append(files, metaAbs)
+					}
+					if len(files) == 0 && it.PreviewAbs != "" {
+						files = append(files, it.PreviewAbs)
+					}
+					a.shareLabFiles(c, files, it.LabPhotoID)
+				},
+			},
+			kit.DarkroomLightboxAction{
+				ID:    "ghost",
+				Label: "设为叠影参考",
+				Icon:  lucide.Layers(),
+				OnClick: func() {
+					sess := a.ensureSciCamera()
+					closeGallery(false)
+					if a.shell != nil {
+						if tab := a.shell.ActiveTab(); tab != nil && !sess.open {
+							a.openSciCamera(c, *tab, nil, g.applyDoc)
+						}
+					}
+					sess.ghostEnabled = true
+					sess.ghostImagePath = it.PreviewAbs
+					sess.refPitchDeg = it.Meta.Geometry.IMUPitchDeg
+					sess.refRollDeg = it.Meta.Geometry.IMURollDeg
+					sess.hasRefPose = true
+					sess.isoAuto = false
+					sess.selectedISO = it.Meta.Exposure.ISO
+					sess.shutterAuto = false
+					sess.selectedShutterS = it.Meta.Exposure.ShutterS
+					sess.wbMode = "kelvin"
+					sess.selectedWBKelvin = it.Meta.Exposure.WBKelvinEst
+					sess.focusAuto = false
+					sess.focusLocked = true
+					sess.focusLensPos = it.Meta.Geometry.FocusLensPosition
+					sess.allLocked = true
+					lock := true
+					a.applySciControl(scicamera.ControlRequest{
+						ExposureLocked: &lock,
+						ISO:            it.Meta.Exposure.ISO,
+						ShutterS:       it.Meta.Exposure.ShutterS,
+						WBMode:         "kelvin",
+						WBKelvin:       it.Meta.Exposure.WBKelvinEst,
+						FocusMode:      "lens_pos",
+						FocusLensPos:   it.Meta.Geometry.FocusLensPosition,
+					})
+					mygo.Haptics.Success()
+				},
+			},
+		)
+
+		kit.DarkroomLightbox(c, tok, &g.lightboxOpen, &g.lightboxState, kit.DarkroomLightboxProps{
+			Key:          "lab-gallery-lightbox",
+			Title:        it.LabPhotoID,
+			FormatBadge:  labPhotoFormatBadge(it),
+			MetaSummary:  metaSummary,
+			Caption:      caption,
+			HeroMatchKey: it.LabPhotoID,
+			Image:        g.cachedThumb(it.PreviewAbs),
+			Actions:      actions,
+			OnClose: func() {
+				g.lightboxOpen = false
+			},
+		})
+
+		// Role annotation floating pill strip synced with DarkroomLightbox chrome visibility
+		if g.lightboxOpen && !g.lightboxState.ChromeHidden {
+			ui.Overlay(c, func() {
+				roleWrap := ui.Box(c.Key("lab-gallery-role-strip")).
+					Absolute().
+					Top(safeTop+float32(tok.Spacing48)+float32(tok.Spacing16)).
+					Left(safeLeft+float32(tok.Spacing16)).
+					Right(safeRight+float32(tok.Spacing16)).
+					Background(ui.Transparent).
+					PassThrough().
+					Center()
+				roleWrap.Children(func() {
+					ui.Row(c).
+						Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+						Radius(float32(tok.PillRadius)).
+						Background(tok.DarkroomSurface.Alpha(0.92)).
+						Border(1, tok.DarkroomBorder).
+						AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+						ui.Text(c, "用途标注").FontSize(float32(tok.TextMeta)).TextColor(tok.DarkroomMuted).SingleLine()
+						for _, rp := range []struct{ id, lbl string }{
+							{scicamera.RoleSample, "样本"},
+							{scicamera.RoleWBRef, "灰卡"},
+							{scicamera.RoleFlat, "平场"},
+							{scicamera.RoleScaleRef, "标尺"},
+						} {
+							rp := rp
+							bg, fg := tok.DarkroomElevated, tok.DarkroomMuted
+							if it.Meta.Experiment.FrameRole == rp.id {
+								bg, fg = tok.DarkroomText, tok.DarkroomCanvas
+							}
+							tb := ui.ButtonBase(c.Key("gal-tag-"+rp.id)).Height(float32(tok.Spacing24)).
+								Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
+								Background(bg).Center().Label("标注 " + rp.lbl).
+								OnClick(func() {
+									it.Meta.Experiment.FrameRole = rp.id
+									metaDir := filepath.Dir(it.PreviewAbs)
+									if it.PreviewAbs == "" {
+										metaDir = filepath.Dir(it.RawAbs)
+									}
+									metaPath := filepath.Join(metaDir, it.LabPhotoID+".asterphoto.json")
+									if err := scicamera.WriteSidecarJSON(metaPath, it.Meta); err == nil {
+										g.dirty = true
+										a.refreshLabGallery()
+									}
+									mygo.Haptics.Selection()
+								})
+							tb.Children(func() {
+								ui.Text(c, rp.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+							})
+						}
+					})
+				})
+			})
+		}
+	}
 }
 
 func (a *app) isExternalModalOrGalleryOpen() bool {
