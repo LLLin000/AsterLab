@@ -16,6 +16,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 	plateui "asterlab-mygo-prototype/internal/uikit/plate"
 )
 
@@ -579,25 +580,24 @@ func (v *View) renderPlateFloatingBar(
 		return
 	}
 
-	bg := tok.Elevated
-	borderCol := tok.BorderStrong
-	if inOverlay {
-		bg = tok.Surface
-		borderCol = tok.Border
-	}
-	barRadius := float32(tok.DialogRadius)
+	box := ui.Column(c.Key("pl-classic-bar:"+plate.ID)).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+		Gap(float32(tok.Spacing8)).Transition(theme.FloatingBarTransition())
+	kit.ApplyElevation(box, tok, kit.ElevationFloating)
 	if !inOverlay {
-		barRadius = float32(tok.PanelRadius)
-	}
-	box := ui.Column(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-		Radius(barRadius).Background(bg).Border(1, borderCol).Gap(float32(tok.Spacing8))
-	if inOverlay {
-		box.Shadow(0, float32(tok.Spacing8), float32(tok.Spacing24), 0, tok.Text.Alpha(.22))
+		box.Background(tok.Elevated)
 	}
 	box.Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			if len(selected) > 0 {
-				components.Badge(c, fmt.Sprintf("已选 %d 孔", len(selected)), components.BadgeOptions{Tone: components.BadgeAccent})
+				ui.Row(c).Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).
+					Radius(float32(tok.PillRadius)).
+					Background(tok.AccentSoftBg).
+					Border(1, tok.BorderSelected).
+					AlignItems(ui.Center).Children(func() {
+					ui.Text(c, fmt.Sprintf("已选 %d 孔", len(selected))).
+						FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").
+						TextColor(tok.Accent).ContentTransition(theme.NumericRoll(false)).SingleLine()
+				})
 				ui.Text(c, summarizeWellRange(selected)).FontSize(float32(tok.TextMeta)).Bold().
 					TextColor(tok.TextMuted).FontFeatures("tnum")
 			} else {
@@ -646,7 +646,8 @@ func (v *View) renderPlateFloatingBar(
 				if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() && zoom > 0.6 {
 					v.PlateZoom = zoom - 0.1
 				}
-				ui.Text(c, fmt.Sprintf("%.0f%%", zoom*100)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+				ui.Text(c, fmt.Sprintf("%.0f%%", zoom*100)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+					FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 				if components.IconButton(c, lucide.ZoomIn(), "放大", components.IconButtonCompact).Clicked() && zoom < 1.6 {
 					v.PlateZoom = zoom + 0.1
 				}
@@ -693,7 +694,11 @@ func (v *View) renderPlateFloatingBar(
 				}
 			}
 			if mobileLayout {
-				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+				grpScroll := ui.ScrollHorizontal(c.Key("pl-cls-grp-scroll:" + plate.ID)).FillWidth()
+				grpScrollSt := ui.Local(grpScroll, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+				grpScroll.TrackScroll(grpScrollSt)
+				theme.ApplyEdgeFadeX(grpScroll, tok, grpScrollSt.X > 2, grpScrollSt.MaxX > 2 && grpScrollSt.X < grpScrollSt.MaxX-2)
+				grpScroll.Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderGroupChips)
 				})
 			} else {
@@ -909,15 +914,16 @@ func (v *View) renderUnifiedPlateFloatingBar(
 		setSelected(nil)
 	}
 
-	// Note: omit FloatingBarTransition on pl-float-bar because it hosts components.Tabs
-	// (TabsSegmented), whose slideBehind indicator reads previous-pass element bounds and
-	// panics during exit-transition snapshots when the selection clears.
+	clearGuardOpen := v.ensureWidgetBool("pl_clr_guard:" + plate.ID)
+	clearSlideSt := ui.Local(c.Root(), "pl-clr-slide:"+plate.ID, func() kit.SlideConfirmState { return kit.SlideConfirmState{} })
+
 	box := ui.Column(c.Key("pl-float-bar:"+plate.ID)).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.BorderStrong).Gap(float32(tok.Spacing8))
-	theme.ApplyNudge(box, *nudgeSeq)
-	if inOverlay {
-		box.Background(tok.Surface).Shadow(0, float32(tok.Spacing8), float32(tok.Spacing24), 0, tok.Text.Alpha(.22))
+		Gap(float32(tok.Spacing8)).Transition(theme.FloatingBarTransition())
+	kit.ApplyElevation(box, tok, kit.ElevationFloating)
+	if !inOverlay {
+		box.Background(tok.Elevated)
 	}
+	theme.ApplyNudge(box, *nudgeSeq)
 	box.Children(func() {
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			// UI-03: Uniform-height controls on the first row + scientist-friendly fill mode names
@@ -925,16 +931,20 @@ func (v *View) renderUnifiedPlateFloatingBar(
 				Radius(float32(tok.ControlRadius)).Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.32)).
 				AlignItems(ui.Center).Children(func() {
 				ui.Text(c, fmt.Sprintf("已选 %d 孔 · 图层「%s」", len(selected), activeLayer)).
-					FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Accent).SingleLine()
+					FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").
+					ContentTransition(theme.NumericRoll(false)).TextColor(tok.Accent).SingleLine()
 			})
-			ui.Row(c).Height(float32(tok.Spacing24)).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
-				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(2).Children(func() {
+			fmTrack := ui.Row(c).Height(float32(tok.Spacing24)).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+				Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing4) * 0.5)
+			theme.ApplyRecessedWell(fmTrack, tok)
+			fmTrack.Children(func() {
+				segRad := tok.InnerControlRadius(tok.Spacing4 / 2)
 				for idx, lbl := range []string{"统一填充", "逐孔填入", "梯度稀释"} {
 					idx, lbl := idx, lbl
 					act := fillMode == idx
 					seg := ui.ButtonBase(c.Key(fmt.Sprintf("pl-fm-%s-%d", plate.ID, idx))).
-						Height(float32(tok.Spacing24)-4).Padding(0, float32(tok.Spacing8)).
-						Radius(float32(tok.ControlRadius)-1).AlignItems(ui.Center).Label("填充模式：" + lbl)
+						Height(float32(tok.Spacing24)-float32(tok.Spacing4)).Padding(0, float32(tok.Spacing8)).
+						Radius(segRad).AlignItems(ui.Center).Label("填充模式：" + lbl)
 					fg := tok.TextMuted
 					if act {
 						seg.Background(tok.AccentSoftBg)
@@ -943,6 +953,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 						seg.Background(tok.Text.Alpha(0.04))
 						fg = tok.Text
 					}
+					theme.ApplyTactilePress(seg)
 					seg.Children(func() {
 						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
 					})
@@ -952,11 +963,46 @@ func (v *View) renderUnifiedPlateFloatingBar(
 				}
 			})
 			ui.Spacer(c)
+			if canEdit && len(selected) > 0 {
+				clrGuardBtn := components.IconButton(c.Key("pl-clear-guard:"+plate.ID), lucide.Trash(), "清空所选孔位", components.IconButtonCompact)
+				components.Tooltip(c, clrGuardBtn, "滑动确认清空所选孔位")
+				if clrGuardBtn.Clicked() {
+					clearSlideSt.Reset()
+					*clearGuardOpen = !*clearGuardOpen
+				}
+				components.Popover(c.Key("pl-clear-pop:"+plate.ID), clrGuardBtn, clearGuardOpen, func(panel ui.Element) {
+					panel.Width(float32(tok.Spacing48)*5.8).Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+							ui.Icon(c, lucide.Trash()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Danger)
+							ui.Text(c, fmt.Sprintf("清空所选 %d 孔标注", len(selected))).
+								FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").TextColor(tok.Text).
+								ContentTransition(theme.NumericRoll(false))
+						})
+						if kit.SlideConfirm(c, tok, clearSlideSt, kit.SlideConfirmOptions{
+							Key:            "pl-clr-slide:" + plate.ID,
+							Label:          "向右滑动清空所选",
+							ConfirmedLabel: "已清空所选",
+							Danger:         true,
+						}) {
+							if v.OnClearWells != nil && ownerStepID == "" {
+								v.OnClearWells(plate.ID, append([]string(nil), selected...))
+							} else {
+								_ = v.assign(selected, "")
+							}
+							v.PlateSampleError = ""
+							clearSlideSt.Reset()
+							*clearGuardOpen = false
+							setSelected(nil)
+						}
+					})
+				})
+			}
 			if inOverlay {
 				if components.IconButton(c, lucide.ZoomOut(), "缩小", components.IconButtonCompact).Clicked() && zoom > 0.6 {
 					v.PlateZoom = zoom - 0.1
 				}
-				ui.Text(c, fmt.Sprintf("%.0f%%", zoom*100)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+				ui.Text(c, fmt.Sprintf("%.0f%%", zoom*100)).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+					FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 				if components.IconButton(c, lucide.ZoomIn(), "放大", components.IconButtonCompact).Clicked() && zoom < 1.6 {
 					v.PlateZoom = zoom + 0.1
 				}
@@ -995,16 +1041,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 							*factorDraft = preset.fac
 						}
 					}
-					dirIdx := 0
-					if *dirDraft == "col" {
-						dirIdx = 1
-					}
-					components.Tabs(c, &dirIdx, components.TabsSegmented, "按行", "按列")
-					if dirIdx == 1 {
-						*dirDraft = "col"
-					} else {
-						*dirDraft = "row"
-					}
+					renderRecessedDirectionTabs(c, tok, plate.ID+":serial", dirDraft)
 					if components.Button(c, "生成梯度", components.ButtonPrimary).Clicked() {
 						applySerial()
 					}
@@ -1024,16 +1061,7 @@ func (v *View) renderUnifiedPlateFloatingBar(
 						})
 					})
 					if fillMode == 1 {
-						dirIdx := 0
-						if *dirDraft == "col" {
-							dirIdx = 1
-						}
-						components.Tabs(c, &dirIdx, components.TabsSegmented, "按行", "按列")
-						if dirIdx == 1 {
-							*dirDraft = "col"
-						} else {
-							*dirDraft = "row"
-						}
+						renderRecessedDirectionTabs(c, tok, plate.ID+":list", dirDraft)
 					}
 					if components.Button(c, "应用", components.ButtonPrimary).Clicked() && strings.TrimSpace(*draft) != "" {
 						applySingleOrList()
@@ -1103,7 +1131,11 @@ func (v *View) renderUnifiedPlateFloatingBar(
 				}
 			}
 			if mobileLayout {
-				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+				grpScroll := ui.ScrollHorizontal(c.Key("pl-uni-grp-scroll:" + plate.ID)).FillWidth()
+				grpScrollSt := ui.Local(grpScroll, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+				grpScroll.TrackScroll(grpScrollSt)
+				theme.ApplyEdgeFadeX(grpScroll, tok, grpScrollSt.X > 2, grpScrollSt.MaxX > 2 && grpScrollSt.X < grpScrollSt.MaxX-2)
+				grpScroll.Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(renderUnifiedGroupChips)
 				})
 			} else {
@@ -1113,6 +1145,41 @@ func (v *View) renderUnifiedPlateFloatingBar(
 
 		if v.PlateSampleError != "" {
 			ui.Text(c, v.PlateSampleError).FontSize(float32(tok.TextMeta)).TextColor(tok.Danger)
+		}
+	})
+}
+
+func renderRecessedDirectionTabs(c *ui.Context, tok theme.Tokens, keyPrefix string, dirDraft *string) {
+	track := ui.Row(c.Key("pl-dir-track:"+keyPrefix)).Height(float32(tok.Spacing24)).
+		Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+		Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing4) * 0.5)
+	theme.ApplyRecessedWell(track, tok)
+	segRad := tok.InnerControlRadius(tok.Spacing4 / 2)
+	track.Children(func() {
+		for _, opt := range []struct {
+			key, lbl string
+		}{{"row", "按行"}, {"col", "按列"}} {
+			opt := opt
+			act := *dirDraft == opt.key || (opt.key == "row" && *dirDraft != "col")
+			seg := ui.ButtonBase(c.Key("pl-dir-"+keyPrefix+"-"+opt.key)).
+				Height(float32(tok.Spacing24)-float32(tok.Spacing4)).
+				Padding(0, float32(tok.Spacing8)).
+				Radius(segRad).AlignItems(ui.Center).Label(opt.lbl)
+			fg := tok.TextMuted
+			if act {
+				seg.Background(tok.AccentSoftBg)
+				fg = tok.Accent
+			} else if seg.Hovered() {
+				seg.Background(tok.Text.Alpha(0.04))
+				fg = tok.Text
+			}
+			theme.ApplyTactilePress(seg)
+			seg.Children(func() {
+				ui.Text(c, opt.lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+			})
+			if seg.Clicked() {
+				*dirDraft = opt.key
+			}
 		}
 	})
 }
@@ -1887,13 +1954,15 @@ func (v *View) RenderMobilePlateStudio(c *ui.Context, plate *Plate, ownerStepID 
 				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 					sub := fmt.Sprintf("已排 %d / %d 孔 · 已选 %d 孔", len(wells), geometry.Rows*geometry.Columns, len(selected))
-					ui.Text(c, sub).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+					ui.Text(c, sub).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).
+						ContentTransition(theme.NumericRoll(false)).SingleLine()
 				})
 				if components.IconButton(c, lucide.ZoomOut(), "缩小孔板", components.IconButtonCompact).Clicked() {
 					st.ZoomState.Scale = max(1, st.ZoomState.Scale-0.5)
 				}
 				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
-					FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+					FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).
+					ContentTransition(theme.NumericRoll(false))
 				if components.IconButton(c, lucide.ZoomIn(), "放大孔板", components.IconButtonCompact).Clicked() {
 					st.ZoomState.Scale = min(maxZoom, st.ZoomState.Scale+0.5)
 				}
@@ -1968,7 +2037,11 @@ func (v *View) RenderMobilePlateStudio(c *ui.Context, plate *Plate, ownerStepID 
 						groups = append(groups, gid)
 					}
 				}
-				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+				grpScroll := ui.ScrollHorizontal(c.Key("pl-mob-grp-scroll:" + plate.ID)).FillWidth()
+				grpScrollSt := ui.Local(grpScroll, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+				grpScroll.TrackScroll(grpScrollSt)
+				theme.ApplyEdgeFadeX(grpScroll, tok, grpScrollSt.X > 2, grpScrollSt.MaxX > 2 && grpScrollSt.X < grpScrollSt.MaxX-2)
+				grpScroll.Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						for _, gid := range groups {
 							gid := gid

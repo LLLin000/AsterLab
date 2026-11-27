@@ -82,9 +82,11 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
-				ui.Text(c, firstNonEmpty(emb.Label, filepath.Base(emb.Asset))).
+				hdrTitle := formatFigureDisplayName(c, v, firstNonEmpty(emb.Label, filepath.Base(emb.Asset)))
+				ui.Text(c, hdrTitle).
 					FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-				ui.Text(c, metaSummary).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
+				ui.Text(c, metaSummary).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").
+					ContentTransition(theme.NumericRoll(false)).SingleLine().Shrink(0)
 				if canEditSource && (cardHover || v.MobileCompact) {
 					if components.IconButton(c.Key("emb-src-btn:"+cardKey), lucide.Code(), "编辑行内关联语法", components.IconButtonCompact).Clicked() {
 						*srcEditOpen = true
@@ -111,73 +113,79 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 		})
 
 		// 2. Interactive relation chips strip + unified hover card + `+ 关联` editor
-		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-			if len(rr.Contexts) > 0 {
-				for ci, tc := range rr.Contexts {
-					ci, tc := ci, tc
-					chipKey := fmt.Sprintf("emb-chip:%s:%d", cardKey, ci)
-					chipHoverOpen := v.ensureWidgetBool("emb_hov:" + chipKey)
-					lbl := firstNonEmpty(tc.ObjectTitle, tc.ObjectID)
-					if tc.SubTarget != "" {
-						lbl = firstNonEmpty(tc.ObjectTitle, tc.ObjectID) + " · " + tc.SubTarget
-					}
-					if tc.GroupName != "" {
-						lbl += " (" + tc.GroupName + ")"
-					}
-					bg := tok.AccentSoftBg
-					fg := tok.Accent
-					bd := tok.Accent.Alpha(0.35)
-					if !tc.Valid {
-						bg = tok.Warning.Alpha(0.14)
-						fg = tok.Warning
-						bd = tok.Warning.Alpha(0.55)
-						lbl = "⚠ " + lbl
-					}
-					chip := ui.ButtonBase(c.Key(chipKey)).
-						Height(float32(tok.Spacing24)).
-						Padding(0, float32(tok.Spacing8)).
-						AlignItems(ui.Center).
-						AlignSelf(ui.Center).
-						Radius(float32(tok.ControlRadius)).
-						Background(bg).Border(1, bd).Label(lbl)
-					chip.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							if tc.GroupID != "" && tc.Valid {
-								ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
-									Radius(float32(tok.PillRadius)).
-									Background(plateui.GroupColorIndexed(tc.GroupID, idxMap, dark))
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			chipScroll := ui.ScrollHorizontal(c.Key("emb-rel-scroll:" + cardKey)).Grow(1).MinWidth(0)
+			chipScrollSt := ui.Local(chipScroll, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+			chipScroll.TrackScroll(chipScrollSt)
+			theme.ApplyEdgeFadeX(chipScroll, tok, chipScrollSt.X > 2, chipScrollSt.MaxX > 2 && chipScrollSt.X < chipScrollSt.MaxX-2)
+			chipScroll.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					if len(rr.Contexts) > 0 {
+						for ci, tc := range rr.Contexts {
+							ci, tc := ci, tc
+							chipKey := fmt.Sprintf("emb-chip:%s:%d", cardKey, ci)
+							chipHoverOpen := v.ensureWidgetBool("emb_hov:" + chipKey)
+							lbl := firstNonEmpty(tc.ObjectTitle, tc.ObjectID)
+							if tc.SubTarget != "" {
+								lbl = firstNonEmpty(tc.ObjectTitle, tc.ObjectID) + " · " + tc.SubTarget
 							}
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").TextColor(fg).SingleLine()
-						})
-					})
-					if chip.Clicked() {
-						if tc.Valid {
-							v.focusRelationTarget(tc.ObjectID, tc.SubTarget)
+							if tc.GroupName != "" {
+								lbl += " (" + tc.GroupName + ")"
+							}
+							bg := tok.AccentSoftBg
+							fg := tok.Accent
+							bd := tok.Accent.Alpha(0.35)
+							if !tc.Valid {
+								bg = tok.Warning.Alpha(0.14)
+								fg = tok.Warning
+								bd = tok.Warning.Alpha(0.55)
+								lbl = "⚠ " + lbl
+							}
+							chip := ui.ButtonBase(c.Key(chipKey)).
+								Height(float32(tok.Spacing24)).
+								Padding(0, float32(tok.Spacing8)).
+								AlignItems(ui.Center).
+								AlignSelf(ui.Center).
+								Radius(float32(tok.ControlRadius)).
+								Background(bg).Border(1, bd).Label(lbl)
+							chip.Children(func() {
+								ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+									if tc.GroupID != "" && tc.Valid {
+										ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
+											Radius(float32(tok.PillRadius)).
+											Background(plateui.GroupColorIndexed(tc.GroupID, idxMap, dark))
+									}
+									ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").TextColor(fg).SingleLine()
+								})
+							})
+							if chip.Clicked() {
+								if tc.Valid {
+									v.focusRelationTarget(tc.ObjectID, tc.SubTarget)
+								}
+								*chipHoverOpen = !*chipHoverOpen
+							}
+							components.Popover(c.Key("emb-hov-pop:"+chipKey), chip, chipHoverOpen, func(panel ui.Element) {
+								panel.Padding(float32(tok.Spacing12)).Children(func() {
+									v.renderRelationHoverContent(c, tok, rr)
+								})
+							})
 						}
-						*chipHoverOpen = !*chipHoverOpen
+					} else if !emb.HasRelation() {
+						ui.Text(c, "普通插图（未建立科学关联）").
+							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).AlignSelf(ui.Center).SingleLine()
 					}
-					components.Popover(c.Key("emb-hov-pop:"+chipKey), chip, chipHoverOpen, func(panel ui.Element) {
-						panel.Padding(float32(tok.Spacing12)).Children(func() {
-							v.renderRelationHoverContent(c, tok, rr)
-						})
-					})
-				}
-			} else if !emb.HasRelation() {
-				ui.Text(c, "普通插图（未建立科学关联）").
-					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).AlignSelf(ui.Center)
-			}
 
-			if emb.Timepoint != "" {
-				inlineBadge(c, emb.Timepoint).FontFeatures("tnum")
-			}
-			if emb.FOV > 0 {
-				inlineBadge(c, fmt.Sprintf("FOV %d", emb.FOV)).FontFeatures("tnum")
-			}
-			if emb.Role != "" {
-				inlineBadge(c, relationRoleLabel(emb.Role))
-			}
-
-			ui.Spacer(c)
+					if emb.Timepoint != "" {
+						inlineBadge(c, emb.Timepoint).FontFeatures("tnum")
+					}
+					if emb.FOV > 0 {
+						inlineBadge(c, fmt.Sprintf("FOV %d", emb.FOV)).FontFeatures("tnum")
+					}
+					if emb.Role != "" {
+						inlineBadge(c, relationRoleLabel(emb.Role))
+					}
+				})
+			})
 
 			if canEditRelation {
 				linkBtn := ui.ButtonBase(c.Key("emb-link-btn:"+cardKey)).
@@ -186,6 +194,7 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 					AlignItems(ui.Center).
 					AlignSelf(ui.Center).
 					Radius(float32(tok.ControlRadius)).
+					Shrink(0).
 					Label("+ 关联")
 				if linkBtn.Hovered() {
 					linkBtn.Background(tok.Text.Alpha(0.05))
@@ -218,16 +227,16 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 	v.renderDarkroomFigureLightbox(c, tok, figureLightboxOptions{
 		Key:          "emb-darkroom-lb:" + cardKey,
 		ModuleID:     cardKey,
-		Title:        firstNonEmpty(emb.Label, filepath.Base(emb.Asset), "插图预览"),
+		Title:        formatFigureDisplayName(c, v, firstNonEmpty(emb.Label, filepath.Base(emb.Asset), "插图预览")),
 		Src:          emb.Asset,
-		MetaSummary:  v.buildEmbedMetaSummary(emb, rr),
+		MetaSummary:  v.buildEmbedMetaSummary(c, emb, rr),
 		Caption:      emb.Note,
 		HeroMatchKey: figureHeroMatch{ID: cardKey},
 		ExtraActions: extraActions,
 	})
 }
 
-func (v *View) buildEmbedMetaSummary(emb InlineRelation, rr ResolvedRelation) string {
+func (v *View) buildEmbedMetaSummary(c *ui.Context, emb InlineRelation, rr ResolvedRelation) string {
 	var parts []string
 	if len(rr.Contexts) > 0 {
 		for _, tc := range rr.Contexts {
@@ -268,7 +277,7 @@ func (v *View) buildEmbedMetaSummary(emb InlineRelation, rr ResolvedRelation) st
 	}
 	if len(parts) == 0 {
 		if base := filepath.Base(strings.TrimSpace(emb.Asset)); base != "" && base != "." {
-			parts = append(parts, base)
+			parts = append(parts, formatFigureDisplayName(c, v, base))
 		} else {
 			parts = append(parts, "普通插图")
 		}
@@ -469,7 +478,8 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.Images()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 			ui.Text(c, fmt.Sprintf("孔位 %s 关联图像 (%d)", wellSummary, len(matched))).
-				FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).FontFeatures("tnum")
+				FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).FontFeatures("tnum").
+				ContentTransition(theme.NumericRoll(false))
 			ui.Spacer(c)
 			if allowAttach && v.OnAttachPhotoToWell != nil {
 				if components.Button(c, "+ 拍照 / 关联图片", components.ButtonSecondary).Clicked() {
@@ -479,48 +489,55 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 		})
 		if len(matched) > 0 {
 			chipRad := tok.InnerControlRadius(tok.Spacing4)
-			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				for mi, r := range matched {
-					mi, r := mi, r
-					itemKey := fmt.Sprintf("pl-rel-%s-%d", p.ID, mi)
-					metaParts := []string{}
-					if r.Timepoint != "" {
-						metaParts = append(metaParts, r.Timepoint)
-					}
-					if r.FOV > 0 {
-						metaParts = append(metaParts, fmt.Sprintf("FOV %d", r.FOV))
-					}
-					lbl := filepath.Base(r.Asset)
-					if len(metaParts) > 0 {
-						lbl = strings.Join(metaParts, " · ") + " · " + lbl
-					}
-					btn := ui.ButtonBase(c.Key(itemKey)).
-						Height(float32(tok.Spacing24)).
-						Padding(0, float32(tok.Spacing8)).
-						AlignItems(ui.Center).
-						AlignSelf(ui.Center).
-						Radius(chipRad).
-						Background(tok.Surface).Border(1, tok.BorderSubtle).Label(lbl)
-					btn.Children(func() {
-						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-							ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text).SingleLine()
+			relStrip := ui.ScrollHorizontal(c.Key("pl-rel-strip:" + p.ID)).FillWidth()
+			relScrollSt := ui.Local(relStrip, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+			relStrip.TrackScroll(relScrollSt)
+			theme.ApplyEdgeFadeX(relStrip, tok, relScrollSt.X > 2, relScrollSt.MaxX > 2 && relScrollSt.X < relScrollSt.MaxX-2)
+			relStrip.Children(func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					for mi, r := range matched {
+						mi, r := mi, r
+						itemKey := fmt.Sprintf("pl-rel-%s-%d", p.ID, mi)
+						metaParts := []string{}
+						if r.Timepoint != "" {
+							metaParts = append(metaParts, r.Timepoint)
+						}
+						if r.FOV > 0 {
+							metaParts = append(metaParts, fmt.Sprintf("FOV %d", r.FOV))
+						}
+						baseName := formatFigureDisplayName(c, v, filepath.Base(r.Asset))
+						lbl := baseName
+						if len(metaParts) > 0 {
+							lbl = strings.Join(metaParts, " · ") + " · " + baseName
+						}
+						btn := ui.ButtonBase(c.Key(itemKey)).
+							Height(float32(tok.Spacing24)).
+							Padding(0, float32(tok.Spacing8)).
+							AlignItems(ui.Center).
+							AlignSelf(ui.Center).
+							Radius(chipRad).
+							Background(tok.Surface).Border(1, tok.BorderSubtle).Label(lbl)
+						btn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
+								ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
+								ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text).SingleLine()
+							})
 						})
-					})
-					if btn.Clicked() {
-						v.ExpandedFigureID = itemKey
-						v.FigureZoom = 1
-						v.figureOpen = true
+						if btn.Clicked() {
+							v.ExpandedFigureID = itemKey
+							v.FigureZoom = 1
+							v.figureOpen = true
+						}
+						v.renderDarkroomFigureLightbox(c, tok, figureLightboxOptions{
+							Key:         "pl-rel-darkroom-lb:" + itemKey,
+							ModuleID:    itemKey,
+							Title:       firstNonEmpty(baseName, lbl),
+							Src:         r.Asset,
+							MetaSummary: v.buildEmbedMetaSummary(c, r.InlineRelation, r),
+							Caption:     r.Note,
+						})
 					}
-					v.renderDarkroomFigureLightbox(c, tok, figureLightboxOptions{
-						Key:         "pl-rel-darkroom-lb:" + itemKey,
-						ModuleID:    itemKey,
-						Title:       firstNonEmpty(filepath.Base(r.Asset), lbl),
-						Src:         r.Asset,
-						MetaSummary: v.buildEmbedMetaSummary(r.InlineRelation, r),
-						Caption:     r.Note,
-					})
-				}
+				})
 			})
 		}
 	})

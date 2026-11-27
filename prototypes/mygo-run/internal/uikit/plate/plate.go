@@ -876,6 +876,9 @@ func View(c *ui.Context, props Props) {
 								animFill := btn.AnimateColor("wfill", fill, theme.MotionSnappy)
 								animStroke := btn.AnimateColor("wstroke", strokeCol, theme.MotionSnappy)
 								btn.Background(animFill).Border(strokeW, animStroke)
+								if !assigned {
+									theme.ApplyRecessedWell(btn, t)
+								}
 								if isDishMatrix && cellW >= 24 {
 									innerRimCol := strokeCol.Alpha(0.45)
 									btn.Draw(func(p *ui.Painter, r ui.Rect) {
@@ -1074,7 +1077,8 @@ func View(c *ui.Context, props Props) {
 			ui.Row(c).FillWidth().Height(float32(t.Spacing24)).Padding(0, float32(t.Spacing8)).
 				AlignItems(ui.Center).Gap(float32(t.Spacing12)).Children(func() {
 				allocText := fmt.Sprintf("%d / %d 孔已分配", len(props.Wells), rows*cols)
-				ui.Text(c, allocText).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum").Shrink(0).SingleLine()
+				ui.Text(c, allocText).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum").
+					ContentTransition(theme.NumericRoll(false)).Shrink(0).SingleLine()
 				ui.Box(c).Width(1).Height(float32(t.Spacing12)).Background(t.Border)
 				hoverText, hoverColor := "点击/框选或右键排板", t.TextMuted
 				if st.stickyHoverWell != "" {
@@ -1305,13 +1309,16 @@ func View(c *ui.Context, props Props) {
 				for _, label := range legendOrder {
 					ui.Row(c).Gap(float32(t.Spacing4)).AlignItems(ui.Center).Children(func() {
 						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).Radius(float32(t.ControlRadius)).Background(legendColors[label])
-						ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum")
+						ui.Text(c, fmt.Sprintf("%s %d", label, legendCounts[label])).FontSize(labelSize).
+							TextColor(t.TextMuted).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 					})
 				}
 			})
 		}
 		if !mini && !props.HideFooter {
-			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).FontSize(labelSize).TextColor(t.TextMuted)
+			ui.Text(c, fmt.Sprintf("%d / %d 孔已分配 · 悬停查看分组与样本明细", len(props.Wells), rows*cols)).
+				FontSize(labelSize).TextColor(t.TextMuted).FontFeatures("tnum").
+				ContentTransition(theme.NumericRoll(false))
 		}
 	})
 }
@@ -1723,15 +1730,26 @@ func RenderCompactSummaryCard(
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
 			components.Badge(c, geomLabel, components.BadgeOptions{Tone: components.BadgeAccent})
 			ui.Text(c, fmt.Sprintf("已排 %d / %d 孔", assignedWells, totalWells)).
-				FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted)
+				FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).
+				ContentTransition(theme.NumericRoll(false))
 			if len(selected) > 0 {
-				components.Badge(c, fmt.Sprintf("已选 %d 孔", len(selected)), components.BadgeOptions{Tone: components.BadgeNeutral})
+				ui.Row(c).Padding(float32(t.Spacing4)*0.5, float32(t.Spacing8)).
+					Radius(float32(t.PillRadius)).
+					Background(t.AccentSoftBg).
+					Border(1, t.BorderSelected).
+					AlignItems(ui.Center).Children(func() {
+					ui.Text(c, fmt.Sprintf("已选 %d 孔", len(selected))).
+						FontSize(float32(t.TextMeta)).Bold().FontFeatures("tnum").
+						TextColor(t.Accent).ContentTransition(theme.NumericRoll(false)).SingleLine()
+				})
 			}
 		})
 
 		// Proportional group color bar
-		ui.Row(c).FillWidth().Height(float32(t.Spacing12)).Radius(float32(t.ControlRadius)).
-			Clip().Background(t.Surface).Border(1, t.Border).Gap(0).Children(func() {
+		propBar := ui.Row(c).FillWidth().Height(float32(t.Spacing12)).Radius(float32(t.ControlRadius)).
+			Clip().Background(t.Surface).Border(1, t.Border).Gap(0)
+		theme.ApplyRecessedWell(propBar, t)
+		propBar.Children(func() {
 			sumCounts := 0
 			for _, item := range legend {
 				if item.Count > 0 {
@@ -1752,7 +1770,8 @@ func RenderCompactSummaryCard(
 						ui.Box(c).Size(float32(t.Spacing8), float32(t.Spacing8)).
 							Radius(float32(t.ControlRadius)).Background(item.Color)
 						ui.Text(c, fmt.Sprintf("%s (%d)", dispLbl, item.Count)).
-							FontSize(float32(t.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum")
+							FontSize(float32(t.TextMeta)).TextColor(t.TextMuted).FontFeatures("tnum").
+							ContentTransition(theme.NumericRoll(false))
 					})
 				}
 			})
@@ -1809,8 +1828,10 @@ func RenderTouchModeSelector(c *ui.Context, st *InteractionState, onClear func()
 	}
 
 	ui.Column(c).FillWidth().Gap(float32(t.Spacing8)).Children(func() {
-		ui.Row(c).FillWidth().Padding(float32(t.Spacing4)).Radius(float32(t.PanelRadius)).
-			Background(t.Elevated).Border(1, t.Border).Gap(float32(t.Spacing4)).Children(func() {
+		modeTrack := ui.Row(c).FillWidth().Padding(float32(t.Spacing4)).Radius(float32(t.PanelRadius)).
+			Background(t.Elevated).Border(1, t.Border).Gap(float32(t.Spacing4))
+		theme.ApplyRecessedWell(modeTrack, t)
+		modeTrack.Children(func() {
 			for _, m := range modes {
 				m := m
 				active := st.TouchMode == m.mode
@@ -1826,6 +1847,7 @@ func RenderTouchModeSelector(c *ui.Context, st *InteractionState, onClear func()
 					st.TouchMode = m.mode
 					mygo.Haptics.Selection()
 				})
+				theme.ApplyTactilePress(btn)
 				btn.Children(func() {
 					txt := ui.Text(c, m.label).FontSize(float32(t.TextMeta)).TextColor(fg).SingleLine()
 					if active {
@@ -1905,7 +1927,8 @@ func renderMobilePlateSheet(
 					ui.Text(c, plateGeometryLabel(rows, cols, props.Topology)).
 						FontSize(float32(t.TextSection)).Bold().TextColor(t.Text).SingleLine().Ellipsis("…")
 					sub := fmt.Sprintf("已排 %d / %d 孔 · 已选 %d 孔", len(props.Wells), rows*cols, len(props.SelectedIDs))
-					ui.Text(c, sub).FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).SingleLine().Ellipsis("…")
+					ui.Text(c, sub).FontSize(float32(t.TextMeta)).FontFeatures("tnum").TextColor(t.TextMuted).
+						ContentTransition(theme.NumericRoll(false)).SingleLine().Ellipsis("…")
 				})
 				doneBtn := components.Button(c, "完成", components.ButtonPrimary).MinHeight(float32(t.Spacing32) + float32(t.Spacing8))
 				if doneBtn.Clicked() {
@@ -1914,9 +1937,11 @@ func renderMobilePlateSheet(
 				}
 			})
 			// Header Row 2: Dedicated thumb-friendly Zoom Bar [- | 100% | + | 重置]
-			ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Gap(float32(t.Spacing8)).
+			zoomTrack := ui.Row(c).FillWidth().Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Gap(float32(t.Spacing8)).
 				Padding(float32(t.Spacing4), float32(t.Spacing8)).
-				Radius(float32(t.ControlRadius)).Background(t.Elevated).Border(1, t.BorderSubtle).Children(func() {
+				Radius(float32(t.ControlRadius)).Background(t.Elevated).Border(1, t.BorderSubtle)
+			theme.ApplyRecessedWell(zoomTrack, t)
+			zoomTrack.Children(func() {
 				zoomBtnH := float32(t.Spacing32) + float32(t.Spacing4)
 				zoomOutBtn := ui.ButtonBase(c.Key("plate-zoom-out")).Size(zoomBtnH, zoomBtnH).Radius(float32(t.ControlRadius)).Center().Label("缩小孔板")
 				zoomOutBtn.Children(func() {
@@ -1927,6 +1952,7 @@ func renderMobilePlateSheet(
 				}
 				ui.Text(c, fmt.Sprintf("%.0f%%", st.ZoomState.Scale*100)).
 					FontSize(float32(t.TextData)).Bold().FontFeatures("tnum").TextColor(t.Text).
+					ContentTransition(theme.NumericRoll(false)).
 					MinWidth(float32(t.Spacing48)).Center()
 				zoomInBtn := ui.ButtonBase(c.Key("plate-zoom-in")).Size(zoomBtnH, zoomBtnH).Radius(float32(t.ControlRadius)).Center().Label("放大孔板")
 				zoomInBtn.Children(func() {
@@ -1970,7 +1996,11 @@ func renderMobilePlateSheet(
 
 			// Thumb-friendly group assignment bar
 			if props.Interactive {
-				ui.ScrollHorizontal(c).FillWidth().Children(func() {
+				grpScroll := ui.ScrollHorizontal(c.Key("pl-sheet-grp-scroll")).FillWidth()
+				grpScrollSt := ui.Local(grpScroll, "scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+				grpScroll.TrackScroll(grpScrollSt)
+				theme.ApplyEdgeFadeX(grpScroll, t, grpScrollSt.X > 2, grpScrollSt.MaxX > 2 && grpScrollSt.X < grpScrollSt.MaxX-2)
+				grpScroll.Children(func() {
 					ui.Row(c).AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
 						seenGrp := map[string]bool{}
 						var groupIDs []string

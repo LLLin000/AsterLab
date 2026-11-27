@@ -60,7 +60,8 @@ func renderUnifiedModuleShell(
 						ui.Spacer(c)
 					}
 					if metaText != "" {
-						ui.Text(c, metaText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
+						ui.Text(c, metaText).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").
+							ContentTransition(theme.NumericRoll(false)).SingleLine().Shrink(0)
 					}
 					if extraRight != nil {
 						ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {

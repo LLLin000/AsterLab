@@ -275,7 +275,7 @@ func (v *View) renderFigure(c *ui.Context, data map[string]any) {
 		Src:          src,
 		SVGRaw:       svgRaw,
 		Annotations:  annotations,
-		MetaSummary:  figureDefaultMetaSummary(src, svgRaw, annotations),
+		MetaSummary:  figureDefaultMetaSummary(c, v, src, svgRaw, annotations),
 		Caption:      caption,
 		HeroMatchKey: heroKey,
 	})
@@ -377,6 +377,7 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 				Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
 				Radius(tok.InnerPanelRadius(tok.Spacing8)).Background(tok.Elevated.Alpha(0.7)).Border(1, tok.BorderSubtle).
 				AlignItems(ui.Center).Gap(float32(tok.Spacing12))
+			theme.ApplyRecessedWell(dropBox, tok)
 			dropBox.Children(func() {
 				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted).Shrink(0)
 				ui.Text(c, "拖入或点击添加实验图 / SVG").
@@ -523,7 +524,7 @@ func (v *View) renderUnifiedFigure(c *ui.Context, tok theme.Tokens, moduleID, ti
 		Src:          src,
 		SVGRaw:       svgRaw,
 		Annotations:  annotations,
-		MetaSummary:  figureDefaultMetaSummary(src, svgRaw, annotations),
+		MetaSummary:  figureDefaultMetaSummary(c, v, src, svgRaw, annotations),
 		Caption:      strings.TrimSpace(*v.ensureWidgetDraft("fig:"+moduleID+":cap", caption)),
 		HeroMatchKey: heroKey,
 	})
@@ -652,10 +653,24 @@ func figureFormatBadge(src, svgRaw string) string {
 	}
 }
 
-func figureDefaultMetaSummary(src, svgRaw string, annotations []svgTextLabel) string {
+// formatFigureDisplayName keeps short filenames/titles untouched and middle-truncates
+// overly long asset names (>32 runes on mobile, >48 runes on desktop) cleanly.
+func formatFigureDisplayName(c *ui.Context, v *View, raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	maxRunes := 48
+	if isMobileAsterdocViewport(c, v) {
+		maxRunes = 32
+	}
+	return kit.MiddleTruncate(trimmed, maxRunes)
+}
+
+func figureDefaultMetaSummary(c *ui.Context, v *View, src, svgRaw string, annotations []svgTextLabel) string {
 	var parts []string
 	if trimSrc := strings.TrimSpace(src); trimSrc != "" {
-		parts = append(parts, filepath.Base(trimSrc))
+		parts = append(parts, formatFigureDisplayName(c, v, filepath.Base(trimSrc)))
 	} else if strings.TrimSpace(svgRaw) != "" {
 		_, _, vbW, vbH, _ := CachedSVGMetrics(svgRaw)
 		parts = append(parts, fmt.Sprintf("矢量 %.0f×%.0f", vbW, vbH))
@@ -693,7 +708,7 @@ func (v *View) renderDarkroomFigureLightbox(c *ui.Context, tok theme.Tokens, opt
 		imgSrc, loadErr = v.cachedImageFile(resolved)
 	}
 
-	title := firstNonEmpty(strings.TrimSpace(opts.Title), filepath.Base(strings.TrimSpace(opts.Src)), "示意图 / 实验照片")
+	title := formatFigureDisplayName(c, v, firstNonEmpty(strings.TrimSpace(opts.Title), filepath.Base(strings.TrimSpace(opts.Src)), "示意图 / 实验照片"))
 	formatBadge := figureFormatBadge(opts.Src, opts.SVGRaw)
 
 	actions := make([]kit.DarkroomLightboxAction, 0, len(opts.ExtraActions)+2)
@@ -822,8 +837,10 @@ func (v *View) drawDarkroomFigureStage(c *ui.Context, src, svgRaw string, annota
 		Border(1, dtok.DarkroomBorder).
 		Center().Gap(float32(dtok.Spacing8)).Children(func() {
 		ui.Icon(c, lucide.Image()).Size(float32(dtok.IconLg), float32(dtok.IconLg)).TextColor(dtok.DarkroomMuted)
-		ui.Text(c, "图片引用："+src+"（"+firstNonEmpty(loadErr, "暂无可预览图像")+"）").
-			FontSize(float32(dtok.TextMeta)).FontFeatures("tnum").TextColor(dtok.DarkroomMuted)
+		dispSrc := formatFigureDisplayName(c, v, firstNonEmpty(filepath.Base(src), src))
+		ui.Text(c, "图片引用："+dispSrc+"（"+firstNonEmpty(loadErr, "暂无可预览图像")+"）").
+			FontSize(float32(dtok.TextMeta)).FontFeatures("tnum").TextColor(dtok.DarkroomMuted).
+			SingleLine().Ellipsis("…").MinWidth(0)
 	})
 }
 
@@ -1020,8 +1037,10 @@ func (v *View) drawFigureCanvasInteractive(c *ui.Context, moduleID, src, svgRaw 
 				Gap(float32(tok.Spacing8)).AlignItems(ui.Center)
 			applyDarkSpecularRim(errRow, tok, frameRad)
 			errRow.Children(func() {
-				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
-				ui.Text(c, "图片引用："+src+"（"+loadErr+"）").FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted).Shrink(0)
+				dispSrc := formatFigureDisplayName(c, v, firstNonEmpty(filepath.Base(src), src))
+				ui.Text(c, "图片引用："+dispSrc+"（"+loadErr+"）").FontSize(float32(tok.TextMeta)).FontFeatures("tnum").
+					TextColor(tok.TextMuted).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 			})
 			return
 		}

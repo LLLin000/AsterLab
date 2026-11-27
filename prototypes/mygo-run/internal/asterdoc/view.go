@@ -1654,43 +1654,49 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 			if v.UnifiedLive && (len(layerNames) > 0 || *newLayerOpen) {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Text(c, "图层").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
-					renderLayerPill := func(key, label string, active bool, onClick func()) {
-						fgCol := tok.TextMuted
-						if active {
-							fgCol = tok.Accent
-						}
-						btn := ui.ButtonBase(c.Key("pl-lpill:" + p.ID + ":" + key)).
-							Padding(float32(tok.Spacing4)*0.6, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-							Label(label)
-						if active {
-							btn.Background(tok.AccentSoftBg).Border(1, tok.Accent)
-						} else {
-							hoverBg := ui.Transparent
-							if btn.Hovered() {
-								hoverBg = tok.Text.Alpha(0.04)
+					layerTrack := ui.Row(c).Wrap().Padding(float32(tok.Spacing4)*0.5).
+						Radius(float32(tok.ControlRadius)).Background(tok.Canvas).
+						Border(1, tok.BorderSubtle).AlignItems(ui.Center).Gap(float32(tok.Spacing4) * 0.5)
+					theme.ApplyRecessedWell(layerTrack, tok)
+					layerTrack.Children(func() {
+						renderLayerPill := func(key, label string, active bool, onClick func()) {
+							fgCol := tok.TextMuted
+							if active {
+								fgCol = tok.Accent
 							}
-							btn.Background(btn.AnimateColor("lpbg", hoverBg, theme.MotionMicroFade)).
-								Border(1, tok.Border)
+							btn := ui.ButtonBase(c.Key("pl-lpill:" + p.ID + ":" + key)).
+								Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(tok.InnerControlRadius(tok.Spacing4 / 2)).
+								Label(label)
+							if active {
+								btn.Background(tok.AccentSoftBg).Border(1, tok.Accent)
+							} else {
+								hoverBg := ui.Transparent
+								if btn.Hovered() {
+									hoverBg = tok.Text.Alpha(0.04)
+								}
+								btn.Background(btn.AnimateColor("lpbg", hoverBg, theme.MotionMicroFade)).
+									Border(1, ui.Transparent)
+							}
+							fg := btn.AnimateColor("lpfg", fgCol, theme.MotionSnappy)
+							theme.ApplyTactilePress(btn)
+							btn.Children(func() {
+								ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+							})
+							if btn.Clicked() {
+								onClick()
+							}
 						}
-						fg := btn.AnimateColor("lpfg", fgCol, theme.MotionSnappy)
-						theme.ApplyTactilePress(btn)
-						btn.Children(func() {
-							ui.Text(c, label).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+						renderLayerPill("__group__", "分组", colorBy == "group", func() {
+							v.plateColorBy[p.ID] = "group"
 						})
-						if btn.Clicked() {
-							onClick()
+						for _, lName := range layerNames {
+							lName := lName
+							renderLayerPill(lName, lName, colorBy == "factor" && factorKey == lName, func() {
+								v.plateColorBy[p.ID] = "factor"
+								v.plateFactorKey[p.ID] = lName
+							})
 						}
-					}
-					renderLayerPill("__group__", "分组", colorBy == "group", func() {
-						v.plateColorBy[p.ID] = "group"
 					})
-					for _, lName := range layerNames {
-						lName := lName
-						renderLayerPill(lName, lName, colorBy == "factor" && factorKey == lName, func() {
-							v.plateColorBy[p.ID] = "factor"
-							v.plateFactorKey[p.ID] = lName
-						})
-					}
 					if editable {
 						addLayerBtn := components.IconButton(c, lucide.Plus(), "新建孔板图层", components.IconButtonCompact)
 						if addLayerBtn.Clicked() {
@@ -1803,7 +1809,8 @@ func (v *View) plate(c *ui.Context, p *Plate) {
 			} else if v.LabMode && !v.ReadOnly && len(selected) > 0 {
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Text(c, fmt.Sprintf("实验模式已选 %d 孔（设计布局已锁）", len(selected))).
-						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+						FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").
+						ContentTransition(theme.NumericRoll(false))
 					if components.Button(c, "标记 / 取消异常孔", components.ButtonOutline).Clicked() {
 						v.togglePlateExcludedWells(p, selected)
 					}
@@ -2076,7 +2083,8 @@ func (v *View) plateOverlay(c *ui.Context) {
 								if len(v.ExpandedWells) > 0 {
 									meta += fmt.Sprintf(" · 当前已选 %d 孔", len(v.ExpandedWells))
 								}
-								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
+								ui.Text(c, meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").
+									ContentTransition(theme.NumericRoll(false))
 							})
 							ui.Spacer(c)
 						})

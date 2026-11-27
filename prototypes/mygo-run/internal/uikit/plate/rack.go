@@ -68,9 +68,11 @@ func Rack(c *ui.Context, props RackProps) {
 	}
 	ui.Column(c).FillWidth().Gap(float32(t.Spacing8)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(t.Spacing8)).Children(func() {
-			ui.Text(c, fmt.Sprintf("%d 管架", len(props.Lanes))).FontSize(float32(t.TextMeta)).FontWeight(600).TextColor(th.Text)
+			ui.Text(c, fmt.Sprintf("%d 管架", len(props.Lanes))).FontSize(float32(t.TextMeta)).FontWeight(600).TextColor(th.Text).
+				FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 			ui.Text(c, fmt.Sprintf("已记录 %d · 缺失 %d", recorded, len(props.Lanes)-recorded)).
-				FontSize(float32(t.TextMeta)).TextColor(th.TextMuted)
+				FontSize(float32(t.TextMeta)).TextColor(th.TextMuted).
+				FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 			ui.Spacer(c)
 			if props.Blind {
 				ui.Text(c, "已设盲 · 分组已隐藏").FontSize(float32(t.TextMeta)).TextColor(th.TextMuted)
@@ -86,6 +88,9 @@ func Rack(c *ui.Context, props RackProps) {
 				}
 				chip := ui.ButtonBase(c).Padding(6, 10).Radius(6).
 					Background(laneFill(lane, th, t)).Border(1, border)
+				if !lane.HasValue {
+					theme.ApplyRecessedWell(chip, t)
+				}
 				chip.Children(func() {
 					ui.Column(c).Gap(2).Children(func() {
 						ui.Text(c, lane.Position).FontSize(11).FontWeight(600).TextColor(th.Text).FontFeatures("tnum")
@@ -113,6 +118,7 @@ func Rack(c *ui.Context, props RackProps) {
 				}
 			}
 		})
-		ui.Text(c, fmt.Sprintf("%d 个位置 · 单击选择", len(props.Lanes))).FontSize(float32(t.TextMeta)).TextColor(th.TextMuted)
+		ui.Text(c, fmt.Sprintf("%d 个位置 · 单击选择", len(props.Lanes))).FontSize(float32(t.TextMeta)).TextColor(th.TextMuted).
+			FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 	})
 }

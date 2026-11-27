@@ -7,12 +7,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 func writeTestFluorescencePNG(t *testing.T, path string) {
@@ -354,5 +357,182 @@ title: Classic Figure Test
 	settleFigureFrames(tt, 150)
 	if v.figureOpen {
 		t.Fatalf("expected classic renderFigure lightbox closed")
+	}
+}
+
+func savePlateDocRolloutShotIfRequested(t *testing.T, tt *ui.Tester, filename string) {
+	t.Helper()
+	dir := os.Getenv("ASTERLAB_PLATEDOC_ROLLOUT_SHOT_DIR")
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir rollout shot dir: %v", err)
+	}
+	img := tt.Image()
+	if img == nil {
+		t.Fatalf("nil tester image for %s", filename)
+	}
+	out := filepath.Join(dir, filename)
+	f, err := os.Create(out)
+	if err != nil {
+		t.Fatalf("create shot %s: %v", out, err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatalf("encode shot %s: %v", out, err)
+	}
+}
+
+func TestPlateAndDocCraftRolloutDesktopDarkAndMobile402x874(t *testing.T) {
+	baseDir := t.TempDir()
+	longBase := "20261127_HUVEC_VEGF50ng_Plate02_WellA01_Timepoint06h_ChannelTRITC_FOV02_40x.png"
+	secondBase := "20261127_HUVEC_Control_Plate02_WellA01_Timepoint12h_ChannelDAPI_FOV03_40x.png"
+	writeTestFluorescencePNG(t, filepath.Join(baseDir, "assets", longBase))
+	writeTestFluorescencePNG(t, filepath.Join(baseDir, "assets", secondBase))
+
+	src := "---\ntitle: Topinspo 孔板与插图工艺测试\ndate: 2026-11-27\n---\n\n" +
+		"![[./assets/" + longBase + "|120]]{@plate-rollout:A1 6h fov=2 role=obs note=\"内皮细胞成管主视野\"}\n\n" +
+		"```asterlab\nkind: plate\nid: plate-rollout\nschema: 1\ntitle: 24 孔血管成管板\nformat: 24\ngroups:\n  g-ctrl: [A1, A2, A3]\n  g-vegf: [B1, B2, B3]\nlayers:\n  浓度:\n    A1: 0 uM\n    B1: 50 ng/mL\n```\n\n" +
+		"```asterlab\nkind: group_table\nid: gt-rollout\nschema: 1\nrows:\n  - {id: g-ctrl, name: 对照组, role: control}\n  - {id: g-vegf, name: VEGF 50ng/mL, role: treatment}\n```\n"
+
+	doc, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	// 1. Desktop Dark 1180x760: Top-lit cards, recessed empty wells vs dyed wells,
+	//    middle-truncated long filename, NumericRoll counters, FloatingSelectionBar + SlideConfirm.
+	var curSrc = src
+	var vDesktop *View
+	vDesktop = &View{
+		Doc:           doc,
+		Registry:      BuiltinRegistry(),
+		Mode:          ModeDesign,
+		UnifiedLive:   true,
+		MobileCompact: false,
+		BaseDir:       baseDir,
+		Allowed:       map[string]bool{PermDocumentEdit: true},
+		OnChange: func(next string) {
+			curSrc = next
+			if parsed, pErr := Parse(next); pErr == nil {
+				vDesktop.Doc = parsed
+			}
+		},
+	}
+	vDesktop.SetPlateSelection("plate-rollout", []string{"A1", "A2"})
+
+	ttDesk := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.DarkTheme())
+		tok := theme.GetTokens(c.Theme())
+		ui.Scroll(c.Key("rollout-desk-scroll")).Fill().Background(tok.Canvas).Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+				vDesktop.Render(c)
+			})
+		})
+	}, 1180, 760)
+	settleFigureFrames(ttDesk, 200)
+
+	wantDeskTitle := kit.MiddleTruncate(longBase, 48)
+	if !ttDesk.HasText(wantDeskTitle) {
+		t.Fatalf("expected desktop middle-truncated title %q, texts=%v", wantDeskTitle, ttDesk.Texts())
+	}
+	if ttDesk.HasText(longBase) {
+		t.Fatalf("expected raw 76-rune filename %q not rendered untruncated on desktop", longBase)
+	}
+	if !ttDesk.HasText("6/24") || !ttDesk.HasText("已选 2 孔 · 图层「分组」") {
+		t.Fatalf("expected NumericRoll counters on desktop, texts=%v", ttDesk.Texts())
+	}
+
+	// Scroll slightly so both the middle-truncated embed card and the plate + floating bar sit cleanly in frame.
+	if r, ok := ttDesk.Find("已选 2 孔 · 图层「分组」"); ok && r.Y+r.H > 748 {
+		ttDesk.Scroll(590, 380, 0, r.Y+r.H-720)
+		settleFigureFrames(ttDesk, 100)
+	}
+	savePlateDocRolloutShotIfRequested(t, ttDesk, "rollout_plate_doc_dark_1180x760.png")
+
+	// Verify FloatingBarTransition + recessed direction switch ("按行"/"按列") works without panic
+	// when switching modes and clearing selection.
+	if err := ttDesk.Click("填充模式：梯度稀释"); err != nil {
+		t.Fatalf("click 梯度稀释: %v", err)
+	}
+	settleFigureFrames(ttDesk, 80)
+	if err := ttDesk.Click("按列"); err != nil {
+		t.Fatalf("click recessed direction 按列: %v", err)
+	}
+	settleFigureFrames(ttDesk, 80)
+	if err := ttDesk.Click("清空所选孔位"); err != nil {
+		t.Fatalf("click SlideConfirm guard trigger 清空所选孔位: %v", err)
+	}
+	settleFigureFrames(ttDesk, 120)
+	if !ttDesk.HasText("向右滑动清空所选") {
+		t.Fatalf("expected SlideConfirm popover label, texts=%v", ttDesk.Texts())
+	}
+	handleInfo, ok := ttDesk.Access("向右滑动清空所选")
+	if !ok {
+		t.Fatalf("expected accessible handle for SlideConfirm, texts=%v", ttDesk.Texts())
+	}
+	sx := handleInfo.Bounds.X + handleInfo.Bounds.W/2
+	sy := handleInfo.Bounds.Y + handleInfo.Bounds.H/2
+	ttDesk.Press(sx, sy)
+	ttDesk.Move(sx+240, sy)
+	ttDesk.Frame()
+	ttDesk.Release(sx+240, sy)
+	settleFigureFrames(ttDesk, 240)
+	if updatedPlate, ok := vDesktop.Doc.PlateByID("plate-rollout"); !ok || len(updatedPlate.Groups["g-ctrl"]) != 1 || updatedPlate.Groups["g-ctrl"][0] != "A3" {
+		t.Fatalf("expected A1, A2 cleared from g-ctrl via SlideConfirm guard, src=\n%s", curSrc)
+	}
+
+	// 2. Mobile 402x874: middle-truncated filename (<=32 runes), edge-faded relation strip,
+	//    compact mobile plate card with recessed proportional bar, and zero horizontal overflow.
+	mobSrc := strings.Replace(src,
+		"![[./assets/"+longBase+"|120]]{@plate-rollout:A1 6h fov=2 role=obs note=\"内皮细胞成管主视野\"}",
+		"![[./assets/"+longBase+"|120]]{@plate-rollout:A1 6h fov=2 role=obs note=\"内皮细胞成管主视野\"}\n\n![[./assets/"+secondBase+"|120]]{@plate-rollout:A1 12h fov=3 role=ref}",
+		1)
+	docMob, err := Parse(mobSrc)
+	if err != nil {
+		t.Fatalf("Parse mobile src failed: %v", err)
+	}
+	vMob := &View{
+		Doc:           docMob,
+		Registry:      BuiltinRegistry(),
+		Mode:          ModeDesign,
+		UnifiedLive:   true,
+		MobileCompact: true,
+		BaseDir:       baseDir,
+		Allowed:       map[string]bool{PermDocumentEdit: true},
+	}
+	vMob.SetPlateSelection("plate-rollout", []string{"A1"})
+	ttMob := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		tok := theme.GetTokens(c.Theme())
+		ui.Scroll(c.Key("rollout-mob-scroll")).Fill().Background(tok.Canvas).Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+				vMob.Render(c)
+			})
+		})
+	}, 402, 874)
+	ttMob.SetInsets(59, 0, 34, 0)
+	settleFigureFrames(ttMob, 200)
+
+	wantMobTitle := kit.MiddleTruncate(longBase, 32)
+	if utf8.RuneCountInString(wantMobTitle) > 32 {
+		t.Fatalf("expected <=32 runes for mobile title, got %d", utf8.RuneCountInString(wantMobTitle))
+	}
+	if !ttMob.HasText(wantMobTitle) {
+		t.Fatalf("expected mobile middle-truncated title %q, texts=%v", wantMobTitle, ttMob.Texts())
+	}
+	if !ttMob.HasText("已排 6 / 24 孔") {
+		t.Fatalf("expected compact mobile plate count, texts=%v", ttMob.Texts())
+	}
+	savePlateDocRolloutShotIfRequested(t, ttMob, "rollout_plate_doc_mobile_402x874.png")
+
+	for _, info := range ttMob.AccessAll() {
+		if info.Offscreen || info.Bounds.W <= 0 || info.Bounds.H <= 0 {
+			continue
+		}
+		if info.Bounds.X < -1.5 || info.Bounds.X+info.Bounds.W > 403.0 {
+			t.Fatalf("mobile 402x874 rollout overflow: name=%q bounds=%+v", info.Name, info.Bounds)
+		}
 	}
 }
