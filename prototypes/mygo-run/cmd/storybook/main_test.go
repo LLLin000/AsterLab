@@ -46,6 +46,7 @@ func TestStandaloneStorybookRendersAllSections(t *testing.T) {
 					"2A. 基础交互控件 & 6 大 UI 逻辑引擎",
 					"3A. 空间实验载体（孔板 · 平皿 · 管架 · 流程节点）",
 					"3D. 暗房灯箱与印样画廊",
+					"3E. Topinspo 工艺工坊",
 					"4A. 顶栏标签页、分屏与模式头",
 					"5A. AsterDoc 单真源文档组件实战预览",
 					"6A. 动物房合规卡片与边界压测态",

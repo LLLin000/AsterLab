@@ -71,6 +71,14 @@ type GalleryState struct {
 	LightboxItemID  string
 	LightboxState   DarkroomLightboxState
 
+	// Topinspo Craft Workshop & Break-UI Stress Mode state
+	StressMode         bool
+	CraftInit          bool
+	CraftCounter       int
+	CraftMorph         MorphActionState
+	CraftSlide         SlideConfirmState
+	CraftSelectedCount int
+
 	plateState plate.InteractionState
 }
 
@@ -111,6 +119,15 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 	}
 	if st.ContactSelected == nil {
 		st.ContactSelected = map[string]bool{"spec-huvec-1": true}
+	}
+	if !st.CraftInit {
+		st.CraftInit = true
+		if st.CraftCounter == 0 {
+			st.CraftCounter = 12
+		}
+		if st.CraftSelectedCount == 0 {
+			st.CraftSelectedCount = 3
+		}
 	}
 
 	tok := theme.GetTokens(c.Theme())
@@ -178,6 +195,17 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 			Icon:     lucide.Aperture(),
 			Render: func(c *ui.Context, tok theme.Tokens) {
 				renderStoryDarkroomGallery(c, tok, st)
+			},
+		},
+		{
+			ID:       "craft-workshop",
+			Group:    "工艺工坊",
+			NavTitle: "工艺工坊",
+			Title:    "3E. Topinspo 工艺工坊",
+			Subtitle: "Top-lit 顶光 · EdgeFadeX · RecessedWell · NumericRoll · SlideConfirm · MorphAction · MiddleTruncate",
+			Icon:     lucide.Sparkles(),
+			Render: func(c *ui.Context, tok theme.Tokens) {
+				renderStoryCraftWorkshop(c, tok, st)
 			},
 		},
 	}
@@ -329,6 +357,16 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 							st.NarrowPreview = false
 						}
 					}
+				}
+
+				stressLbl := "正常数据"
+				stressVar := components.ButtonSecondary
+				if st.StressMode {
+					stressLbl = "极限压力"
+					stressVar = components.ButtonPrimary
+				}
+				if components.Button(c.Key("gal-stress-toggle"), stressLbl, stressVar).Clicked() {
+					st.StressMode = !st.StressMode
 				}
 			})
 		})
@@ -496,9 +534,13 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 
 	if st.LightboxOpen {
 		spec := findStorySpecimen(st.LightboxItemID)
+		lbTitle := spec.Title
+		if st.StressMode {
+			lbTitle = craftStressFilename
+		}
 		DarkroomLightbox(c, tok, &st.LightboxOpen, &st.LightboxState, DarkroomLightboxProps{
 			Key:          "storybook-darkroom-lightbox",
-			Title:        spec.Title,
+			Title:        lbTitle,
 			FormatBadge:  spec.FormatBadge,
 			MetaSummary:  spec.MetaSummary,
 			Caption:      spec.Caption,
@@ -511,7 +553,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 					Icon:  lucide.Plus(),
 					Primary: true,
 					OnClick: func() {
-						st.DemoToasts.Push(Toast{Tone: ToastSuccess, Message: "已插入：" + spec.Title})
+						st.DemoToasts.Push(Toast{Tone: ToastSuccess, Message: "已插入：" + MiddleTruncate(lbTitle, 24)})
 						st.LightboxOpen = false
 					},
 				},
@@ -925,9 +967,23 @@ func renderStoryControlsAndEngines(c *ui.Context, tok theme.Tokens, st *GalleryS
 			{"HUVEC 水凝胶成管实验", "STEP 4 进行中 · 12 孔板", 1},
 			{"MRSA 抑菌圈与 CFU 计数", "STEP 2 待记录 · 12 块平皿", 1},
 		}
+		if st.StressMode {
+			sampleRows = []struct {
+				title, sub string
+				indent     int
+			}{
+				{MiddleTruncate(craftStressFilename, 34), "999+ 份实验 · 极限文件名压测 · 0 溢出", 0},
+				{"HUVEC_VEGF50ng_GroupB_Plate02_WellA01_超长中英混排实验记录标题边界压测", "STEP 999+ 进行中 · 96 孔板 · 999+ 孔", 1},
+				{"MRSA_InhibitionZone_LongTitleOverflowCheck_CFU_20261127_Batch999", "STEP 999+ 待记录 · 999+ 块平皿", 1},
+			}
+		}
 		ui.Column(c).FillWidth().Gap(2).Children(func() {
 			for idx, r := range sampleRows {
 				idx, r := idx, r
+				badgeTxt := fmt.Sprintf("#%d", idx+1)
+				if st.StressMode {
+					badgeTxt = "999+"
+				}
 				ListItem(c, fmt.Sprintf("gal-li-%d", idx), tok, ListItemOptions{
 					Title:       r.title,
 					Subtitle:    r.sub,
@@ -941,7 +997,7 @@ func renderStoryControlsAndEngines(c *ui.Context, tok theme.Tokens, st *GalleryS
 						ui.Icon(c, ico).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
 					},
 					EndSlot: func() {
-						components.Badge(c, fmt.Sprintf("#%d", idx+1), components.BadgeOptions{Tone: components.BadgeNeutral})
+						components.Badge(c, badgeTxt, components.BadgeOptions{Tone: components.BadgeNeutral})
 					},
 					HoverEndSlot: func() {
 						components.IconButton(c, lucide.Columns2(), "分屏打开", components.IconButtonCompact)
@@ -1235,12 +1291,20 @@ func renderStoryDarkroomGallery(c *ui.Context, tok theme.Tokens, st *GalleryStat
 
 		specs := getStorySpecimens()
 		var b1Items, b2Items []ContactSheetItem
-		for _, sp := range specs {
+		for i, sp := range specs {
+			title := sp.Title
+			roleBadge := sp.RoleBadge
+			if st.StressMode {
+				title = MiddleTruncate(craftStressFilename, 24)
+				if i == 0 {
+					roleBadge = "999+"
+				}
+			}
 			it := ContactSheetItem{
 				ID:           sp.ID,
-				Title:        sp.Title,
+				Title:        title,
 				FormatBadge:  sp.FormatBadge,
-				RoleBadge:    sp.RoleBadge,
+				RoleBadge:    roleBadge,
 				CapturedAt:   sp.CapturedAt,
 				Image:        sp.Bitmap,
 				HeroMatchKey: sp.HeroKey,
@@ -1252,10 +1316,14 @@ func renderStoryDarkroomGallery(c *ui.Context, tok theme.Tokens, st *GalleryStat
 			}
 		}
 
+		b1Title := "2026-11-27 · B20261127-01 · HUVEC 免疫荧光"
+		if st.StressMode {
+			b1Title = MiddleTruncate(craftStressFilename, 32) + " (999+)"
+		}
 		batches := []ContactSheetBatch{
 			{
 				ID:          "B20261127-01",
-				Title:       "2026-11-27 · B20261127-01 · HUVEC 免疫荧光",
+				Title:       b1Title,
 				Subtitle:    "20x 物镜 · 共聚焦/明场组",
 				ActionLabel: "选择本批",
 				OnAction: func() {
@@ -1306,6 +1374,361 @@ func renderStoryDarkroomGallery(c *ui.Context, tok theme.Tokens, st *GalleryStat
 					st.LightboxItemID = item.ID
 					st.LightboxOpen = true
 				},
+			})
+		})
+	})
+}
+
+const (
+	craftNormalFilename = "20261127_HUVEC_Plate02_WellA01_6h_FOV02.dng"
+	craftStressFilename = "20261127_HUVECTUBE_VEGF50ng_GroupB_Plate02_WellA01_6h_FOV02_RAW_16bit.dng"
+)
+
+func renderStoryCraftWorkshop(c *ui.Context, tok theme.Tokens, st *GalleryState) {
+	outer := ui.Column(c.Key("craft-workshop-card")).FillWidth().
+		Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+		Gap(float32(tok.Spacing12))
+	ApplyElevation(outer, tok, ElevationCard)
+	outer.Children(func() {
+		headerMeta := "Top-lit 顶光 · EdgeFadeX · RecessedWell · NumericRoll · SlideConfirm"
+		if st.StressMode {
+			headerMeta = "极限压力态 · 73 字符文件名 · 999+ 计数 · 402dp 零溢出"
+		}
+		SectionHeader(c, tok, lucide.Sparkles(), "3E. Topinspo 工艺工坊", headerMeta, func() {
+			badgeTxt := "正常样本"
+			badgeTone := components.BadgeNeutral
+			if st.StressMode {
+				badgeTxt = "999+ 极限压力"
+				badgeTone = components.BadgeWarning
+			}
+			Badge(c, badgeTxt, components.BadgeOptions{Tone: badgeTone})
+		})
+
+		// 1. Top-lit Specular Rim cards & Recessed Well + ShortcutKeycaps
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
+			rimCard := ui.Column(c.Key("craft-toplit-card")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).
+				Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+			ApplyElevation(rimCard, tok, ElevationCard)
+			rimCard.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "Top-lit Specular Rim (180° 顶光边线)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+					Badge(c, "ApplyTopLitBorder", components.BadgeOptions{Tone: components.BadgeAccent})
+				})
+				ui.Text(c, "暗色模式由 SpecularRimTop → Border → SpecularRimBottom 单层渐变勾勒立体边缘。").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+				floatPill := ui.Row(c.Key("craft-toplit-floating")).FillWidth().
+					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+				ApplyElevation(floatPill, tok, ElevationFloating)
+				floatPill.Children(func() {
+					ui.Icon(c, lucide.Layers()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent).Shrink(0)
+					lbl := "ElevationFloating · 顶光渐变描边"
+					if st.StressMode {
+						lbl = MiddleTruncate(craftStressFilename, 28)
+					}
+					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				})
+			})
+
+			wellCard := ui.Column(c.Key("craft-recessed-card")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).
+				Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+			ApplyElevation(wellCard, tok, ElevationCard)
+			wellCard.Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "Recessed Well & 凹槽键帽 (ShortcutKeycaps)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+					if st.StressMode {
+						Badge(c, "999+", components.BadgeOptions{Tone: components.BadgeDanger})
+					}
+				})
+				wellTrack := ui.Row(c.Key("craft-recessed-well")).FillWidth().Wrap().
+					Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+					Radius(float32(tok.ControlRadius)).
+					Background(tok.Canvas).
+					Border(1, tok.BorderSubtle).
+					AlignItems(ui.Center).
+					Gap(float32(tok.Spacing8))
+				theme.ApplyRecessedWell(wellTrack, tok)
+				wellTrack.Children(func() {
+					ui.Text(c, "快捷指令").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					ShortcutKeycaps(c, tok, "Ctrl", "K")
+					ShortcutKeycaps(c, tok, "Shift", "Alt", "E")
+				})
+			})
+		})
+
+		// 2. ApplyEdgeFadeX Horizontal ScrollSnap Strip
+		ui.Column(c.Key("craft-edgefade-box")).FillWidth().
+			Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.PanelRadius)).
+			Background(tok.Elevated).
+			Border(1, tok.BorderSubtle).
+			Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "ApplyEdgeFadeX + ScrollSnap(SnapMandatory) 印样横滑条").
+					FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				stripMeta := "5 组样本"
+				if st.StressMode {
+					stripMeta = "999+ 样本"
+				}
+				ui.Text(c, stripMeta).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+			})
+			strip := ui.ScrollHorizontal(c.Key("craft-snap-strip")).FillWidth().ScrollSnap(ui.SnapMandatory)
+			theme.ApplyEdgeFadeX(strip, tok, true, true)
+			strip.Children(func() {
+				ui.Row(c).AlignItems(ui.Stretch).Padding(float32(tok.Spacing4), float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
+					snapItems := []struct {
+						id, title, meta string
+					}{
+						{"s1", "A1 · HUVEC_DAPI.dng", "ISO 400 · 20x"},
+						{"s2", "A2 · VEGF_50ng.dng", "ISO 640 · 20x"},
+						{"s3", "B1 · PBS_Ctrl.dng", "ISO 100 · 10x"},
+						{"s4", "B2 · TRITC_Tube.dng", "ISO 800 · 20x"},
+						{"s5", "C1 · ChemiDoc_WB.tiff", "16-bit · 12s"},
+					}
+					for _, item := range snapItems {
+						item := item
+						ttl := item.title
+						meta := item.meta
+						if st.StressMode {
+							ttl = MiddleTruncate(craftStressFilename, 24)
+							meta = "999+ · 16-bit RAW"
+						}
+						sc := ui.Column(c.Key("craft-snap-"+item.id)).
+							Width(float32(tok.Spacing48)*3.8).
+							Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Gap(float32(tok.Spacing4)).
+							SnapAlign(ui.Start)
+						ApplyElevation(sc, tok, ElevationCard)
+						sc.Children(func() {
+							ui.Text(c, ttl).FontSize(float32(tok.TextData)).Bold().FontFeatures("tnum").
+								TextColor(tok.Text).SingleLine().Ellipsis("…").MinWidth(0)
+							ui.Text(c, meta).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").
+								TextColor(tok.TextMuted).SingleLine().Ellipsis("…").MinWidth(0)
+						})
+					}
+				})
+			})
+		})
+
+		// 3. NumericRoll Mechanical Pipette Counter + MorphActionButton + SlideConfirm
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
+			// Mechanical Pipette NumericRoll
+			pipetteCard := ui.Column(c.Key("craft-pipette-card")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).
+				Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+			ApplyElevation(pipetteCard, tok, ElevationCard)
+			pipetteCard.Children(func() {
+				ui.Text(c, "机械移液器 NumericRoll 滚轮计数").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					if components.Button(c.Key("craft-cnt-dec"), "-", components.ButtonSecondary).Clicked() {
+						if st.CraftCounter > 0 {
+							st.CraftCounter--
+						}
+					}
+					cntStr := fmt.Sprintf("%d uL", st.CraftCounter)
+					if st.StressMode {
+						cntStr = "999+ uL"
+					}
+					well := ui.Row(c).Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
+						Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.Border).Center()
+					theme.ApplyRecessedWell(well, tok)
+					well.Children(func() {
+						ui.Text(c, cntStr).
+							FontSize(float32(tok.TextSection)).Bold().FontFeatures("tnum").
+							TextColor(tok.Text).SingleLine().
+							ContentTransition(theme.NumericRoll(false))
+					})
+					if components.Button(c.Key("craft-cnt-inc"), "+", components.ButtonSecondary).Clicked() {
+						st.CraftCounter++
+					}
+				})
+			})
+
+			// Width-stable MorphActionButton
+			morphCard := ui.Column(c.Key("craft-morph-card")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).
+				Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+			ApplyElevation(morphCard, tok, ElevationCard)
+			morphCard.Children(func() {
+				ui.Text(c, "等宽 MorphActionButton (Idle → Busy → Done)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					if MorphActionButton(c, tok, &st.CraftMorph, MorphActionOptions{
+						Key:       "craft-morph-btn",
+						IdleLabel: "归档实验数据",
+						BusyLabel: "归档校验中…",
+						DoneLabel: "已归档",
+						IdleIcon:  lucide.Archive(),
+						Primary:   true,
+					}) {
+						st.CraftMorph.Phase = MorphBusy
+						st.CraftMorph.PhaseSince = time.Now()
+					}
+					if components.Button(c.Key("craft-morph-step"), "切换阶段", components.ButtonSecondary).Clicked() {
+						st.CraftMorph.Phase = (st.CraftMorph.Phase + 1) % 3
+					}
+				})
+			})
+		})
+
+		// SlideConfirm bar
+		slideCard := ui.Column(c.Key("craft-slide-card")).FillWidth().
+			Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+		ApplyElevation(slideCard, tok, ElevationCard)
+		slideCard.Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "SlideConfirm 不可逆滑块确认 (≥82% 锁定 / <82% 弹簧回弹)").
+					FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				if st.CraftSlide.Confirmed {
+					if components.Button(c.Key("craft-slide-reset"), "重置滑块", components.ButtonGhost).Clicked() {
+						st.CraftSlide.Reset()
+					}
+				}
+			})
+			slideLbl := "向右滑动销毁废液批号 · B20261127"
+			if st.StressMode {
+				slideLbl = "滑动确认销毁 " + MiddleTruncate(craftStressFilename, 24)
+			}
+			if SlideConfirm(c, tok, &st.CraftSlide, SlideConfirmOptions{
+				Key:            "craft-slide-confirm",
+				Label:          slideLbl,
+				ConfirmedLabel: "已确认锁定销毁",
+				Danger:         true,
+			}) {
+				st.DemoToasts.Push(Toast{
+					Tone:             ToastDanger,
+					Message:          "已锁定废液批号销毁操作",
+					UndoLabel:        "撤销",
+					ProgressOverride: 0.72,
+					OnUndo: func() {
+						st.CraftSlide.Reset()
+					},
+				})
+			}
+		})
+
+		// 4. MiddleTruncate Before/After + FloatingSelectionBar + Undo Toast Trigger
+		truncCard := ui.Column(c.Key("craft-truncate-card")).FillWidth().
+			Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+		ApplyElevation(truncCard, tok, ElevationCard)
+		truncCard.Children(func() {
+			ui.Text(c, "MiddleTruncate 科研文件名智能中段截断对照").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+			srcName := craftNormalFilename
+			if st.StressMode {
+				srcName = craftStressFilename
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				Badge(c, "原文", components.BadgeOptions{Tone: components.BadgeNeutral})
+				ui.Text(c, srcName).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").
+					TextColor(tok.TextMuted).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+			})
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				Badge(c, "28 字符", components.BadgeOptions{Tone: components.BadgeAccent})
+				ui.Text(c, MiddleTruncate(srcName, 28)).FontSize(float32(tok.TextData)).Bold().FontFeatures("tnum").
+					TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+			})
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				Badge(c, "42 字符", components.BadgeOptions{Tone: components.BadgeSuccess})
+				ui.Text(c, MiddleTruncate(srcName, 42)).FontSize(float32(tok.TextData)).FontFeatures("tnum").
+					TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+			})
+		})
+
+		// FloatingSelectionBar + Undo Toast countdown hairline demo
+		fsbWrap := ui.Column(c.Key("craft-fsb-card")).FillWidth().
+			Padding(float32(tok.Spacing12)).Gap(float32(tok.Spacing8))
+		ApplyElevation(fsbWrap, tok, ElevationCard)
+		fsbWrap.Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "FloatingSelectionBar 悬浮上下文操作条 & Undo Toast 倒计时进度条").
+					FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
+				if components.Button(c.Key("craft-sel-add"), "选中 +1", components.ButtonSecondary).Clicked() {
+					st.CraftSelectedCount++
+				}
+				if components.Button(c.Key("craft-sel-sub"), "选中 -1", components.ButtonSecondary).Clicked() {
+					if st.CraftSelectedCount > 0 {
+						st.CraftSelectedCount--
+					}
+				}
+				if components.Button(c.Key("craft-undo-toast-btn"), "触发进度条 Undo Toast", components.ButtonSecondary).Clicked() {
+					prev := st.CraftSelectedCount
+					st.CraftSelectedCount = 0
+					st.DemoToasts.Push(Toast{
+						Tone:             ToastWarning,
+						Message:          "已移除所选显微印样",
+						UndoLabel:        "撤销",
+						Duration:         6 * time.Second,
+						ProgressOverride: 0.68,
+						OnUndo: func() {
+							st.CraftSelectedCount = prev
+						},
+					})
+				}
+			})
+			selCount := st.CraftSelectedCount
+			if st.StressMode {
+				selCount = 999
+			}
+			FloatingSelectionBar(c, tok, FloatingSelectionBarProps{
+				Key:        "craft-floating-bar",
+				Count:      selCount,
+				UnitLabel:  "项已选",
+				ClearLabel: "清空",
+				OnClear: func() {
+					st.CraftSelectedCount = 0
+				},
+				Actions: []FloatingSelectionAction{
+					{
+						ID:      "export",
+						Label:   "批量导出",
+						Icon:    lucide.Download(),
+						Primary: true,
+						OnClick: func() {
+							st.DemoToasts.Push(Toast{Tone: ToastSuccess, Message: fmt.Sprintf("已导出 %d 项样本", selCount)})
+						},
+					},
+					{
+						ID:     "delete",
+						Label:  "移除",
+						Icon:   lucide.Trash(),
+						Danger: true,
+						OnClick: func() {
+							prev := st.CraftSelectedCount
+							st.CraftSelectedCount = 0
+							st.DemoToasts.Push(Toast{
+								Tone:             ToastDanger,
+								Message:          "已移除选中样本",
+								UndoLabel:        "撤销",
+								ProgressOverride: 0.65,
+								OnUndo:           func() { st.CraftSelectedCount = prev },
+							})
+						},
+					},
+				},
+			})
+		})
+
+		// 5. SkeletonCard & EmptyStateCard
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
+			ui.Column(c.Key("craft-skel-wrap")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "SkeletonCard 骨架占位卡").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				SkeletonCard(c, tok)
+			})
+			ui.Column(c.Key("craft-empty-wrap")).Grow(1).MinWidth(float32(tok.Spacing48)*5.4).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "EmptyStateCard 快捷键引导空态").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
+				emptyTitle := "暂无待归档的共聚焦图像"
+				emptyHint := "拖拽 DNG/TIFF 至画廊或按下快捷键新建记录"
+				if st.StressMode {
+					emptyTitle = MiddleTruncate(craftStressFilename, 28)
+					emptyHint = "999+ 条记录筛选为空 · 请重置条件或快捷键新建"
+				}
+				EmptyStateCard(c, tok, EmptyStateProps{
+					Icon:        lucide.FlaskConical(),
+					Title:       emptyTitle,
+					Hint:        emptyHint,
+					ActionLabel: "新建样本记录",
+					Shortcuts:   []string{"Ctrl", "N"},
+					OnAction: func() {
+						st.CraftSelectedCount++
+					},
+				})
 			})
 		})
 	})

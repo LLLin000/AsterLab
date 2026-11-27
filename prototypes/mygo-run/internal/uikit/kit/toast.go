@@ -23,13 +23,33 @@ const (
 
 // Toast describes one optimistic non-blocking feedback item with optional undo callback.
 type Toast struct {
-	ID        string
-	Tone      ToastTone
-	Message   string
-	UndoLabel string
-	OnUndo    func()
-	Duration  time.Duration
-	createdAt time.Time
+	ID               string
+	Tone             ToastTone
+	Message          string
+	UndoLabel        string
+	OnUndo           func()
+	Duration         time.Duration
+	ProgressOverride float32 // <= 0: auto from elapsed/Duration; (0, 1]: deterministic remaining ratio
+	createdAt        time.Time
+}
+
+func toastRemainingRatio(it Toast, now time.Time) float32 {
+	if it.ProgressOverride > 0 {
+		if it.ProgressOverride > 1 {
+			return 1
+		}
+		return it.ProgressOverride
+	}
+	if it.Duration <= 0 {
+		return 1
+	}
+	elapsed := float32(now.Sub(it.createdAt)) / float32(it.Duration)
+	if elapsed < 0 {
+		elapsed = 0
+	} else if elapsed > 1 {
+		elapsed = 1
+	}
+	return 1 - elapsed
 }
 
 // ToastQueue manages Linear-style stacked optimistic notifications & undo snackbars.
@@ -119,7 +139,8 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 	if q == nil || c == nil {
 		return
 	}
-	q.Prune(time.Now())
+	now := time.Now()
+	q.Prune(now)
 	if len(q.items) == 0 {
 		return
 	}
@@ -143,11 +164,8 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 			case ToastDanger:
 				fg, icon = tok.Danger, lucide.CircleAlert()
 			}
-			card := ui.Row(c.Key("toast-" + it.ID)).
+			card := ui.Column(c.Key("toast-" + it.ID)).
 				FillWidth().
-				Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-				AlignItems(ui.Center).
-				Gap(float32(tok.Spacing8)).
 				Transition(theme.AnchoredPopoverTransition())
 			ApplyElevation(card, tok, ElevationFloating)
 			if !tok.Dark && tok.SpecularRim.A > 0 {
@@ -160,26 +178,45 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 				})
 			}
 			innerRad := tok.InnerPanelRadius(tok.Spacing8)
+			remaining := toastRemainingRatio(it, now)
+			elapsedPct := 1 - remaining
+			if elapsedPct < 0 {
+				elapsedPct = 0
+			} else if elapsedPct > 1 {
+				elapsedPct = 1
+			}
 			card.Children(func() {
-				ui.Icon(c, icon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(fg).Shrink(0)
-				ui.Text(c, it.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
-				if it.OnUndo != nil {
-					lbl := it.UndoLabel
-					if lbl == "" {
-						lbl = "撤销"
-					}
-					undoBtn := components.Button(c, lbl, components.ButtonSecondary).Radius(innerRad)
-					if undoBtn.Clicked() {
-						fn := it.OnUndo
-						id := it.ID
-						q.Dismiss(id)
-						fn()
-					}
-				}
-				closeBtn := components.IconButton(c, lucide.X(), "关闭提示", components.IconButtonCompact).Radius(innerRad)
-				if closeBtn.Clicked() {
-					q.Dismiss(it.ID)
-				}
+				ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).Clip().Children(func() {
+					ui.Row(c).FillWidth().
+						Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+						AlignItems(ui.Center).
+						Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Icon(c, icon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(fg).Shrink(0)
+						ui.Text(c, it.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
+						if it.OnUndo != nil {
+							lbl := it.UndoLabel
+							if lbl == "" {
+								lbl = "撤销"
+							}
+							undoBtn := components.Button(c, lbl, components.ButtonSecondary).Radius(innerRad)
+							if undoBtn.Clicked() {
+								fn := it.OnUndo
+								id := it.ID
+								q.Dismiss(id)
+								fn()
+							}
+						}
+						closeBtn := components.IconButton(c, lucide.X(), "关闭提示", components.IconButtonCompact).Radius(innerRad)
+						if closeBtn.Clicked() {
+							q.Dismiss(it.ID)
+						}
+					})
+					ui.Box(c).FillWidth().Height(2).Background(tok.HairlineDivider).Children(func() {
+						ui.Box(c.Key("toast-prog-"+it.ID)).Fill().
+							Background(fg).
+							ClipInsetPercent(0, elapsedPct*100, 0, 0, 0)
+					})
+				})
 			})
 		}
 	})

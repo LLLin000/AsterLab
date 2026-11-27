@@ -237,6 +237,11 @@ func DarkroomLightbox(c *ui.Context, tok theme.Tokens, open *bool, st *DarkroomL
 						if title == "" {
 							title = "暗房检视"
 						}
+						maxRunes := 48
+						if compact {
+							maxRunes = 28
+						}
+						title = MiddleTruncate(title, maxRunes)
 						ui.Text(c, title).FontSize(float32(tok.TextSection)).Bold().
 							TextColor(tok.DarkroomText).SingleLine().Ellipsis("…").MinWidth(0)
 						if props.FormatBadge != "" {
