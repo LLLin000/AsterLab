@@ -137,3 +137,56 @@ func TestSpatialEmergenceMotionGrammarAndReduceMotion(t *testing.T) {
 		}
 	}
 }
+
+func TestTopinspoCraftAndParallaxHelpers(t *testing.T) {
+	SetAccessibilityPrefs(1.0, false)
+	defer SetAccessibilityPrefs(1.0, false)
+
+	childOpen := false
+	renderWithTokens := func(tok Tokens) *ui.Tester {
+		return ui.NewTester(func(c *ui.Context) {
+			if tok.Dark {
+				c.SetTheme(DarkPalette())
+			} else {
+				c.SetTheme(LightPalette())
+			}
+			canvas := ui.Column(c).Key("canvas")
+			ApplyParentParallaxRecede(canvas, childOpen)
+			canvas.Children(func() {
+				ApplyTopLitBorder(ui.Box(c).Key("toplit"), tok, 1)
+				ApplyTopLitBorder(ui.Box(c).Key("toplit-zero"), tok, 0)
+				ApplyRecessedWell(ui.Box(c).Key("well"), tok)
+				ApplyEdgeFadeX(ui.Box(c).Key("fadex-both"), tok, true, true)
+				ApplyEdgeFadeX(ui.Box(c).Key("fadex-left"), tok, true, false)
+				ApplyEdgeFadeX(ui.Box(c).Key("fadex-right"), tok, false, true)
+				ApplyEdgeFadeX(ui.Box(c).Key("fadex-none"), tok, false, false)
+				ApplyEdgeFadeY(ui.Box(c).Key("fadey-both"), tok, true, true)
+				ApplyEdgeFadeY(ui.Box(c).Key("fadey-top"), tok, true, false)
+				ApplyEdgeFadeY(ui.Box(c).Key("fadey-bottom"), tok, false, true)
+				ApplyEdgeFadeY(ui.Box(c).Key("fadey-none"), tok, false, false)
+			})
+		}, 480, 360)
+	}
+
+	// Dark mode + state transitions (closed -> open -> closed)
+	ttDark := renderWithTokens(DarkTokens())
+	ttDark.Frame()
+	childOpen = true
+	ttDark.Frame()
+	childOpen = false
+	ttDark.Frame()
+
+	// Light mode
+	ttLight := renderWithTokens(LightTokens())
+	childOpen = true
+	ttLight.Frame()
+
+	// Verify ReduceMotion=true skips spatial parallax recede cleanly without panics.
+	SetAccessibilityPrefs(1.0, true)
+	if !ReducedMotionEnabled() {
+		t.Fatal("expected ReducedMotionEnabled() to be true")
+	}
+	ttReduced := renderWithTokens(DarkTokens())
+	childOpen = true
+	ttReduced.Frame()
+}

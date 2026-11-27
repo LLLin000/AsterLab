@@ -518,3 +518,102 @@ func ApplyNudge(elem ui.Element, seq int) ui.Element {
 	}
 	return elem
 }
+
+// ApplyTopLitBorder applies a studio top-lit border gradient on dark surfaces
+// (bright SpecularRimTop fading through Border to a subtle SpecularRimBottom)
+// and a crisp Border in light mode.
+func ApplyTopLitBorder(el ui.Element, tok Tokens, width float32) ui.Element {
+	if width <= 0 {
+		return el
+	}
+	if !tok.Dark {
+		return el.Border(width, tok.Border)
+	}
+	return el.Border(width, tok.Border).BorderLinearGradient(ui.LinearGradient{
+		Angle: 180,
+		Stops: []ui.GradientStop{
+			{Color: tok.SpecularRimTop, At: 0},
+			{Color: tok.Border, At: 0.35},
+			{Color: tok.SpecularRimBottom, At: 1},
+		},
+	})
+}
+
+func applyEdgeFade(el ui.Element, tok Tokens, angle, feather float32, startFade, endFade bool) ui.Element {
+	if !startFade && !endFade {
+		return el
+	}
+	solid := tok.MaskSolid
+	if solid.A == 0 {
+		solid = ui.RGB(0, 0, 0)
+	}
+	stops := make([]ui.GradientStop, 0, 4)
+	if startFade {
+		stops = append(stops,
+			ui.GradientStop{Color: ui.Transparent, At: 0},
+			ui.GradientStop{Color: solid, At: feather},
+		)
+	} else {
+		stops = append(stops, ui.GradientStop{Color: solid, At: 0})
+	}
+	if endFade {
+		stops = append(stops,
+			ui.GradientStop{Color: solid, At: 1 - feather},
+			ui.GradientStop{Color: ui.Transparent, At: 1},
+		)
+	} else {
+		stops = append(stops, ui.GradientStop{Color: solid, At: 1})
+	}
+	return el.MaskLinearGradient(ui.LinearGradient{
+		Angle: angle,
+		Stops: stops,
+	})
+}
+
+// ApplyEdgeFadeX applies horizontal alpha mask feathering (8% on enabled edges)
+// for scrollable strips, tab bars, and horizontal ribbons without literal color hexes.
+func ApplyEdgeFadeX(el ui.Element, tok Tokens, leftFade, rightFade bool) ui.Element {
+	return applyEdgeFade(el, tok, 90, 0.08, leftFade, rightFade)
+}
+
+// ApplyEdgeFadeY applies vertical alpha mask feathering (6% on enabled edges)
+// for scrollable lists and drawers without literal color hexes.
+func ApplyEdgeFadeY(el ui.Element, tok Tokens, topFade, bottomFade bool) ui.Element {
+	return applyEdgeFade(el, tok, 180, 0.06, topFade, bottomFade)
+}
+
+// ApplyRecessedWell imparts tactile recessed inner depth to segmented tracks,
+// keycaps, empty wells, and inputs using tok.InsetShadow (plus a subtle bottom
+// catch-light in dark mode).
+func ApplyRecessedWell(el ui.Element, tok Tokens) ui.Element {
+	el.InsetShadow(0, 1, 2, 0, tok.InsetShadow)
+	if tok.Dark {
+		el.InsetShadow(0, -1, 0, 0, tok.SpecularRimBottom)
+	}
+	return el
+}
+
+// ApplyParentParallaxRecede implements directional motion for push-style child
+// views: when childOpen is true (and ReduceMotion is off), the parent canvas
+// smoothly shifts left by 48px using MotionPagePush and dims to 0.86 opacity
+// via MotionEffect, springing back cleanly to (0, 1.0) on close.
+func ApplyParentParallaxRecede(el ui.Element, childOpen bool) ui.Element {
+	if ReducedMotionEnabled() {
+		return el
+	}
+	targetX := float32(0)
+	targetOpacity := float32(1.0)
+	if childOpen {
+		targetX = -48
+		targetOpacity = 0.86
+	}
+	dx := el.AnimateTo("parent-parallax-x", targetX, MotionPagePush)
+	if dx != 0 {
+		el.Translate(dx, 0)
+	}
+	op := el.AnimateTo("parent-parallax-opacity", targetOpacity, MotionEffect)
+	if op > 0 && op < 1.0 {
+		el.Opacity(op)
+	}
+	return el
+}

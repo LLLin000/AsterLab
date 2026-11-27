@@ -178,3 +178,34 @@ func TestDarkroomAndSpecularTokens(t *testing.T) {
 		t.Fatalf("light SpecularRim mismatch: %+v", light.SpecularRim)
 	}
 }
+
+func TestTopinspoOpticalCraftTokensAcrossPresets(t *testing.T) {
+	for _, preset := range []string{PresetPaper, PresetZinc, PresetWarm} {
+		lt := TokensFor(preset, false, true)
+		dk := TokensFor(preset, true, true)
+
+		if dk.SpecularRimTop.A <= dk.SpecularRimBottom.A {
+			t.Fatalf("preset=%s dark: expected SpecularRimTop.A (%d) > SpecularRimBottom.A (%d)",
+				preset, dk.SpecularRimTop.A, dk.SpecularRimBottom.A)
+		}
+		if dk.SpecularRimTop.A <= dk.SpecularRim.A {
+			t.Fatalf("preset=%s dark: expected SpecularRimTop.A (%d) > SpecularRim.A (%d)",
+				preset, dk.SpecularRimTop.A, dk.SpecularRim.A)
+		}
+		if dk.SpecularRimBottom.A == 0 {
+			t.Fatalf("preset=%s dark: expected SpecularRimBottom.A > 0", preset)
+		}
+		if lt.InsetShadow.A == 0 || dk.InsetShadow.A == 0 {
+			t.Fatalf("preset=%s: expected InsetShadow.A > 0 in light (%d) and dark (%d)",
+				preset, lt.InsetShadow.A, dk.InsetShadow.A)
+		}
+		if dk.InsetShadow.A <= lt.InsetShadow.A {
+			t.Fatalf("preset=%s: expected dark InsetShadow.A (%d) > light InsetShadow.A (%d)",
+				preset, dk.InsetShadow.A, lt.InsetShadow.A)
+		}
+		if lt.MaskSolid.A != 255 || dk.MaskSolid.A != 255 {
+			t.Fatalf("preset=%s: expected MaskSolid.A == 255 in light (%d) and dark (%d)",
+				preset, lt.MaskSolid.A, dk.MaskSolid.A)
+		}
+	}
+}

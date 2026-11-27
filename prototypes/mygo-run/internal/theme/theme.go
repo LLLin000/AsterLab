@@ -194,6 +194,7 @@ type Tokens struct {
 	Dark                                                                                         bool
 	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
 	Border, BorderStrong, BorderSubtle, TopHighlight, SpecularRim, HairlineDivider, ShadowAmbient ui.Color
+	SpecularRimTop, SpecularRimBottom, InsetShadow, MaskSolid                                   ui.Color
 	Scrim, ShadowColor                                                                           ui.Color
 	DarkroomCanvas, DarkroomSurface, DarkroomElevated, DarkroomBorder                            ui.Color
 	DarkroomText, DarkroomMuted, DarkroomBadgeBg                                                 ui.Color
@@ -407,6 +408,9 @@ func aliases(t Tokens) Tokens {
 		t.BorderSubtle = ui.RGBA(255, 255, 255, 0.08)
 		t.TopHighlight = ui.RGBA(255, 255, 255, 0.07)
 		t.SpecularRim = ui.RGBA(255, 255, 255, 0.08)
+		t.SpecularRimTop = ui.RGBA(255, 253, 248, 0.15)
+		t.SpecularRimBottom = ui.RGBA(255, 255, 255, 0.03)
+		t.InsetShadow = ui.RGBA(0, 0, 0, 0.48)
 		t.HairlineDivider = ui.RGBA(255, 255, 255, 0.08)
 		t.ShadowAmbient = ui.RGBA(0, 0, 0, 0.36)
 		t.Scrim = ui.RGBA(0, 0, 0, 0.56)
@@ -427,6 +431,9 @@ func aliases(t Tokens) Tokens {
 		t.BorderSubtle = t.Border.Alpha(0.65)
 		t.TopHighlight = ui.Transparent
 		t.SpecularRim = ui.RGBA(255, 255, 255, 0.65)
+		t.SpecularRimTop = ui.RGBA(255, 255, 255, 0.85)
+		t.SpecularRimBottom = t.Border.Alpha(0.75)
+		t.InsetShadow = ui.RGBA(15, 23, 42, 0.09)
 		t.HairlineDivider = t.Border.Alpha(0.55)
 		t.ShadowAmbient = ui.RGBA(15, 23, 42, 0.08)
 		t.Scrim = ui.RGBA(0, 0, 0, 0.28)
@@ -444,6 +451,7 @@ func aliases(t Tokens) Tokens {
 		t.DropTargetBg = t.Accent.Alpha(0.10)
 		t.DropTargetBorder = t.Accent.Alpha(0.65)
 	}
+	t.MaskSolid = ui.RGB(0, 0, 0)
 	t.BorderFocused = t.Accent
 	t.BorderSelected = t.Accent
 	t.BorderDisabled = t.BorderSubtle

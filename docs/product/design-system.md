@@ -10,7 +10,7 @@
 
 | 类别 | 唯一来源 | 禁止写法 | 正确写法 |
 |---|---|---|---|
-| 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger`、`SpecularRim/HairlineDivider`、`Darkroom*` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DarkroomCanvas`、`tokens.DangerText`；调色板色复用具名函数 |
+| 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger`、`SpecularRim/SpecularRimTop/SpecularRimBottom/InsetShadow/MaskSolid/HairlineDivider`、`Darkroom*` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DarkroomCanvas`、`tokens.MaskSolid`、`tokens.DangerText`；调色板色复用具名函数 |
 | 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
 | 间距 | `Spacing4/8/12/16/24/32/48`（紧凑/默认/舒展三档与缩放后一律按 `scaleGridToken` 对齐 4px 栅格），或 `t.Space(n)` | `Padding(2)`、`Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
 | 图标 | `IconSm=16 / IconMd=18 / IconLg=20` 与 `IconBoxSize=24`（偶数光学尺度 + 24×24 透明光学外框）；行内/列表/卡片图标优先走 `kit.IconBox` | 写死 `Size(18, 18)` 或宽窄图标裸排错位 | `kit.IconBox(c, tok, icon, tok.Text)`、`.Size(float32(tok.IconMd), float32(tok.IconMd))` |
@@ -27,7 +27,8 @@
 | 主文字 / 辅文字 | `Text` / `TextMuted` | `#18181b` / `#6b6b73` | `#f4f4f5` / `#9a9ca6` | 90% 中性纸面阅读层级 |
 | 单色 Accent | `Accent` / `AccentHover` / `AccentText` | `#18181b` / `#27272a` / `#ffffff` | `#f4f4f5` / `#e4e4e7` / `#111214` | 唯一 Primary CTA 与焦点态 |
 | 仪器信号色 | `Success` / `Warning`（Amber）/ `Danger` | `#16794b` / `#c87010` / `#c23643` | `#65c996` / `#f0a52b` / `#f08e96` | 仅用于语义状态，不作普通高亮 |
-| 精密边线与高光 | `SpecularRim` / `HairlineDivider` | `rgba(255,255,255,0.65)` / `Border.Alpha(0.55)` | `rgba(255,255,255,0.08)` / `rgba(255,255,255,0.08)` | 1px 阳极氧化石墨高光边与发丝分割线（`kit` 悬浮层在暗色下呈精密仪器质感而非闷黑方块） |
+| 精密边线与高光 | `SpecularRim` / `SpecularRimTop` / `SpecularRimBottom` / `HairlineDivider` | `rgba(255,255,255,0.65)` / `rgba(255,255,255,0.85)` / `Border.Alpha(0.75)` / `Border.Alpha(0.55)` | `rgba(255,255,255,0.08)` / `rgba(255,253,248,0.15)` / `rgba(255,255,255,0.03)` / `rgba(255,255,255,0.08)` | 1px 阳极氧化石墨顶光渐变边线（`ApplyTopLitBorder`）与发丝分割线 |
+| 凹槽内阴影与遮罩 | `InsetShadow` / `MaskSolid` | `rgba(15,23,42,0.09)` / `rgb(0,0,0)` | `rgba(0,0,0,0.48)` / `rgb(0,0,0)` | 分段槽/键帽/空槽凹陷内影（`ApplyRecessedWell`）与边缘羽化纯色遮罩（`ApplyEdgeFadeX`/`Y`） |
 | 暗房灯箱 / 印样画廊（固定暗室标定） | `DarkroomCanvas` / `DarkroomSurface` / `DarkroomElevated` | `#0b0c0e` / `#141518` / `#1d1f24` | `#0b0c0e` / `#141518` / `#1d1f24` | Lightbox 与 Contact-Sheet 图库专用深色暗室表面（不随浅色文档漂移） |
 | 暗房边线 / 文本 / 浮标 | `DarkroomBorder` / `DarkroomText` / `DarkroomMuted` / `DarkroomBadgeBg` | `rgba(255,255,255,0.10)` / `#f4f4f5` / `#9a9ca6` / `rgba(11,12,14,0.72)` | 同左 | 暗室图片边框、DNG/孔位半透徽标与元数据条 |
 
@@ -219,7 +220,13 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | `theme.MotionModal` / `ModalDialogTransition()` | 柔和弹簧 (`190ms, Bounce: 0.02`，退场 `120ms`)，`Scale: 0.96`, `Y: 6` | 模态对话框与设置中心面板居中浮现 |
 | `theme.MotionLightbox` / `DarkroomLightboxTransition()` | 暗房平静弹簧 (`220ms, Bounce: 0`，退场 `150ms`)，`Scale: 0.93` | 无锚定缩略图场景下的暗室灯箱照片柔和放大入场 |
 | `theme.MotionSheetBackdrop` / `SheetBackdropScale(0.94)` / `ApplySheetBackdropDepth()` | 同步弹簧 (`340ms, Bounce: 0`)，背景缩放 `0.94` | 移动端底部 `Sheet` 升起时底层工作区画布景深后退 |
+| `theme.ApplyParentParallaxRecede` | `MotionPagePush` (`330ms`) + `MotionEffect` (`180ms`)，`X: -48`, `Opacity: 0.86` | 子级推进页打开时，底层父画布左移 `48px` 并微暗至 `0.86` 构成方向性视差；`ReduceMotion` 下自动跳过 |
 | `theme.ApplyNudge` | 欠阻尼速度脉冲 (`k=580, c=16, v0=240`) | 空输入或非法倍比提交时的 `±5px` 海绵轻晃提醒（替代刺眼弹窗报错） |
+
+**Topinspo 光学材质与边缘羽化辅助函数（`internal/theme/motion.go`，零字面值）**：
+- `theme.ApplyTopLitBorder(el, tok, width)`：暗色模式以 `BorderLinearGradient`（`180°`，`SpecularRimTop @ 0` → `Border @ 0.35` → `SpecularRimBottom @ 1`）塑造工作室顶光边线，浅色模式保持利落 `Border(width, tok.Border)`。
+- `theme.ApplyEdgeFadeX(el, tok, leftFade, rightFade)` / `theme.ApplyEdgeFadeY(el, tok, topFade, bottomFade)`：使用 `tok.MaskSolid` 与 `ui.Transparent` 在横/纵滚动容器启用侧施加 `0.08` / `0.06` `MaskLinearGradient` 透明羽化，调用方禁止写任何颜色字面值。
+- `theme.ApplyRecessedWell(el, tok)`：以 `InsetShadow(0, 1, 2, 0, tok.InsetShadow)`（暗色叠加 `SpecularRimBottom` 底部微反光）赋予分段器底轨、键帽、空槽与输入框物理凹槽纵深。
 
 **动效红线**：
 1. 禁止从 `Scale: 0` 缩放弹出（通用浮层最小起始缩放 `0.95 ~ 0.98`，暗室灯箱 `0.93`）；退场时长必须短于进场时长（`75ms ~ 150ms`）；初始常驻标签禁止挂 `Enter: {Collapse: true}` 以免首帧被零宽裁切。
