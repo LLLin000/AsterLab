@@ -108,21 +108,65 @@ type sciCameraSession struct {
 }
 
 type labGalleryState struct {
-	open          bool
-	fromCamera    bool
-	filterRole    string // "" | "dng" | sample | flat_field | wb_reference | scale_bar_ref
-	items         []scicamera.GalleryItem
-	selectedID    string
-	lightboxOpen  bool
-	lightboxState kit.DarkroomLightboxState
-	dirty         bool
-	tabPath       string
-	applyDoc      func(string)
+	open             bool
+	fromCamera       bool
+	filterRole       string // "" | "dng" | sample | flat_field | wb_reference | scale_bar_ref
+	items            []scicamera.GalleryItem
+	selectedID       string
+	lightboxOpen     bool
+	lightboxState    kit.DarkroomLightboxState
+	dirty            bool
+	tabPath          string
+	applyDoc         func(string)
+	exportAllMorph   kit.MorphActionState
+	batchExportMorph map[string]*kit.MorphActionState
+	toasts           *kit.ToastQueue
 
 	imgMu    sync.Mutex
 	imgCache map[string]ui.ImageSource
 	imgErr   map[string]bool
 	imgOrder []string
+}
+
+func (g *labGalleryState) ensureToasts() *kit.ToastQueue {
+	if g.toasts == nil {
+		g.toasts = kit.NewToastQueue()
+	}
+	return g.toasts
+}
+
+func (g *labGalleryState) batchMorphState(key string) *kit.MorphActionState {
+	if g.batchExportMorph == nil {
+		g.batchExportMorph = map[string]*kit.MorphActionState{}
+	}
+	st, ok := g.batchExportMorph[key]
+	if !ok {
+		st = &kit.MorphActionState{}
+		g.batchExportMorph[key] = st
+	}
+	return st
+}
+
+func (g *labGalleryState) resetExpiredMorphs(now time.Time) bool {
+	const morphHold = 5 * time.Second
+	active := false
+	check := func(st *kit.MorphActionState) {
+		if st == nil {
+			return
+		}
+		if st.Phase == kit.MorphDone && !st.PhaseSince.IsZero() && now.Sub(st.PhaseSince) >= morphHold {
+			st.Phase = kit.MorphIdle
+			st.PhaseSince = time.Time{}
+		}
+		if st.Phase != kit.MorphIdle {
+			active = true
+		}
+	}
+	check(&g.exportAllMorph)
+	for _, st := range g.batchExportMorph {
+		check(st)
+	}
+	return active
 }
 
 func (a *app) ensureSciCamera() *sciCameraSession {
@@ -298,6 +342,8 @@ func (a *app) openLabGallery(curTab *shell.WorkspaceTab, applyDoc func(string)) 
 	g.lightboxOpen = false
 	g.lightboxState = kit.DarkroomLightboxState{Zoom: 1.0}
 	g.dirty = true
+	g.exportAllMorph = kit.MorphActionState{}
+	g.batchExportMorph = map[string]*kit.MorphActionState{}
 	if curTab != nil && curTab.Kind == shell.TabFile {
 		g.tabPath = curTab.FilePath
 	} else if a.sciCam != nil && a.sciCam.tabPath != "" {
@@ -696,7 +742,7 @@ func (a *app) handleSciCaptureSuccess(c *ui.Context, res scicamera.CaptureResult
 	}
 }
 
-func (a *app) shareLabFiles(c *ui.Context, files []string, label string) {
+func (a *app) shareLabFilesWithResult(c *ui.Context, files []string, label string, emitPageToast bool) (bool, string, kit.ToastTone) {
 	var clean []string
 	for _, f := range files {
 		if f == "" {
@@ -706,38 +752,82 @@ func (a *app) shareLabFiles(c *ui.Context, files []string, label string) {
 			clean = append(clean, f)
 		}
 	}
+	notifyPage := func(msg, tone string) {
+		if emitPageToast {
+			addPageToast(c, msg, tone)
+		}
+	}
 	if len(clean) == 0 {
-		addPageToast(c, "暂无可导出的原片文件", components.ToastWarning)
-		return
+		msg := "暂无可导出的原片文件"
+		notifyPage(msg, components.ToastWarning)
+		return false, msg, kit.ToastWarning
 	}
 	if runtime.GOOS == "ios" || runtime.GOOS == "android" {
 		if err := mygo.Share(mygo.ShareOptions{
 			Text:  label,
 			Files: clean,
 		}); err != nil {
-			addPageToast(c, "分享原片失败："+err.Error(), components.ToastWarning)
+			msg := "分享原片失败：" + err.Error()
+			notifyPage(msg, components.ToastWarning)
+			return false, msg, kit.ToastWarning
 		}
-		return
+		return true, fmt.Sprintf("已调起分享 %d 个原片文件", len(clean)), kit.ToastSuccess
 	}
 	if len(clean) == 1 {
 		data, err := os.ReadFile(clean[0])
 		if err != nil {
-			addPageToast(c, "读取原片失败："+err.Error(), components.ToastWarning)
-			return
+			msg := "读取原片失败：" + err.Error()
+			notifyPage(msg, components.ToastWarning)
+			return false, msg, kit.ToastWarning
 		}
 		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(clean[0])), ".")
-		_, _ = a.saveExportBytes(c, filepath.Base(clean[0]), "导出科研原片", mygo.FileFilter{Name: "科研原片", Extensions: []string{ext}}, data)
-		return
+		savedPath, saveErr := a.saveExportBytes(c, filepath.Base(clean[0]), "导出科研原片", mygo.FileFilter{Name: "科研原片", Extensions: []string{ext}}, data)
+		if saveErr != nil {
+			msg := "导出原片失败：" + saveErr.Error()
+			notifyPage(msg, components.ToastWarning)
+			return false, msg, kit.ToastWarning
+		}
+		if strings.TrimSpace(savedPath) == "" {
+			return false, "已取消导出", kit.ToastInfo
+		}
+		return true, "已导出：" + filepath.Base(savedPath), kit.ToastSuccess
 	}
 	if a.vault != nil {
 		dest := filepath.Join(filepath.Dir(clean[0]), "export_"+time.Now().Format("150405"))
 		rep, err := scicamera.ExportBatchBundle(a.vault.AssetsDir(), "", dest)
 		if err == nil {
-			addPageToast(c, fmt.Sprintf("已打包 %d 组科研原片至 %s", rep.ShotCount, dest), components.ToastSuccess)
-			return
+			msg := fmt.Sprintf("已打包 %d 组科研原片至 %s", rep.ShotCount, filepath.Base(dest))
+			notifyPage(fmt.Sprintf("已打包 %d 组科研原片至 %s", rep.ShotCount, dest), components.ToastSuccess)
+			return true, msg, kit.ToastSuccess
 		}
 	}
-	addPageToast(c, fmt.Sprintf("共就绪 %d 个原片与元数据文件", len(clean)), components.ToastSuccess)
+	msg := fmt.Sprintf("共就绪 %d 个原片与元数据文件", len(clean))
+	notifyPage(msg, components.ToastSuccess)
+	return true, msg, kit.ToastSuccess
+}
+
+func (a *app) shareLabFiles(c *ui.Context, files []string, label string) {
+	_, _, _ = a.shareLabFilesWithResult(c, files, label, true)
+}
+
+func (a *app) exportLabFilesWithFeedback(c *ui.Context, files []string, label string, morph *kit.MorphActionState) {
+	ok, msg, tone := a.shareLabFilesWithResult(c, files, label, false)
+	if morph != nil {
+		if ok {
+			morph.Phase = kit.MorphDone
+			morph.PhaseSince = time.Now()
+		} else {
+			morph.Phase = kit.MorphIdle
+			morph.PhaseSince = time.Time{}
+		}
+	}
+	if g := a.labGallery; g != nil && msg != "" {
+		g.ensureToasts().Push(kit.Toast{
+			Tone:     tone,
+			Message:  msg,
+			Duration: 5 * time.Second,
+		})
+	}
 }
 
 func (a *app) routeArchivedPhotoIntoDoc(c *ui.Context, relAsset, rawAbs, labID string) {
@@ -1803,6 +1893,27 @@ func labPhotoRoleBadge(it scicamera.GalleryItem) string {
 	return scicamera.RoleLabel(role)
 }
 
+func labFilterLabel(filterRole string) string {
+	switch filterRole {
+	case "":
+		return "全部"
+	case "dng":
+		return "DNG 原片"
+	default:
+		return scicamera.RoleLabel(filterRole)
+	}
+}
+
+func labItemDisplayFilename(it scicamera.GalleryItem) string {
+	if it.RawAbs != "" {
+		return filepath.Base(it.RawAbs)
+	}
+	if it.PreviewAbs != "" {
+		return filepath.Base(it.PreviewAbs)
+	}
+	return it.LabPhotoID
+}
+
 func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 	g := a.labGallery
 	if g == nil || !g.open {
@@ -1812,13 +1923,28 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 		a.refreshLabGallery()
 	}
 
+	now := time.Now()
+	morphActive := g.resetExpiredMorphs(now)
+	if g.toasts != nil {
+		g.toasts.Prune(now)
+	}
+	if morphActive || (g.toasts != nil && g.toasts.Len() > 0) {
+		c.After(150 * time.Millisecond)
+	}
+
 	// Lock darkroom tokens & dark theme so Camera -> Lab Gallery never flashes white in Light mode.
 	tok := theme.DarkTokens()
 	safeTop, safeRight, safeBottom, safeLeft := c.SafeArea()
 	vw, _ := c.Size()
 	cols := 4
+	maxHeaderRunes := 44
+	maxFileRunes := 36
+	maxCaptionFileRunes := 44
 	if vw > 0 && vw < 680 {
 		cols = 3
+		maxHeaderRunes = 28
+		maxFileRunes = 18
+		maxCaptionFileRunes = 28
 	}
 
 	rawCount := 0
@@ -1854,9 +1980,16 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 	}
 
 	// Build timeline-grouped museum contact-sheet batches.
-	var batches []kit.ContactSheetBatch
+	type labBatchSection struct {
+		ID       string
+		BatchID  string
+		Title    string
+		Subtitle string
+		Items    []kit.ContactSheetItem
+		RawFiles []string
+	}
+	var batches []labBatchSection
 	batchIndex := map[string]int{}
-	batchRawFiles := map[string][]string{}
 	for _, it := range filtered {
 		dateYMD := labPhotoDateYMD(it)
 		batchID := strings.TrimSpace(it.Meta.Experiment.BatchID)
@@ -1868,25 +2001,28 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 		if !exists {
 			idx = len(batches)
 			batchIndex[bKey] = idx
+			expID := strings.TrimSpace(it.Meta.Experiment.ExperimentID)
+			repFile := labItemDisplayFilename(it)
 			sub := ""
-			if expID := strings.TrimSpace(it.Meta.Experiment.ExperimentID); expID != "" {
-				sub = "实验 " + expID
+			switch {
+			case expID != "" && repFile != "":
+				sub = "实验 " + kit.MiddleTruncate(expID, 16) + " · " + kit.MiddleTruncate(repFile, maxFileRunes)
+			case expID != "":
+				sub = "实验 " + kit.MiddleTruncate(expID, maxHeaderRunes)
+			case repFile != "":
+				sub = kit.MiddleTruncate(repFile, maxFileRunes)
 			}
-			captureBatchID := batchID
-			batches = append(batches, kit.ContactSheetBatch{
-				ID:          bKey,
-				Title:       dateYMD + " · " + batchID,
-				Subtitle:    sub,
-				ActionLabel: "导出本批",
-				OnAction: func() {
-					a.shareLabFiles(c, batchRawFiles[bKey], captureBatchID)
-				},
+			batches = append(batches, labBatchSection{
+				ID:       bKey,
+				BatchID:  batchID,
+				Title:    kit.MiddleTruncate(dateYMD+" · "+batchID, maxHeaderRunes),
+				Subtitle: sub,
 			})
 		}
 		if it.RawAbs != "" {
-			batchRawFiles[bKey] = append(batchRawFiles[bKey], it.RawAbs)
+			batches[idx].RawFiles = append(batches[idx].RawFiles, it.RawAbs)
 		} else if it.PreviewAbs != "" {
-			batchRawFiles[bKey] = append(batchRawFiles[bKey], it.PreviewAbs)
+			batches[idx].RawFiles = append(batches[idx].RawFiles, it.PreviewAbs)
 		}
 		batches[idx].Items = append(batches[idx].Items, kit.ContactSheetItem{
 			ID:           it.LabPhotoID,
@@ -1944,7 +2080,8 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 					ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 						ui.Text(c, "科研图库").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.DarkroomText).SingleLine().Ellipsis("…")
 						ui.Text(c, fmt.Sprintf("%d 组原片 · DNG %d", len(g.items), rawCount)).
-							FontSize(float32(tok.TextMeta)).TextColor(tok.DarkroomMuted).FontFeatures("tnum").SingleLine().Ellipsis("…")
+							FontSize(float32(tok.TextMeta)).TextColor(tok.DarkroomMuted).FontFeatures("tnum").
+							ContentTransition(theme.NumericRoll(false)).SingleLine().Ellipsis("…")
 					})
 					if !g.fromCamera {
 						pickBtn := ui.ButtonBase(c.Key("gal-import-album")).
@@ -1960,28 +2097,23 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 						})
 					}
 					if len(g.items) > 0 {
-						expBtn := ui.ButtonBase(c.Key("gal-export-all")).
-							Height(float32(tok.ButtonHeight)).
-							Padding(0, float32(tok.Spacing8)).
-							Radius(float32(tok.ControlRadius)).
-							Background(tok.DarkroomElevated).
-							Border(1, tok.DarkroomBorder).
-							Center().Label("全部导出").
-							OnClick(func() {
-								var allRaw []string
-								for _, it := range g.items {
-									if it.RawAbs != "" {
-										allRaw = append(allRaw, it.RawAbs)
-									} else if it.PreviewAbs != "" {
-										allRaw = append(allRaw, it.PreviewAbs)
-									}
+						if kit.MorphActionButton(c, tok, &g.exportAllMorph, kit.MorphActionOptions{
+							Key:       "gal-export-all",
+							IdleLabel: "全部导出",
+							BusyLabel: "导出中…",
+							DoneLabel: "已导出",
+							IdleIcon:  lucide.Download(),
+						}) {
+							var allRaw []string
+							for _, it := range g.items {
+								if it.RawAbs != "" {
+									allRaw = append(allRaw, it.RawAbs)
+								} else if it.PreviewAbs != "" {
+									allRaw = append(allRaw, it.PreviewAbs)
 								}
-								a.shareLabFiles(c, allRaw, "AsterLab 科研原片批导出")
-							})
-						theme.ApplyTactilePress(expBtn)
-						expBtn.Children(func() {
-							ui.Text(c, "全部导出").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.DarkroomText).SingleLine()
-						})
+							}
+							a.exportLabFilesWithFeedback(c, allRaw, "AsterLab 科研原片批导出", &g.exportAllMorph)
+						}
 					}
 					closeLabel := "关闭"
 					if g.fromCamera {
@@ -2004,15 +2136,15 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 				})
 				ui.Box(c).FillWidth().Height(1).Background(tok.DarkroomBorder)
 
-				// Lightweight Darkroom Top Filter Pills (全部 / DNG 原片 / present roles)
+				// Lightweight Darkroom Top Filter Pills (全部 / DNG 原片 / 样本 / 灰卡 + present roles)
 				type galFilterPill struct{ id, lbl string }
 				filters := []galFilterPill{
 					{"", "全部"},
 					{"dng", "DNG 原片"},
-				}
-				for _, rf := range []galFilterPill{
 					{scicamera.RoleSample, "样本"},
 					{scicamera.RoleWBRef, "灰卡"},
+				}
+				for _, rf := range []galFilterPill{
 					{scicamera.RoleFlat, "平场"},
 					{scicamera.RoleScaleRef, "标尺"},
 				} {
@@ -2020,8 +2152,11 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 						filters = append(filters, rf)
 					}
 				}
-				ui.ScrollHorizontal(c.Key("gal-filter-scroll")).Scrollbars(false).FillWidth().
-					Background(tok.DarkroomCanvas).Children(func() {
+				filterStrip := ui.ScrollHorizontal(c.Key("gal-filter-scroll")).Scrollbars(false).FillWidth().
+					ScrollSnap(ui.SnapProximity).
+					Background(tok.DarkroomCanvas)
+				theme.ApplyEdgeFadeX(filterStrip, tok, false, true)
+				filterStrip.Children(func() {
 					ui.Row(c).Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), float32(tok.Spacing8), safeLeft+float32(tok.Spacing16)).
 						Gap(float32(tok.Spacing8)).Children(func() {
 						for _, f := range filters {
@@ -2034,7 +2169,8 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 							}
 							b := ui.ButtonBase(c.Key("gal-flt-"+f.id)).Height(float32(tok.ButtonHeight)).
 								Padding(0, float32(tok.Spacing12)).Radius(float32(tok.PillRadius)).
-								Background(bg).Border(1, borderCol).Center().Label("筛选 " + f.lbl).
+								Background(bg).Border(1, borderCol).Center().
+								SnapAlign(ui.Start).Label("筛选 " + f.lbl).
 								OnClick(func() {
 									g.filterRole = f.id
 									mygo.Haptics.Selection()
@@ -2052,26 +2188,131 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 					ui.Column(c).FillWidth().
 						Padding(float32(tok.Spacing8), safeRight+float32(tok.Spacing16), safeBottom+float32(tok.Spacing24), safeLeft+float32(tok.Spacing16)).
 						Background(tok.DarkroomCanvas).Children(func() {
+						if len(batches) == 0 {
+							emptyProps := kit.EmptyStateProps{
+								Icon:  lucide.Images(),
+								Title: "暂无带编号的科研原片",
+								Hint:  "拍摄后自动保存 Bayer DNG 与光学元数据。",
+							}
+							if g.filterRole != "" {
+								emptyProps = kit.EmptyStateProps{
+									Icon:        lucide.SlidersHorizontal(),
+									Title:       fmt.Sprintf("暂无「%s」原片", labFilterLabel(g.filterRole)),
+									Hint:        "当前筛选条件下无匹配原片，可切换回全部批次。",
+									ActionLabel: "返回全部",
+									OnAction: func() {
+										g.filterRole = ""
+										mygo.Haptics.Selection()
+									},
+								}
+							} else if g.fromCamera {
+								emptyProps.ActionLabel = "返回拍摄"
+								emptyProps.OnAction = func() {
+									mygo.Haptics.Selection()
+									closeGallery(false)
+								}
+							}
+							kit.EmptyStateCard(c, tok, emptyProps)
+							return
+						}
+
 						var activeHero any
 						if g.lightboxOpen && lightboxItem != nil {
 							activeHero = lightboxItem.LabPhotoID
 						}
-						kit.ContactSheetGrid(c, tok, batches, kit.ContactSheetOptions{
-							Darkroom:      true,
-							Columns:       cols,
-							ActiveHeroKey: activeHero,
-							EmptyTitle:    "暂无带编号的科研原片",
-							EmptySub:      "拍摄后会自动以规范编号保存 Bayer DNG 与 5 层光学元数据。",
-							OnItemClick: func(item kit.ContactSheetItem) {
-								g.selectedID = item.ID
-								g.lightboxState = kit.DarkroomLightboxState{Zoom: 1.0}
-								g.lightboxOpen = true
-								mygo.Haptics.Selection()
-							},
+						tileGap := float32(tok.Spacing4) * 0.5
+						ui.Column(c.Key("gal-batches-col")).FillWidth().Gap(float32(tok.Spacing16)).Children(func() {
+							for _, batch := range batches {
+								batch := batch
+								ui.Column(c.Key("cs-batch-" + batch.ID)).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
+									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+										ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4) * 0.5).Children(func() {
+											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+												ui.Text(c, batch.Title).FontSize(float32(tok.TextData)).Bold().
+													FontFeatures("tnum").TextColor(tok.DarkroomText).SingleLine().Ellipsis("…").MinWidth(0)
+												ui.Text(c, fmt.Sprintf("%d 张", len(batch.Items))).
+													FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.DarkroomMuted).
+													ContentTransition(theme.NumericRoll(false)).SingleLine().Shrink(0)
+											})
+											if batch.Subtitle != "" {
+												ui.Text(c, batch.Subtitle).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").
+													TextColor(tok.DarkroomMuted).SingleLine().Ellipsis("…")
+											}
+										})
+										batchMorph := g.batchMorphState(batch.ID)
+										if kit.MorphActionButton(c, tok, batchMorph, kit.MorphActionOptions{
+											Key:       "cs-act-" + batch.ID,
+											IdleLabel: "导出本批",
+											BusyLabel: "打包中…",
+											DoneLabel: "已导出",
+											IdleIcon:  lucide.Download(),
+										}) {
+											a.exportLabFilesWithFeedback(c, batch.RawFiles, batch.BatchID, batchMorph)
+										}
+									})
+									ui.Box(c).FillWidth().Height(1).Background(tok.DarkroomBorder)
+
+									ui.Grid(c.Key("cs-grid-" + batch.ID)).FillWidth().Columns(cols).Gap(tileGap).Children(func() {
+										for _, item := range batch.Items {
+											item := item
+											tile := ui.ButtonBase(c.Key("cs-tile-" + item.ID)).
+												FillWidth().AspectRatio(1).Clip().
+												Background(tok.DarkroomElevated).
+												Label(item.Title)
+											if item.HeroMatchKey != nil && item.HeroMatchKey != activeHero {
+												tile.Transition(theme.HeroFlyTransition(item.HeroMatchKey))
+											} else if item.HeroMatchKey == nil {
+												tile.Transition(theme.ContactSheetCardTransition())
+											}
+											if tile.Pressed() {
+												tile.Opacity(0.86)
+											}
+											tile.Children(func() {
+												if item.Image != nil {
+													ui.Image(c, item.Image).Fill().Fit(ui.Cover)
+												} else {
+													ui.Box(c).Fill().Center().Children(func() {
+														ui.Icon(c, lucide.Image()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.DarkroomMuted)
+													})
+												}
+												if item.FormatBadge != "" || item.RoleBadge != "" {
+													badgeText := item.FormatBadge
+													if item.RoleBadge != "" && item.FormatBadge != "" {
+														badgeText = item.RoleBadge + " · " + item.FormatBadge
+													} else if item.RoleBadge != "" {
+														badgeText = item.RoleBadge
+													}
+													ui.Row(c).Absolute().Bottom(float32(tok.Spacing4)).Right(float32(tok.Spacing4)).
+														Padding(0, float32(tok.Spacing4)).
+														Radius(tok.InnerControlRadius(tok.Spacing4 / 2)).
+														Background(tok.DarkroomBadgeBg).
+														IgnoreInput(true).Children(func() {
+														ui.Text(c, badgeText).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").
+															TextColor(tok.DarkroomText).SingleLine()
+													})
+												}
+											})
+											if tile.Clicked() {
+												g.selectedID = item.ID
+												g.lightboxState = kit.DarkroomLightboxState{Zoom: 1.0}
+												g.lightboxOpen = true
+												mygo.Haptics.Selection()
+											}
+										}
+									})
+								})
+							}
 						})
 					})
 				})
 			})
+			if g.toasts != nil && g.toasts.Len() > 0 && !g.lightboxOpen {
+				ui.Box(c.Key("lab-gallery-toast-slot")).
+					Absolute().Top(0).Left(safeLeft).Right(safeRight).Bottom(safeBottom).
+					PassThrough().Children(func() {
+					g.toasts.Render(c, tok)
+				})
+			}
 		})
 	})
 
@@ -2079,9 +2320,10 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 	if g.lightboxOpen && lightboxItem != nil {
 		it := *lightboxItem
 		batchID := strings.TrimSpace(it.Meta.Experiment.BatchID)
-		caption := it.LabPhotoID + " · " + scicamera.RoleLabel(it.Meta.Experiment.FrameRole)
-		if batchID != "" && len(it.LabPhotoID) <= 16 {
-			caption += " · " + batchID
+		captionFile := labItemDisplayFilename(it)
+		caption := kit.MiddleTruncate(captionFile, maxCaptionFileRunes) + " · " + scicamera.RoleLabel(it.Meta.Experiment.FrameRole)
+		if batchID != "" && len([]rune(it.LabPhotoID)) <= 16 {
+			caption += " · " + kit.MiddleTruncate(batchID, 16)
 		}
 		metaSummary := fmt.Sprintf("ISO %.0f · %s · %.0fK · F%.2f · %.1f°/%.1f°",
 			it.Meta.Exposure.ISO,
@@ -2129,7 +2371,7 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 					if len(files) == 0 && it.PreviewAbs != "" {
 						files = append(files, it.PreviewAbs)
 					}
-					a.shareLabFiles(c, files, it.LabPhotoID)
+					a.exportLabFilesWithFeedback(c, files, it.LabPhotoID, nil)
 				},
 			},
 			kit.DarkroomLightboxAction{
@@ -2169,6 +2411,7 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 						FocusMode:      "lens_pos",
 						FocusLensPos:   it.Meta.Geometry.FocusLensPosition,
 					})
+					sess.setToast("已设为叠影参考并锁定 AE / AWB / AF")
 					mygo.Haptics.Success()
 				},
 			},
@@ -2222,6 +2465,7 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 								Padding(0, float32(tok.Spacing8)).Radius(float32(tok.PillRadius)).
 								Background(bg).Center().Label("标注 " + rp.lbl).
 								OnClick(func() {
+									prevRole := it.Meta.Experiment.FrameRole
 									it.Meta.Experiment.FrameRole = rp.id
 									metaDir := filepath.Dir(it.PreviewAbs)
 									if it.PreviewAbs == "" {
@@ -2231,6 +2475,23 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 									if err := scicamera.WriteSidecarJSON(metaPath, it.Meta); err == nil {
 										g.dirty = true
 										a.refreshLabGallery()
+										if prevRole != rp.id {
+											capturedItem := it
+											capturedMetaPath := metaPath
+											g.ensureToasts().Push(kit.Toast{
+												Tone:      kit.ToastInfo,
+												Message:   fmt.Sprintf("已标注为「%s」", rp.lbl),
+												UndoLabel: "撤销",
+												Duration:  5 * time.Second,
+												OnUndo: func() {
+													capturedItem.Meta.Experiment.FrameRole = prevRole
+													if uErr := scicamera.WriteSidecarJSON(capturedMetaPath, capturedItem.Meta); uErr == nil {
+														g.dirty = true
+														a.refreshLabGallery()
+													}
+												},
+											})
+										}
 									}
 									mygo.Haptics.Selection()
 								})
@@ -2242,6 +2503,20 @@ func (a *app) renderLabGalleryOverlay(c *ui.Context) {
 				})
 			})
 		}
+	}
+
+	if g.toasts != nil && g.toasts.Len() > 0 && g.lightboxOpen {
+		toastBottom := safeBottom + float32(tok.Spacing48)*3 + float32(tok.Spacing24)
+		ui.Overlay(c, func() {
+			ui.Themed(c, theme.DarkTheme()).Key("lab-gallery-toast-overlay").
+				Absolute().Fill().Background(ui.Transparent).PassThrough().Children(func() {
+				ui.Box(c.Key("lab-gallery-toast-lightbox-slot")).
+					Absolute().Top(0).Left(safeLeft).Right(safeRight).Bottom(toastBottom).
+					PassThrough().Children(func() {
+					g.toasts.Render(c, tok)
+				})
+			})
+		})
 	}
 }
 

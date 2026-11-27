@@ -17,6 +17,7 @@ import (
 	"asterlab-mygo-prototype/internal/scicamera"
 	"asterlab-mygo-prototype/internal/shell"
 	"asterlab-mygo-prototype/internal/theme"
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 func imageMeanLuma(img image.Image) float64 {
@@ -502,5 +503,204 @@ func TestScientificCameraLabGalleryContactSheetAndLightbox402x874(t *testing.T) 
 	}
 	if !strings.Contains(updatedLD.Source, "20261127_HUVECTUBE_SMP_001") {
 		t.Fatalf("expected inserted photo reference in doc, got:\n%s", updatedLD.Source)
+	}
+}
+
+func saveCameraRolloutShot(t *testing.T, tt *ui.Tester, filename string) {
+	t.Helper()
+	dir := strings.TrimSpace(os.Getenv("ASTERLAB_CAMERA_ROLLOUT_SHOT_DIR"))
+	if dir == "" {
+		return
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir rollout shot dir %s: %v", dir, err)
+	}
+	img := tt.Image()
+	if img == nil {
+		t.Fatalf("nil tester image for %s", filename)
+	}
+	outPath := filepath.Join(dir, filename)
+	f, err := os.Create(outPath)
+	if err != nil {
+		t.Fatalf("create rollout shot %s: %v", outPath, err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatalf("encode rollout shot %s: %v", outPath, err)
+	}
+}
+
+func TestScientificCameraLabGalleryCraftPrimitivesAndEmptyState402x874(t *testing.T) {
+	vaultRoot := filepath.Join(t.TempDir(), "LabGalleryCraftVault")
+	a, sh := newWiredFSMTestApp(t, vaultRoot)
+	sh.ForceMobilePreview = true
+
+	origOverlays := sh.RenderOverlays
+	sh.RenderOverlays = func(c *ui.Context) {
+		if origOverlays != nil {
+			origOverlays(c)
+		}
+		a.renderSciCameraOverlay(c)
+		a.renderLabGalleryOverlay(c)
+	}
+	sh.OnOpenLabGallery = func() {
+		a.openLabGallery(sh.ActiveTab(), nil)
+	}
+	sh.IsExternalModalOpen = func() bool {
+		return a.isExternalModalOrGalleryOpen()
+	}
+
+	expPath := "HUVEC-Craft.asterml"
+	if err := os.WriteFile(filepath.Join(vaultRoot, expPath), []byte("---\ntitle: HUVEC-Craft\n---\n\n# HUVEC-Craft\n\n## 步骤 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	curTab := shell.WorkspaceTab{Kind: shell.TabFile, FilePath: expPath, Title: "HUVEC-Craft"}
+	sh.OpenFileInPane("", curTab.FilePath, curTab.Title, shell.ModeEdit, false)
+
+	tmpDir := t.TempDir()
+	assetsDir := a.vault.AssetsDir()
+	imgCyan := filepath.Join(tmpDir, "cyan.png")
+	imgAmber := filepath.Join(tmpDir, "amber.png")
+	rawDummy := filepath.Join(tmpDir, "dummy.dng")
+	writeSpecimenPNG(t, imgCyan, 60, 210, 195)
+	writeSpecimenPNG(t, imgAmber, 225, 155, 45)
+	if err := os.WriteFile(rawDummy, []byte("II*\x00SIMULATED_BAYER_DNG"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	const longPhotoID = "20261127_HUVECTUBE_VEGF50ng_GroupB_Plate02_WellA01_6h_FOV02_RAW_16bit"
+	seed := func(id, previewPath string) {
+		t.Helper()
+		meta := scicamera.PhotoMetadata{
+			Schema:     scicamera.MetadataSchema,
+			LabPhotoID: id,
+			Raw:        scicamera.RawInfo{Format: "bayer_cfa_dng", BitDepth: 12},
+			Exposure:   scicamera.ExposureInfo{ISO: 400, ShutterS: 0.01, WBKelvinEst: 5400},
+			Geometry:   scicamera.GeometryInfo{FocusLensPosition: 0.45, IMUPitchDeg: -1.0, IMURollDeg: 0.5},
+			Experiment: scicamera.ExperimentInfo{
+				ExperimentID: "HUVECTUBE",
+				BatchID:      "B20261127-CRAFT-01",
+				FrameRole:    scicamera.RoleSample,
+				CapturedAt:   "2026-11-27T15:00:00+08:00",
+			},
+		}
+		if _, err := scicamera.SaveCapturedTrio(assetsDir, id, previewPath, rawDummy, meta); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	seed(longPhotoID, imgCyan)
+	seed("20261127_HUVECTUBE_SMP_002", imgAmber)
+
+	tt := ui.NewTester(func(c *ui.Context) {
+		c.SetTheme(theme.LightTheme())
+		sh.RenderSplitView(c)
+	}, 402, 874)
+	tt.SetInsets(59, 0, 34, 0)
+	settleIPhoneFrames(tt, 180)
+
+	a.openLabGallery(&curTab, nil)
+	settleIPhoneFrames(tt, 260)
+	if luma := imageMeanLuma(tt.Image()); luma >= 60 {
+		t.Fatalf("expected darkroom canvas in LightTheme (mean_luma < 60), got %.1f", luma)
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryCraftInitial402")
+
+	// Verify MiddleTruncate in contact sheet batch header and NumericRoll counts
+	wantBatchHeaderFile := kit.MiddleTruncate(longPhotoID+".dng", 18)
+	if !tt.HasText("2 组原片 · DNG 2") || !tt.HasText("2 张") {
+		t.Fatalf("expected header & batch counts, texts=%v", tt.Texts())
+	}
+	foundTruncHeader := false
+	for _, txt := range tt.Texts() {
+		if strings.Contains(txt, wantBatchHeaderFile) {
+			foundTruncHeader = true
+			break
+		}
+	}
+	if !foundTruncHeader {
+		t.Fatalf("expected MiddleTruncate(18) filename %q in contact sheet header, texts=%v", wantBatchHeaderFile, tt.Texts())
+	}
+	for _, filterLbl := range []string{"全部", "DNG 原片", "样本", "灰卡"} {
+		if !tt.HasText(filterLbl) {
+			t.Fatalf("expected filter pill %q in EdgeFade strip, texts=%v", filterLbl, tt.Texts())
+		}
+	}
+
+	// Verify MorphActionButton export state + ToastQueue countdown hairline
+	if err := tt.Click("导出本批"); err != nil {
+		t.Fatalf("click 导出本批: %v", err)
+	}
+	settleIPhoneFrames(tt, 240)
+	g := a.ensureLabGallery()
+	if g.toasts == nil || g.toasts.Len() == 0 {
+		t.Fatalf("expected ToastQueue feedback after batch export")
+	}
+	if !tt.HasText("已导出") {
+		t.Fatalf("expected MorphActionButton Done state (已导出), texts=%v", tt.Texts())
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryCraftMorphAndToast402")
+	saveCameraRolloutShot(t, tt, "rollout_lab_gallery_craft_402x874.png")
+
+	// Dismiss export toast before capturing clean empty-state screenshot
+	_ = tt.Click("关闭提示")
+	settleIPhoneFrames(tt, 140)
+
+	// Verify empty filter -> calm darkroom EmptyStateCard + 返回全部 action
+	if err := tt.Click("筛选 灰卡"); err != nil {
+		t.Fatalf("click 筛选 灰卡: %v", err)
+	}
+	settleIPhoneFrames(tt, 160)
+	if luma := imageMeanLuma(tt.Image()); luma >= 60 {
+		t.Fatalf("expected darkroom EmptyStateCard mean_luma < 60, got %.1f", luma)
+	}
+	if !tt.HasText("暂无「灰卡」原片") || !tt.HasText("返回全部") {
+		t.Fatalf("expected darkroom EmptyStateCard for empty 灰卡 filter, texts=%v", tt.Texts())
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryCraftEmptyState402")
+	saveCameraRolloutShot(t, tt, "rollout_lab_gallery_empty_402x874.png")
+
+	if err := tt.Click("返回全部"); err != nil {
+		t.Fatalf("click 返回全部: %v", err)
+	}
+	settleIPhoneFrames(tt, 140)
+	if g.filterRole != "" || !tt.HasText("2 张") {
+		t.Fatalf("expected filter reset to 全部, filterRole=%q texts=%v", g.filterRole, tt.Texts())
+	}
+
+	// Verify MiddleTruncate in Lightbox top bar + footer metadata strip, plus Undo Toast on role change
+	if err := tt.Click(longPhotoID); err != nil {
+		t.Fatalf("click long DNG tile: %v", err)
+	}
+	settleIPhoneFrames(tt, 260)
+	wantLBTitle := kit.MiddleTruncate(longPhotoID, 28)
+	wantLBCaptionFile := kit.MiddleTruncate(longPhotoID+".dng", 28)
+	if !tt.HasText(wantLBTitle) {
+		t.Fatalf("expected MiddleTruncate(28) Lightbox title %q, texts=%v", wantLBTitle, tt.Texts())
+	}
+	foundLBCaption := false
+	for _, txt := range tt.Texts() {
+		if strings.Contains(txt, wantLBCaptionFile) {
+			foundLBCaption = true
+			break
+		}
+	}
+	if !foundLBCaption {
+		t.Fatalf("expected MiddleTruncate(28) Lightbox footer filename %q, texts=%v", wantLBCaptionFile, tt.Texts())
+	}
+	assertNoHorizontalOverflow402(t, tt, "LabGalleryCraftLightboxTrunc402")
+
+	if err := tt.Click("标注 灰卡"); err != nil {
+		t.Fatalf("click 标注 灰卡: %v", err)
+	}
+	settleIPhoneFrames(tt, 140)
+	if !tt.HasText("已标注为「灰卡」") || !tt.HasText("撤销") {
+		t.Fatalf("expected role-change Undo Toast with countdown hairline, texts=%v", tt.Texts())
+	}
+	if err := tt.Click("撤销"); err != nil {
+		t.Fatalf("click 撤销 on role-change toast: %v", err)
+	}
+	settleIPhoneFrames(tt, 140)
+	if len(g.items) == 0 || g.items[0].Meta.Experiment.FrameRole != scicamera.RoleSample {
+		t.Fatalf("expected role reverted to sample after undo, items=%+v", g.items)
 	}
 }
