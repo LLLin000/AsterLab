@@ -46,7 +46,7 @@ func TestStandaloneStorybookRendersAllSections(t *testing.T) {
 					"6A. 动物房合规卡片与边界压测态",
 					"7A. 宽屏编辑态：极简 Tufte 右侧边注（默认展开 · Y 轴防碰撞）+ @ 行内药丸",
 					"8A. 402dp 移动工作台壳层、顶/底 SafeArea 避让与手势闭环",
-					"8B. 全屏移动页面规范（Obsidian 两级设置页 & 全屏表单导航栏）",
+					"8B. 全屏移动页面规范（两级设置页 & 全屏表单导航栏）",
 				} {
 					if !tt.HasText(heading) {
 						t.Fatalf("standalone gallery missing %q, texts=%v", heading, tt.Texts())

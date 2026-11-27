@@ -7,23 +7,29 @@ import (
 )
 
 func TestDesignTokens(t *testing.T) {
-	SetActiveLook(PresetObsidian, true)
+	if PresetPaper != "paper" || normalizePreset("obsidian") != PresetPaper || normalizePreset("aurora") != PresetPaper {
+		t.Fatalf("expected PresetPaper=='paper' and legacy migration from obsidian/aurora, got %q", normalizePreset("obsidian"))
+	}
+	SetActiveLook(PresetPaper, true)
 	light, dark := LightTokens(), DarkTokens()
-	if light.Canvas != ui.Hex("#ffffff") || light.Elevated != ui.Hex("#f5f6f8") {
-		t.Fatalf("obsidian light surfaces unexpected: canvas=%v elevated=%v", light.Canvas, light.Elevated)
+	if light.Canvas != ui.Hex("#ffffff") || light.Elevated != ui.Hex("#f4f4f5") {
+		t.Fatalf("paper C1 light surfaces unexpected: canvas=%v elevated=%v", light.Canvas, light.Elevated)
 	}
-	if light.Accent != ui.Hex("#6c5ce7") || light.Text != ui.Hex("#18181b") {
-		t.Fatalf("obsidian light ink/accent unexpected: accent=%v text=%v", light.Accent, light.Text)
+	if light.Accent != ui.Hex("#18181b") || light.AccentText != ui.Hex("#ffffff") || light.Text != ui.Hex("#18181b") || light.Warning != ui.Hex("#c87010") {
+		t.Fatalf("paper C1 light ink/accent unexpected: accent=%v text=%v warn=%v", light.Accent, light.Text, light.Warning)
 	}
-	if dark.Canvas != ui.Hex("#111215") || dark.Accent != ui.Hex("#a596ff") || dark.Text != ui.Hex("#f5f5f7") {
-		t.Fatalf("obsidian dark palette unexpected: %+v", dark)
+	if dark.Canvas != ui.Hex("#111214") || dark.Accent != ui.Hex("#f4f4f5") || dark.AccentText != ui.Hex("#111214") || dark.Text != ui.Hex("#f4f4f5") || dark.Warning != ui.Hex("#f0a52b") {
+		t.Fatalf("paper C1 dark palette unexpected: %+v", dark)
+	}
+	if light.AccentSoftBg != light.SelectedRow || dark.AccentSoftBg != dark.SelectedRow {
+		t.Fatal("accent soft bg must match neutral SelectedRow in C1 monochrome theme")
 	}
 	if light.Accent == light.Success || light.Accent == light.Warning {
 		t.Fatal("accent must stay distinct from semantic success/warning")
 	}
 
 	zinc := TokensFor(PresetZinc, false, true)
-	if zinc.Canvas != ui.Hex("#f4f5f7") || zinc.Accent != ui.Hex("#635bff") {
+	if zinc.Canvas != ui.Hex("#f4f5f7") || zinc.Accent != ui.Hex("#1f2430") {
 		t.Fatalf("zinc preset mismatch: %+v", zinc)
 	}
 

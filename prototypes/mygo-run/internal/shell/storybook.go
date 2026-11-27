@@ -27,7 +27,7 @@ func (s *Shell) BuiltinShellStorySection() kit.StorySection {
 			kit.ApplyElevation(card, tok, kit.ElevationCard)
 			card.Children(func() {
 				kit.SectionHeader(c, tok, lucide.AppWindow(), "4A. 顶栏标签页、分屏与模式头",
-					"Obsidian 平权分屏视觉样本（当前实机组件映射）", nil)
+					"AsterLab 平权分屏视觉样本（当前实机组件映射）", nil)
 
 				// Top tab strip mockup using real tokens
 				ui.Row(c).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
@@ -209,7 +209,7 @@ func (s *Shell) BuiltinMobileStorySection() kit.StorySection {
 		Group:    "移动端规范",
 		NavTitle: "移动端 402dp 设计",
 		Title:    "8. 移动端 iOS 专属设计规范与 402×874 真机参考",
-		Subtitle: "顶部 64dp 安全避让 · 双向抽屉闭环 · Obsidian 全屏页面与两级设置 · 移动端工具栏",
+		Subtitle: "顶部 64dp 安全避让 · 双向抽屉闭环 · 全屏页面与两级设置 · 移动端工具栏",
 		Icon:     lucide.Smartphone(),
 		Render: func(c *ui.Context, tok theme.Tokens) {
 			t := c.Theme()
@@ -295,7 +295,7 @@ func (s *Shell) BuiltinMobileStorySection() kit.StorySection {
 				})
 
 				kit.SectionHeader(c, tok, lucide.Layers(),
-					"8B. 全屏移动页面规范（Obsidian 两级设置页 & 全屏表单导航栏）",
+					"8B. 全屏移动页面规范（两级设置页 & 全屏表单导航栏）",
 					"手机端设置与重表单采用 edge-to-edge 全屏页面：一级分组列表 + ‹ 设置 返回二级详情 + 取消 | 标题 | 保存 顶栏", nil)
 
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Start).Gap(t.Space(4)).Children(func() {

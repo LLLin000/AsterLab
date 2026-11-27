@@ -925,20 +925,20 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 					{
 						ID:       "theme-preset",
 						Title:    "配色方案",
-						Keywords: []string{"preset", "obsidian", "zinc", "warm", "配色", "画布", "冷灰", "纯白"},
+						Keywords: []string{"preset", "paper", "zinc", "warm", "配色", "画布", "冷灰", "纯白"},
 						Build: func(c *ui.Context) {
-							options := []string{theme.PresetObsidian, theme.PresetZinc, theme.PresetWarm}
+							options := []string{theme.PresetPaper, theme.PresetZinc, theme.PresetWarm}
 							names := map[string]string{
-								theme.PresetObsidian: "纯净白纸",
-								theme.PresetZinc:     "冷银灰",
-								theme.PresetWarm:     "暖润纸面",
+								theme.PresetPaper: "纯净白纸",
+								theme.PresetZinc:  "冷银灰",
+								theme.PresetWarm:  "暖润纸面",
 							}
-							if s.ThemePreset == "" || s.ThemePreset == "aurora" {
-								s.ThemePreset = theme.PresetObsidian
+							if s.ThemePreset == "" || s.ThemePreset == "aurora" || s.ThemePreset == "obsidian" {
+								s.ThemePreset = theme.PresetPaper
 							}
 							sel := components.Select(c, &s.ThemePreset)
 							sel.Trigger.MinWidth(c.Theme().Space(32)).Shrink(0).Children(func() {
-								components.Text(c, firstNonEmptyStr(names[s.ThemePreset], names[theme.PresetObsidian])).SingleLine()
+								components.Text(c, firstNonEmptyStr(names[s.ThemePreset], names[theme.PresetPaper])).SingleLine()
 							})
 							sel.Popup(func(panel ui.Element) {
 								for _, opt := range options {

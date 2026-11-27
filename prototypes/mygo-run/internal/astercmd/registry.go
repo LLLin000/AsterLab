@@ -273,7 +273,7 @@ func buildDefaultRegistry() *Registry {
 			Description: "以极简行内语法 `![[path]]{@...}` 插入图片或附件，并可选附带孔板/孔位/时间点/FOV 显式关联（实验模式可用）",
 			InputSchema: map[string]FieldSpec{
 				"asset":     {Type: "string", Required: true, Description: "Vault 相对路径，如 ./assets/huvec-a1.png"},
-				"width":     {Type: "string", Description: "可选 Obsidian 显示宽度，如 400"},
+				"width":     {Type: "string", Description: "可选图片显示宽度，如 400"},
 				"targets":   {Type: "any", Description: "可选关联目标列表，如 [\"plate-1:A1\"] 或 [{\"objectId\":\"plate-1\",\"subTargets\":[\"A1\"]}]"},
 				"timepoint": {Type: "string", Description: "可选时间点，如 6h"},
 				"fov":       {Type: "int", Description: "可选视野编号，如 1"},

@@ -2012,7 +2012,7 @@ func (s *Shell) renderMobileTreeNode(c *ui.Context, tok theme.Tokens, node *vaul
 			FillWidth().MinWidth(0).MinHeight(float32(tok.Spacing48)*0.85).
 			Justify(ui.Start).Radius(float32(tok.ControlRadius)).
 			Padding(0, float32(tok.Spacing8), 0, float32(tok.Spacing4)).
-			Selected(selected).TextColor(tok.Text)
+			TextColor(tok.Text)
 		if selected {
 			row.Background(tok.SelectedRow)
 		}
@@ -2145,7 +2145,7 @@ func (s *Shell) renderMobileTreeNode(c *ui.Context, tok theme.Tokens, node *vaul
 			FillWidth().MinWidth(0).MinHeight(float32(tok.Spacing48)*0.85).
 			Justify(ui.Start).Radius(float32(tok.ControlRadius)).
 			Padding(0, float32(tok.Spacing8), 0, float32(tok.Spacing4)).
-			Background(rowBg).Selected(selected).TextColor(tok.Text)
+			Background(rowBg).TextColor(tok.Text)
 		theme.ApplyTactilePress(row)
 		row.Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
@@ -2155,9 +2155,16 @@ func (s *Shell) renderMobileTreeNode(c *ui.Context, tok theme.Tokens, node *vaul
 						ui.Icon(c, lucide.Pin()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
 					}
 				})
-				ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.TextMuted)
-				components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+				icoCol := tok.TextMuted
+				if selected {
+					icoCol = tok.Text
+				}
+				ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(icoCol)
+				nameTxt := components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+				if selected {
+					nameTxt.Bold()
+				}
 				if shortDate != "" {
 					ui.Text(c, shortDate).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
 						FontFeatures("tnum").Shrink(0)

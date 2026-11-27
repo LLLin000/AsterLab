@@ -76,11 +76,11 @@ var LogoStandardSVG = fmt.Sprintf(
 	logoStdPath1, logoStdPath2, logoStdPath3,
 )
 
-// TriStreamSVG returns the 3-channel optical SVG colored across Design (Violet), Execution (Sky), and Core (Emerald).
+// TriStreamSVG returns the 3-channel optical SVG colored across Design (Graphite Ink), Execution (Instrument Amber), and Core (Emerald).
 func TriStreamSVG(dark, small bool) string {
-	cDesign, cExec, cCore := "#6c5ce7", "#0ea5e9", "#168053"
+	cDesign, cExec, cCore := "#18181b", "#c87010", "#16794b"
 	if dark {
-		cDesign, cExec, cCore = "#a596ff", "#38bdf8", "#6fd3a4"
+		cDesign, cExec, cCore = "#f4f4f5", "#f0a52b", "#65c996"
 	}
 	p1, p2, p3 := logoStdPath1, logoStdPath2, logoStdPath3
 	if small {
@@ -131,7 +131,7 @@ func LogoParsedOutline() *ui.SVG {
 	return logoOutlineSVG
 }
 
-// AppIconPNG returns the 256x256 Obsidian-badge application icon encoded as PNG bytes.
+// AppIconPNG returns the 256x256 AsterLab graphite-badge application icon encoded as PNG bytes.
 func AppIconPNG() []byte {
 	appIconOnce.Do(func() {
 		appIconPNG, _ = RenderAppTilePNG(256)
@@ -139,8 +139,8 @@ func AppIconPNG() []byte {
 	return appIconPNG
 }
 
-// RenderAppTilePNG renders a crisp square application badge matching www.asterlab.party favicon:
-// warm Obsidian (#0c0b0a) rounded squircle with subtle violet rim and centered white mark.
+// RenderAppTilePNG renders a crisp square application badge in AsterLab C1 graphite aesthetic:
+// anodized dark graphite (#111214) rounded squircle with subtle warm-silver/amber studio sheen and centered white mark.
 // Uses optical small variant for <=32px and standard variant for >=48px.
 func RenderAppTilePNG(size int) ([]byte, error) {
 	if size < 16 {
@@ -157,7 +157,7 @@ func RenderAppTilePNG(size int) ([]byte, error) {
 	radius := float64(w) * 0.225
 	center := float64(w) / 2
 	half := center
-	bgR, bgG, bgB := 12.0, 11.0, 10.0
+	bgR, bgG, bgB := 17.0, 18.0, 20.0
 
 	for y := 0; y < w; y++ {
 		dy := math.Abs(float64(y)+0.5-center) - (half - radius)
@@ -170,13 +170,13 @@ func RenderAppTilePNG(size int) ([]byte, error) {
 			if alpha <= 0 {
 				continue
 			}
-			// Subtle top-left violet-obsidian studio sheen
+			// Subtle top-left anodized graphite studio sheen with restrained warm amber hint
 			nx := float64(x) / float64(w)
 			ny := float64(y) / float64(w)
 			glow := math.Max(0, 1-math.Hypot(nx-0.25, ny-0.22)*1.25) * 0.14
-			r := uint8(math.Min(255, bgR+116*glow))
-			g := uint8(math.Min(255, bgG+87*glow))
-			b := uint8(math.Min(255, bgB+236*glow))
+			r := uint8(math.Min(255, bgR+185*glow))
+			g := uint8(math.Min(255, bgG+162*glow))
+			b := uint8(math.Min(255, bgB+125*glow))
 			dst.SetNRGBA(x, y, color.NRGBA{R: r, G: g, B: b, A: uint8(math.Round(alpha * 255))})
 		}
 	}

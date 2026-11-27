@@ -740,8 +740,8 @@ func (s *Shell) StepUIScale(c *ui.Context, delta float32) {
 // SetInitialThemeLook loads persisted appearance settings without letting first-frame
 // defaults overwrite an explicitly saved LiquidGlass=false preference.
 func (s *Shell) SetInitialThemeLook(preset string, liquidGlass bool) {
-	if preset == "" || preset == "aurora" {
-		preset = theme.PresetObsidian
+	if preset == "" || preset == "aurora" || preset == "obsidian" {
+		preset = theme.PresetPaper
 	}
 	s.ThemePreset = preset
 	s.LiquidGlass = liquidGlass
@@ -749,20 +749,20 @@ func (s *Shell) SetInitialThemeLook(preset string, liquidGlass bool) {
 	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
 }
 
-// SyncThemeLook ensures Shell's ThemePreset ("obsidian" | "zinc" | "warm"),
+// SyncThemeLook ensures Shell's ThemePreset ("paper" | "zinc" | "warm"),
 // LiquidGlass, TextScale, and ReduceMotion are synced to package theme and installed on c.
 func (s *Shell) SyncThemeLook(c *ui.Context) theme.Tokens {
 	if !s.themeLookInited {
 		s.themeLookInited = true
-		if s.ThemePreset == "" || s.ThemePreset == "aurora" {
-			s.ThemePreset = theme.PresetObsidian
+		if s.ThemePreset == "" || s.ThemePreset == "aurora" || s.ThemePreset == "obsidian" {
+			s.ThemePreset = theme.PresetPaper
 		}
 		if !s.LiquidGlass {
 			s.LiquidGlass = true
 		}
 	}
-	if s.ThemePreset == "" || s.ThemePreset == "aurora" {
-		s.ThemePreset = theme.PresetObsidian
+	if s.ThemePreset == "" || s.ThemePreset == "aurora" || s.ThemePreset == "obsidian" {
+		s.ThemePreset = theme.PresetPaper
 	}
 	theme.SetActiveLook(s.ThemePreset, s.LiquidGlass)
 	theme.SetActiveDensity(s.Density)

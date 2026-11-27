@@ -1,6 +1,6 @@
-// Package theme is AsterLab's visual system: Obsidian-inspired pure editorial
-// surfaces, neutral Zinc option, or classic Warm paper, paired with restrained
-// violet accents and tuned MyGo Liquid Glass capsule materials.
+// Package theme is AsterLab's visual system: monochrome graphite paper, neutral Zinc
+// option, or classic Warm paper, paired with restrained ink-contrast accents,
+// instrument amber status signals, and tuned MyGo Liquid Glass capsule materials.
 package theme
 
 import (
@@ -49,7 +49,8 @@ func MixColor(c0, c1 ui.Color, frac float32) ui.Color {
 }
 
 const (
-	PresetObsidian = "obsidian" // Pure white editorial paper + whisper-cool #f5f6f8 borderless cards
+	PresetPaper    = "paper"    // Pure white editorial paper + whisper-cool #f5f6f8 borderless cards
+	PresetObsidian = PresetPaper // Deprecated alias kept for source compatibility; configs migrate to "paper"
 	PresetZinc     = "zinc"     // Achromatic cool silver-zinc #f4f5f7 canvas + pure #ffffff cards
 	PresetWarm     = "warm"     // Classic warm laboratory paper (#f7f6f3 / #171614)
 
@@ -60,7 +61,7 @@ const (
 
 var (
 	themeCfgMu            sync.RWMutex
-	activePreset          = PresetObsidian
+	activePreset          = PresetPaper
 	activeLiquidGlass     = true
 	activeDensity         = DensityDefault
 	activeTextScale       float32
@@ -176,12 +177,12 @@ func ActiveLook() (preset string, liquidGlass bool) {
 
 func normalizePreset(preset string) string {
 	switch preset {
-	case PresetZinc, PresetWarm, PresetObsidian:
+	case PresetZinc, PresetWarm, PresetPaper:
 		return preset
-	case "aurora": // migrate legacy config cleanly to default Obsidian
-		return PresetObsidian
+	case "obsidian", "aurora": // migrate legacy preset names cleanly to PresetPaper
+		return PresetPaper
 	default:
-		return PresetObsidian
+		return PresetPaper
 	}
 }
 
@@ -290,16 +291,16 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 			t.SelectedRow = ui.Hex("#2c2a25")
 			t.Border, t.BorderStrong = ui.Hex("#37352f"), ui.Hex("#4a473f")
 			t.Text, t.TextMuted = ui.Hex("#f2efe9"), ui.Hex("#a9a49a")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a996ff"), ui.Hex("#bcabff"), ui.Hex("#1b1533")
-			t.Success, t.Warning, t.Danger = ui.Hex("#84c9a4"), ui.Hex("#d9b878"), ui.Hex("#e79a9c")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#f2efe9"), ui.Hex("#ffffff"), ui.Hex("#171614")
+			t.Success, t.Warning, t.Danger = ui.Hex("#65c996"), ui.Hex("#eab354"), ui.Hex("#e79a9c")
 			t.RailBackground, t.SidebarBackground = t.Canvas, t.Canvas
 		} else {
 			t.Canvas, t.Surface, t.Elevated = ui.Hex("#f7f6f3"), ui.Hex("#ffffff"), ui.Hex("#faf9f7")
 			t.SelectedRow = ui.Hex("#edeae3")
 			t.Border, t.BorderStrong = ui.Hex("#e7e3db"), ui.Hex("#d6d0c5")
 			t.Text, t.TextMuted = ui.Hex("#1c1b18"), ui.Hex("#5f5a52")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#5b45c9"), ui.Hex("#4b37ae"), ui.Hex("#ffffff")
-			t.Success, t.Warning, t.Danger = ui.Hex("#2f7a4f"), ui.Hex("#7a6233"), ui.Hex("#a3373a")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#262420"), ui.Hex("#1c1b18"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#2f7a4f"), ui.Hex("#b8670e"), ui.Hex("#a3373a")
 			t.RailBackground, t.SidebarBackground = ui.Hex("#f1efea"), ui.Hex("#f1efea")
 		}
 	case PresetZinc:
@@ -308,35 +309,35 @@ func TokensFor(preset string, dark, liquidGlass bool) Tokens {
 			t.SelectedRow = ui.Hex("#262a34")
 			t.Border, t.BorderStrong = ui.Hex("#262a35"), ui.Hex("#383e4d")
 			t.Text, t.TextMuted = ui.Hex("#f3f4f6"), ui.Hex("#9ca3af")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a397ff"), ui.Hex("#b8aeff"), ui.Hex("#131026")
-			t.Success, t.Warning, t.Danger = ui.Hex("#74cfa3"), ui.Hex("#e2b96f"), ui.Hex("#ed939b")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#e5e7eb"), ui.Hex("#f3f4f6"), ui.Hex("#0f1115")
+			t.Success, t.Warning, t.Danger = ui.Hex("#65c996"), ui.Hex("#f0a52b"), ui.Hex("#ed939b")
 			t.RailBackground, t.SidebarBackground = ui.Hex("#0c0d10"), ui.Hex("#12141a")
 		} else {
 			t.Canvas, t.Surface, t.Elevated = ui.Hex("#f4f5f7"), ui.Hex("#ffffff"), ui.Hex("#eceef2")
 			t.SelectedRow = ui.Hex("#e5e7ec")
 			t.Border, t.BorderStrong = ui.Hex("#e2e5ec"), ui.Hex("#cbd0da")
 			t.Text, t.TextMuted = ui.Hex("#111827"), ui.Hex("#5c6370")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#635bff"), ui.Hex("#5046e5"), ui.Hex("#ffffff")
-			t.Success, t.Warning, t.Danger = ui.Hex("#18794e"), ui.Hex("#8c6115"), ui.Hex("#c03641")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#1f2430"), ui.Hex("#111827"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#18794e"), ui.Hex("#c87010"), ui.Hex("#c03641")
 			t.RailBackground, t.SidebarBackground = ui.Hex("#eff1f4"), ui.Hex("#f1f2f5")
 		}
-	default: // PresetObsidian: pure crisp white paper (#ffffff) + whisper-cool #f5f6f8 borderless cards
+	default: // PresetPaper (C1): monochrome graphite paper + instrument amber signal
 		if dark {
-			t.Canvas, t.Surface, t.Elevated = ui.Hex("#111215"), ui.Hex("#16181d"), ui.Hex("#1e2027")
-			t.SelectedRow = ui.Hex("#272a33")
-			t.Border, t.BorderStrong = ui.Hex("#272b36"), ui.Hex("#3b4152")
-			t.Text, t.TextMuted = ui.Hex("#f5f5f7"), ui.Hex("#a6abb8")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#a596ff"), ui.Hex("#bab0ff"), ui.Hex("#120f24")
-			t.Success, t.Warning, t.Danger = ui.Hex("#6fd3a4"), ui.Hex("#e6bc6a"), ui.Hex("#f08e96")
-			t.RailBackground, t.SidebarBackground = ui.Hex("#0d0e11"), ui.Hex("#13151a")
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#111214"), ui.Hex("#17181b"), ui.Hex("#202226")
+			t.SelectedRow = ui.Hex("#282b31")
+			t.Border, t.BorderStrong = ui.Hex("#272a30"), ui.Hex("#3a3e47")
+			t.Text, t.TextMuted = ui.Hex("#f4f4f5"), ui.Hex("#9a9ca6")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#f4f4f5"), ui.Hex("#e4e4e7"), ui.Hex("#111214")
+			t.Success, t.Warning, t.Danger = ui.Hex("#65c996"), ui.Hex("#f0a52b"), ui.Hex("#f08e96")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#0d0e10"), ui.Hex("#131417")
 		} else {
-			t.Canvas, t.Surface, t.Elevated = ui.Hex("#ffffff"), ui.Hex("#ffffff"), ui.Hex("#f5f6f8")
-			t.SelectedRow = ui.Hex("#ededf0")
-			t.Border, t.BorderStrong = ui.Hex("#e7e9ee"), ui.Hex("#d2d6df")
-			t.Text, t.TextMuted = ui.Hex("#18181b"), ui.Hex("#71717a")
-			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#6c5ce7"), ui.Hex("#5949d4"), ui.Hex("#ffffff")
-			t.Success, t.Warning, t.Danger = ui.Hex("#168053"), ui.Hex("#9a6715"), ui.Hex("#c23643")
-			t.RailBackground, t.SidebarBackground = ui.Hex("#f7f8fa"), ui.Hex("#f8f9fb")
+			t.Canvas, t.Surface, t.Elevated = ui.Hex("#ffffff"), ui.Hex("#ffffff"), ui.Hex("#f4f4f5")
+			t.SelectedRow = ui.Hex("#eaeaef")
+			t.Border, t.BorderStrong = ui.Hex("#e4e4e7"), ui.Hex("#d4d4d8")
+			t.Text, t.TextMuted = ui.Hex("#18181b"), ui.Hex("#6b6b73")
+			t.Accent, t.AccentHover, t.AccentText = ui.Hex("#18181b"), ui.Hex("#27272a"), ui.Hex("#ffffff")
+			t.Success, t.Warning, t.Danger = ui.Hex("#16794b"), ui.Hex("#c87010"), ui.Hex("#c23643")
+			t.RailBackground, t.SidebarBackground = ui.Hex("#f7f7f8"), ui.Hex("#f8f8fa")
 		}
 	}
 	return aliases(t)
@@ -365,7 +366,7 @@ func aliases(t Tokens) Tokens {
 		t.ElementBg = t.Elevated
 		t.ElementHover = t.SelectedRow
 		t.ElementActive = t.BorderStrong.Alpha(0.55)
-		t.ElementSelected = ui.Hex("#2a2645")
+		t.ElementSelected = t.SelectedRow
 		t.ElementDisabled = t.Elevated.Alpha(0.45)
 		t.GhostHover = ui.RGBA(255, 255, 255, 0.06)
 		t.GhostActive = ui.RGBA(255, 255, 255, 0.11)
@@ -383,7 +384,7 @@ func aliases(t Tokens) Tokens {
 		t.ElementBg = t.Elevated
 		t.ElementHover = t.SelectedRow
 		t.ElementActive = t.BorderStrong.Alpha(0.42)
-		t.ElementSelected = ui.Hex("#eeebff")
+		t.ElementSelected = t.SelectedRow
 		t.ElementDisabled = t.Elevated.Alpha(0.55)
 		t.GhostHover = ui.RGBA(15, 23, 42, 0.045)
 		t.GhostActive = ui.RGBA(15, 23, 42, 0.085)
@@ -400,12 +401,7 @@ func aliases(t Tokens) Tokens {
 	t.WarningBg, t.WarningText = t.Surface, t.Warning
 	t.DangerBg, t.DangerText = t.Surface, t.Danger
 	t.NeutralBg, t.NeutralText = t.Surface, t.TextMuted
-	t.AccentSoftBg = t.Accent.Alpha(.14)
-	if t.Dark {
-		t.AccentSoftBg = ui.Hex("#2a2645")
-	} else if t.Preset == PresetObsidian {
-		t.AccentSoftBg = ui.Hex("#eeebff")
-	}
+	t.AccentSoftBg = t.SelectedRow
 	t.InfoBg, t.InfoText = t.Elevated, t.Accent
 	t.CodeBg = t.Elevated
 	return t
@@ -633,14 +629,14 @@ func GradientRampColor(tNorm float64, dark bool) ui.Color {
 	if tNorm > 1 {
 		tNorm = 1
 	}
-	// Low -> High concentration: pale misty violet/indigo to deep cobalt-violet.
+	// Low -> High concentration: pale misty slate to deep scientific cobalt.
 	if dark {
-		lo := ui.Hex("#312e59")
-		hi := ui.Hex("#8b7cff")
+		lo := ui.Hex("#1e293b")
+		hi := ui.Hex("#60a5fa")
 		return lo.Mix(hi, float32(tNorm))
 	}
-	lo := ui.Hex("#ddd6fe")
-	hi := ui.Hex("#4c35b5")
+	lo := ui.Hex("#dbeafe")
+	hi := ui.Hex("#1d4ed8")
 	return lo.Mix(hi, float32(tNorm))
 }
 

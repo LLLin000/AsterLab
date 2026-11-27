@@ -522,9 +522,9 @@ func (s *Shell) buildPaletteEntries() []paletteEntry {
 			runAct: func() { s.OpenPantryTab() },
 		},
 		paletteEntry{
-			kind: paletteAction, key: "cmd-preset-obsidian", title: "切换配色：纯净白纸 (Obsidian 默认)",
-			subtitle: "100% 纯净白纸底搭配 #f5f6f8 无边框冷灰层次与极克制淡紫标签",
-			runAct: func() { s.ThemePreset = theme.PresetObsidian; s.notifySettingsChanged(); s.Invalidate() },
+			kind: paletteAction, key: "cmd-preset-paper", title: "切换配色：纯净白纸 (默认)",
+			subtitle: "100% 纯净白纸底搭配无边框冷灰层次与克制主色",
+			runAct: func() { s.ThemePreset = theme.PresetPaper; s.notifySettingsChanged(); s.Invalidate() },
 		},
 		paletteEntry{
 			kind: paletteAction, key: "cmd-preset-zinc", title: "切换配色：冷银极简 (Cool Zinc)",

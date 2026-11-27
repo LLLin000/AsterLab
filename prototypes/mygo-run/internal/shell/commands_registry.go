@@ -113,9 +113,9 @@ func (s *Shell) ensureCommandRegistry() *kit.CommandRegistry {
 			Run: func() { s.VaultSettingsOpen = true },
 		},
 		{
-			ID: "theme.preset.obsidian", Title: "切换配色：纯净白纸 (Obsidian 默认)", Subtitle: "100% 纯净白纸底搭配冷灰层次",
+			ID: "theme.preset.paper", Title: "切换配色：纯净白纸 (默认)", Subtitle: "100% 纯净白纸底搭配冷灰层次",
 			Category: "外观",
-			Run: func() { s.ThemePreset = theme.PresetObsidian; s.notifySettingsChanged(); s.Invalidate() },
+			Run: func() { s.ThemePreset = theme.PresetPaper; s.notifySettingsChanged(); s.Invalidate() },
 		},
 		{
 			ID: "theme.preset.zinc", Title: "切换配色：冷银极简 (Cool Zinc)", Subtitle: "中性冷灰底配纯白卡片",
