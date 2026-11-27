@@ -71,35 +71,44 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 	kit.ApplyElevation(card, tok, kit.ElevationCard)
 
 	cardHover := card.Hovered()
+	openFig := v.figureOpen && v.ExpandedFigureID == cardKey
+	openLightbox := func() {
+		v.ExpandedFigureID = cardKey
+		v.FigureZoom = 1
+		v.figureOpen = true
+	}
 	card.Children(func() {
 		// Unified Module Header Row (matches group_table / plate / param_table)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
+				ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
 				ui.Text(c, firstNonEmpty(emb.Label, filepath.Base(emb.Asset))).
-					FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-				ui.Spacer(c)
-				ui.Text(c, metaSummary).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine()
+					FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+				ui.Text(c, metaSummary).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Shrink(0)
 				if canEditSource && (cardHover || v.MobileCompact) {
-					if components.IconButton(c, lucide.Code(), "编辑行内关联语法", components.IconButtonCompact).Clicked() {
+					if components.IconButton(c.Key("emb-src-btn:"+cardKey), lucide.Code(), "编辑行内关联语法", components.IconButtonCompact).Clicked() {
 						*srcEditOpen = true
 					}
 				}
-				if components.IconButton(c, lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
-					v.ExpandedFigureID = cardKey
-					v.FigureZoom = 1
-					v.figureOpen = true
+				if components.IconButton(c.Key("emb-zoom-btn:"+cardKey), lucide.Maximize2(), "放大查看", components.IconButtonCompact).Clicked() {
+					openLightbox()
 				}
 			})
 			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 		})
 
-		// 1. Image canvas (reuses unified async figure loader & zoom dialog)
+		// 1. Image canvas (reuses unified async figure loader & darkroom hero transition)
 		maxH := float32(260)
 		if wInt, err := strconv.Atoi(emb.Width); err == nil && wInt >= 80 && wInt <= 600 {
 			maxH = float32(wInt) * 0.75
 		}
-		v.drawFigureCanvas(c, cardKey, emb.Asset, "", nil, maxH, 1)
+		heroBox := ui.Column(c.Key("emb-inline-hero:" + cardKey)).FillWidth()
+		if !openFig {
+			heroBox.Transition(theme.HeroFlyTransition(figureHeroMatch{ID: cardKey}))
+		}
+		heroBox.Children(func() {
+			v.drawFigureCanvasInteractive(c, cardKey, emb.Asset, "", nil, maxH, 1, openLightbox)
+		})
 
 		// 2. Interactive relation chips strip + unified hover card + `+ 关联` editor
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
@@ -135,10 +144,10 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 							if tc.GroupID != "" && tc.Valid {
 								ui.Box(c).Size(float32(tok.Spacing8), float32(tok.Spacing8)).
-									Radius(float32(tok.ControlRadius)).
+									Radius(float32(tok.PillRadius)).
 									Background(plateui.GroupColorIndexed(tc.GroupID, idxMap, dark))
 							}
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().FontFeatures("tnum").TextColor(fg).SingleLine()
 						})
 					})
 					if chip.Clicked() {
@@ -159,10 +168,10 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 			}
 
 			if emb.Timepoint != "" {
-				inlineBadge(c, emb.Timepoint)
+				inlineBadge(c, emb.Timepoint).FontFeatures("tnum")
 			}
 			if emb.FOV > 0 {
-				inlineBadge(c, fmt.Sprintf("FOV %d", emb.FOV))
+				inlineBadge(c, fmt.Sprintf("FOV %d", emb.FOV)).FontFeatures("tnum")
 			}
 			if emb.Role != "" {
 				inlineBadge(c, relationRoleLabel(emb.Role))
@@ -192,59 +201,79 @@ func (v *View) renderEmbedCard(c *ui.Context, seg DocSegment, resolvedBySpan map
 		})
 	})
 
-	// Lightbox zoom dialog
-	openFig := v.figureOpen && v.ExpandedFigureID == cardKey
-	if openFig && isMobileAsterdocViewport(c, v) {
-		renderFigureLightboxMobile(c, v, tok, "mb-emb-dlg:"+cardKey, cardKey, filepath.Base(emb.Asset), emb.Asset, "", nil, "", &openFig)
-	} else {
-		ui.Box(c.Key("emb-dlg:" + cardKey)).Children(func() {
-			components.Dialog(c, &openFig, components.DialogOptions{Label: filepath.Base(emb.Asset)}, func(panel ui.Element) {
-				panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-						ui.Text(c, filepath.Base(emb.Asset)).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-						if emb.HasRelation() {
-							var badgeParts []string
-							for _, tg := range emb.Targets {
-								tLbl := tg.ObjectID
-								if v.Doc != nil {
-									for _, m := range v.Doc.Modules {
-										if m.ID == tg.ObjectID {
-											tLbl = firstNonEmpty(textValue(m.Data, "title"), tg.ObjectID)
-											break
-										}
-									}
-								}
-								if len(tg.SubTargets) > 0 {
-									tLbl += " · " + strings.Join(tg.SubTargets, ", ")
-								}
-								badgeParts = append(badgeParts, tLbl)
-							}
-							if emb.Timepoint != "" {
-								badgeParts = append(badgeParts, emb.Timepoint)
-							}
-							if emb.FOV > 0 {
-								badgeParts = append(badgeParts, fmt.Sprintf("视野 %d", emb.FOV))
-							}
-							if emb.Role != "" {
-								badgeParts = append(badgeParts, relationRoleLabel(emb.Role))
-							}
-							components.Badge(c, strings.Join(badgeParts, " · "), components.BadgeOptions{Tone: components.BadgeAccent})
-						}
-						ui.Spacer(c)
-						if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-							openFig = false
-						}
-					})
-					ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
-						v.drawFigureCanvas(c, cardKey, emb.Asset, "", nil, 360, v.FigureZoom)
-					})
-				})
-			})
+	// Unified Darkroom Lightbox
+	var extraActions []kit.DarkroomLightboxAction
+	if len(rr.Contexts) > 0 && rr.Contexts[0].Valid {
+		target := rr.Contexts[0]
+		extraActions = append(extraActions, kit.DarkroomLightboxAction{
+			ID:    "focus-relation",
+			Label: "定位对象",
+			Icon:  lucide.Crosshair(),
+			OnClick: func() {
+				v.figureOpen = false
+				v.focusRelationTarget(target.ObjectID, target.SubTarget)
+			},
 		})
 	}
-	if !openFig && v.ExpandedFigureID == cardKey {
-		v.figureOpen = false
+	v.renderDarkroomFigureLightbox(c, tok, figureLightboxOptions{
+		Key:          "emb-darkroom-lb:" + cardKey,
+		ModuleID:     cardKey,
+		Title:        firstNonEmpty(emb.Label, filepath.Base(emb.Asset), "插图预览"),
+		Src:          emb.Asset,
+		MetaSummary:  v.buildEmbedMetaSummary(emb, rr),
+		Caption:      emb.Note,
+		HeroMatchKey: figureHeroMatch{ID: cardKey},
+		ExtraActions: extraActions,
+	})
+}
+
+func (v *View) buildEmbedMetaSummary(emb InlineRelation, rr ResolvedRelation) string {
+	var parts []string
+	if len(rr.Contexts) > 0 {
+		for _, tc := range rr.Contexts {
+			tLbl := firstNonEmpty(tc.ObjectTitle, tc.ObjectID)
+			if tc.SubTarget != "" {
+				tLbl += " · " + tc.SubTarget
+			}
+			if tc.GroupName != "" {
+				tLbl += " (" + tc.GroupName + ")"
+			}
+			parts = append(parts, tLbl)
+		}
+	} else {
+		for _, tg := range emb.Targets {
+			tLbl := tg.ObjectID
+			if v.Doc != nil {
+				for _, m := range v.Doc.Modules {
+					if m.ID == tg.ObjectID {
+						tLbl = firstNonEmpty(textValue(m.Data, "title"), tg.ObjectID)
+						break
+					}
+				}
+			}
+			if len(tg.SubTargets) > 0 {
+				tLbl += " · " + strings.Join(tg.SubTargets, ", ")
+			}
+			parts = append(parts, tLbl)
+		}
 	}
+	if emb.Timepoint != "" {
+		parts = append(parts, emb.Timepoint)
+	}
+	if emb.FOV > 0 {
+		parts = append(parts, fmt.Sprintf("FOV %d", emb.FOV))
+	}
+	if emb.Role != "" {
+		parts = append(parts, relationRoleLabel(emb.Role))
+	}
+	if len(parts) == 0 {
+		if base := filepath.Base(strings.TrimSpace(emb.Asset)); base != "" && base != "." {
+			parts = append(parts, base)
+		} else {
+			parts = append(parts, "普通插图")
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 func relationRoleLabel(role string) string {
@@ -430,10 +459,13 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 		wellSummary = fmt.Sprintf("%s 等 %d 孔", strings.Join(selected[:3], ", "), len(selected))
 	}
 
-	ui.Column(c.Key("pl-well-rels:"+p.ID)).FillWidth().
+	stripRad := tok.InnerPanelRadius(tok.Spacing8)
+	strip := ui.Column(c.Key("pl-well-rels:"+p.ID)).FillWidth().
 		Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-		Radius(float32(tok.ControlRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		Radius(stripRad).
+		Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing8))
+	applyDarkSpecularRim(strip, tok, stripRad)
+	strip.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.Images()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 			ui.Text(c, fmt.Sprintf("孔位 %s 关联图像 (%d)", wellSummary, len(matched))).
@@ -446,7 +478,8 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 			}
 		})
 		if len(matched) > 0 {
-			ui.Row(c).FillWidth().Wrap().Gap(float32(tok.Spacing8)).Children(func() {
+			chipRad := tok.InnerControlRadius(tok.Spacing4)
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 				for mi, r := range matched {
 					mi, r := mi, r
 					itemKey := fmt.Sprintf("pl-rel-%s-%d", p.ID, mi)
@@ -462,13 +495,16 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 						lbl = strings.Join(metaParts, " · ") + " · " + lbl
 					}
 					btn := ui.ButtonBase(c.Key(itemKey)).
-						Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-						Radius(float32(tok.ControlRadius)).
-						Background(tok.Surface).Border(1, tok.Border).Label(lbl)
+						Height(float32(tok.Spacing24)).
+						Padding(0, float32(tok.Spacing8)).
+						AlignItems(ui.Center).
+						AlignSelf(ui.Center).
+						Radius(chipRad).
+						Background(tok.Surface).Border(1, tok.BorderSubtle).Label(lbl)
 					btn.Children(func() {
 						ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 							ui.Icon(c, lucide.Image()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
-							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine()
+							ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.Text).SingleLine()
 						})
 					})
 					if btn.Clicked() {
@@ -476,30 +512,14 @@ func (v *View) renderPlateWellRelationsStrip(c *ui.Context, tok theme.Tokens, p 
 						v.FigureZoom = 1
 						v.figureOpen = true
 					}
-					openDlg := v.figureOpen && v.ExpandedFigureID == itemKey
-					if openDlg && isMobileAsterdocViewport(c, v) {
-						renderFigureLightboxMobile(c, v, tok, "mb-pl-rel-dlg:"+itemKey, itemKey, lbl, r.Asset, "", nil, "", &openDlg)
-					} else {
-						ui.Box(c.Key("pl-rel-dlg:" + itemKey)).Children(func() {
-							components.Dialog(c, &openDlg, components.DialogOptions{Label: lbl}, func(panel ui.Element) {
-								panel.Width(float32(tok.Spacing48)*14).Gap(float32(tok.Spacing12)).Children(func() {
-									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-										ui.Text(c, lbl).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text)
-										ui.Spacer(c)
-										if components.Button(c, "关闭", components.ButtonOutline).Clicked() {
-											openDlg = false
-										}
-									})
-									ui.ScrollBoth(c).FillWidth().MaxHeight(460).Children(func() {
-										v.drawFigureCanvas(c, itemKey, r.Asset, "", nil, 360, v.FigureZoom)
-									})
-								})
-							})
-						})
-					}
-					if !openDlg && v.ExpandedFigureID == itemKey {
-						v.figureOpen = false
-					}
+					v.renderDarkroomFigureLightbox(c, tok, figureLightboxOptions{
+						Key:         "pl-rel-darkroom-lb:" + itemKey,
+						ModuleID:    itemKey,
+						Title:       firstNonEmpty(filepath.Base(r.Asset), lbl),
+						Src:         r.Asset,
+						MetaSummary: v.buildEmbedMetaSummary(r.InlineRelation, r),
+						Caption:     r.Note,
+					})
 				}
 			})
 		}
