@@ -134,7 +134,7 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 	stack.Children(func() {
 		for _, it := range visible {
 			it := it
-			bg, fg, icon := tok.Surface, tok.Accent, lucide.Info()
+			fg, icon := tok.Accent, lucide.Info()
 			switch it.Tone {
 			case ToastSuccess:
 				fg, icon = tok.Success, lucide.CircleCheck()
@@ -147,11 +147,19 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 				FillWidth().
 				Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
 				AlignItems(ui.Center).
-				Gap(float32(tok.Spacing8))
+				Gap(float32(tok.Spacing8)).
+				Transition(theme.AnchoredPopoverTransition())
 			ApplyElevation(card, tok, ElevationFloating)
-			if !tok.LiquidGlass {
-				card.Background(bg)
+			if !tok.Dark && tok.SpecularRim.A > 0 {
+				rim := tok.SpecularRim
+				rad := float32(tok.PanelRadius)
+				card.DrawOver(func(p *ui.Painter, r ui.Rect) {
+					if r.W > 4 && r.H > 4 {
+						p.Stroke(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}, rim, theme.ConcentricRadius(rad, 1), 1)
+					}
+				})
 			}
+			innerRad := tok.InnerPanelRadius(tok.Spacing8)
 			card.Children(func() {
 				ui.Icon(c, icon).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(fg).Shrink(0)
 				ui.Text(c, it.Message).FontSize(float32(tok.TextData)).TextColor(tok.Text).Grow(1).MinWidth(0)
@@ -160,14 +168,16 @@ func (q *ToastQueue) Render(c *ui.Context, tok theme.Tokens) {
 					if lbl == "" {
 						lbl = "撤销"
 					}
-					if components.Button(c, lbl, components.ButtonSecondary).Clicked() {
+					undoBtn := components.Button(c, lbl, components.ButtonSecondary).Radius(innerRad)
+					if undoBtn.Clicked() {
 						fn := it.OnUndo
 						id := it.ID
 						q.Dismiss(id)
 						fn()
 					}
 				}
-				if components.IconButton(c, lucide.X(), "关闭提示", components.IconButtonCompact).Clicked() {
+				closeBtn := components.IconButton(c, lucide.X(), "关闭提示", components.IconButtonCompact).Radius(innerRad)
+				if closeBtn.Clicked() {
 					q.Dismiss(it.ID)
 				}
 			})

@@ -164,6 +164,7 @@ func ContextMenu(c *ui.Context, target ui.Element, build func(m *Menu)) {
 			MinWidth(180).MaxWidth(360).
 			Padding(float32(tok.Spacing4)).Gap(1).
 			TextColor(tok.Text).
+			Transition(theme.AnchoredPopoverTransition()).
 			AttachTo(anchor, ui.AnchorTopLeft, ui.AnchorTopLeft)
 		ApplyElevation(panel, tok, ElevationFloating)
 
@@ -258,14 +259,15 @@ func renderMobileContextSheet(c *ui.Context, st *menuState, build func(m *Menu))
 			Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 				m := &Menu{c: c, st: st, tok: tok, asSheet: true}
-				ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+				ui.Column(c).FillWidth().Background(tok.Surface).Gap(float32(tok.Spacing4)).Children(func() {
 					build(m)
 					m.flush()
 				})
 				st.lastItems = len(m.items)
 			})
+			ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 			cancelBtn := ui.ButtonBase(c.Key("kit-sheet-cancel")).FillWidth().MinHeight(rowH).
-				Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Center().Label("取消")
+				Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).Border(1, tok.HairlineDivider).Center().Label("取消")
 			if cancelBtn.Pressed() {
 				cancelBtn.Background(tok.GhostActive)
 			}
@@ -309,7 +311,7 @@ func (m *Menu) dividing() {
 	if m.divide && m.shown {
 		ui.Box(m.c).FillWidth().Height(1).
 			Margin(float32(m.tok.Spacing4), float32(m.tok.Spacing8), float32(m.tok.Spacing4), float32(m.tok.Spacing8)).
-			Background(m.tok.BorderSubtle).Shrink(0)
+			Background(m.tok.HairlineDivider).Shrink(0)
 	}
 	m.divide = false
 }
@@ -350,7 +352,7 @@ func (m *Menu) Submenu(label string, build func(sub *Menu)) {
 	c, tok, st := m.c, m.tok, m.st
 	b := ui.ButtonBase(c).Key(len(m.items)).Label(label).FillWidth().MinWidth(0).
 		Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-		Radius(float32(tok.ControlRadius)).
+		Radius(tok.InnerPanelRadius(tok.Spacing4)).
 		Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
 		Role(ui.RoleMenuItem).TextColor(tok.Text)
 	m.items = append(m.items, menuRow{e: b, enabled: true})
@@ -447,6 +449,7 @@ func (m *Menu) Submenu(label string, build func(sub *Menu)) {
 				MinWidth(168).MaxWidth(320).
 				Padding(float32(tok.Spacing4)).Gap(1).
 				TextColor(tok.Text).
+				Transition(theme.AnchoredPopoverTransition()).
 				AttachTo(b, anchorSelf, anchorTarget)
 			ApplyElevation(subPanel, tok, ElevationFloating)
 
@@ -490,6 +493,9 @@ func (m *Menu) flush() {
 	m.shown = true
 	c, tok := m.c, m.tok
 	if m.asSheet {
+		if len(m.items) > 0 && m.shown {
+			ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider).Shrink(0)
+		}
 		rowH := float32(tok.Spacing48)
 		if rowH < mobileSheetMinRowHeight {
 			rowH = mobileSheetMinRowHeight
@@ -497,7 +503,7 @@ func (m *Menu) flush() {
 		b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).
 			FillWidth().MinWidth(0).MinHeight(rowH).
 			Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
-			Radius(float32(tok.ControlRadius)).
+			Radius(tok.InnerPanelRadius(tok.Spacing4)).
 			Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).
 			TextColor(tok.Text)
 		if it.check {
@@ -507,7 +513,7 @@ func (m *Menu) flush() {
 		}
 		m.items = append(m.items, menuRow{e: b, enabled: !it.disabled})
 
-		bg := tok.Canvas
+		bg := tok.Surface
 		fg := tok.Text
 		if it.disabled {
 			fg = tok.TextDisabled
@@ -537,7 +543,7 @@ func (m *Menu) flush() {
 	}
 	b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).FillWidth().MinWidth(0).
 		Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-		Radius(float32(tok.ControlRadius)).
+		Radius(tok.InnerPanelRadius(tok.Spacing4)).
 		Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
 		TextColor(tok.Text)
 	if it.check {

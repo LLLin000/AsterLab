@@ -58,17 +58,27 @@ func ApplyElevation(el ui.Element, tok theme.Tokens, level Elevation) ui.Element
 		}
 	}
 
-	if tok.Dark && tok.TopHighlight.A > 0 && level >= ElevationCard {
+	if tok.Dark && level >= ElevationCard {
+		rimCol := tok.SpecularRim
+		if rimCol.A == 0 {
+			rimCol = tok.TopHighlight
+		}
 		hlCol := tok.TopHighlight
 		rad := float32(tok.PanelRadius)
 		if level == ElevationModal {
 			rad = float32(tok.DialogRadius)
 		}
-		el.DrawOver(func(p *ui.Painter, r ui.Rect) {
-			if r.W > rad*2+4 {
-				p.Line(r.X+rad*0.75, r.Y+1, r.X+r.W-rad*0.75, r.Y+1, 1, hlCol)
-			}
-		})
+		if rimCol.A > 0 || hlCol.A > 0 {
+			el.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if rimCol.A > 0 && r.W > 4 && r.H > 4 {
+					inner := ui.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}
+					p.Stroke(inner, rimCol, theme.ConcentricRadius(rad, 1), 1)
+				}
+				if hlCol.A > 0 && r.W > rad*2+4 {
+					p.Line(r.X+rad*0.75, r.Y+1, r.X+r.W-rad*0.75, r.Y+1, 1, hlCol)
+				}
+			})
+		}
 	}
 	return el
 }

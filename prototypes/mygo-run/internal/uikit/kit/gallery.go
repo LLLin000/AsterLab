@@ -2,7 +2,11 @@ package kit
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -32,7 +36,7 @@ type GalleryState struct {
 	ActiveSection   string // "all" or section ID
 	Search          string
 	ThemeOverride   string // ""/"follow" | "light" | "dark"
-	PresetOverride  string // "" | obsidian | zinc | warm
+	PresetOverride  string // "" | paper | zinc | warm
 	DensityOverride string // "" | compact | default | comfortable
 	NarrowPreview   bool   // Constrain canvas to 520dp narrow-pane check
 	MobilePreview   bool   // Constrain canvas to 402dp iPhone viewport check
@@ -52,6 +56,20 @@ type GalleryState struct {
 	PeekOpen      bool
 	FilterState   FilterBarState
 	DemoToasts    *ToastQueue
+
+	// Spatial Emergence Motion Sandbox state
+	SandboxTransition string // "quick-palette" | "popover" | "modal" | "lightbox"
+	SandboxOpen       bool
+	SandboxBackdrop   bool
+
+	// Darkroom Lightbox & Contact-Sheet Gallery state
+	ContactDarkroom bool
+	ContactDarkInit bool
+	ContactSelectOn bool
+	ContactSelected map[string]bool
+	LightboxOpen    bool
+	LightboxItemID  string
+	LightboxState   DarkroomLightboxState
 
 	plateState plate.InteractionState
 }
@@ -83,6 +101,16 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 	}
 	if st.DemoToasts == nil {
 		st.DemoToasts = NewToastQueue()
+	}
+	if !st.ContactDarkInit {
+		st.ContactDarkInit = true
+		st.ContactDarkroom = true
+	}
+	if st.SandboxTransition == "" {
+		st.SandboxTransition = "quick-palette"
+	}
+	if st.ContactSelected == nil {
+		st.ContactSelected = map[string]bool{"spec-huvec-1": true}
 	}
 
 	tok := theme.GetTokens(c.Theme())
@@ -141,6 +169,17 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 				renderStoryScienceCarriers(c, tok, st)
 			},
 		},
+		{
+			ID:       "darkroom-contact-sheet",
+			Group:    "暗房图库",
+			NavTitle: "暗房灯箱与印样",
+			Title:    "3D. 暗房灯箱与印样画廊",
+			Subtitle: "DarkroomLightbox · ContactSheetGrid · 2px 紧致方格 · tnum 时间线 · 双击 2x / 下滑关闭",
+			Icon:     lucide.Aperture(),
+			Render: func(c *ui.Context, tok theme.Tokens) {
+				renderStoryDarkroomGallery(c, tok, st)
+			},
+		},
 	}
 	sections = append(sections, extra...)
 
@@ -153,9 +192,9 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		densityLabel = "标准密度"
 	}
 	presetLabel := map[string]string{
-		theme.PresetObsidian: "纯净白纸",
-		theme.PresetZinc:     "冷银极简",
-		theme.PresetWarm:     "暖润纸面",
+		theme.PresetPaper: "纯净白纸",
+		theme.PresetZinc:  "冷银极简",
+		theme.PresetWarm:  "暖润纸面",
 	}[tok.Preset]
 	if presetLabel == "" {
 		presetLabel = "纯净白纸"
@@ -198,67 +237,74 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 			}
 
 			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				trackInnerRad := tok.InnerControlRadius(tok.Spacing4 / 2)
 				// Theme Light/Dark override pills
-				ui.Text(c, "明暗").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
-					for _, tm := range []struct{ id, lbl string }{
-						{"follow", "跟随"},
-						{"light", "浅色"},
-						{"dark", "深色"},
-					} {
-						tm := tm
-						on := st.ThemeOverride == tm.id
-						v := components.ButtonGhost
-						if on {
-							v = components.ButtonToolbar
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "明暗").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+						for _, tm := range []struct{ id, lbl string }{
+							{"follow", "跟随"},
+							{"light", "浅色"},
+							{"dark", "深色"},
+						} {
+							tm := tm
+							on := st.ThemeOverride == tm.id
+							v := components.ButtonGhost
+							if on {
+								v = components.ButtonToolbar
+							}
+							if components.Button(c, tm.lbl, v).Radius(trackInnerRad).Clicked() {
+								st.ThemeOverride = tm.id
+							}
 						}
-						if components.Button(c, tm.lbl, v).Clicked() {
-							st.ThemeOverride = tm.id
-						}
-					}
+					})
 				})
 
 				// Preset override pills
-				ui.Text(c, "色盘").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
-					for _, pr := range []struct{ id, lbl string }{
-						{theme.PresetObsidian, "纯净白纸"},
-						{theme.PresetZinc, "冷银灰"},
-						{theme.PresetWarm, "暖润纸面"},
-					} {
-						pr := pr
-						on := (st.PresetOverride == "" && tok.Preset == pr.id) || st.PresetOverride == pr.id
-						v := components.ButtonGhost
-						if on {
-							v = components.ButtonToolbar
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "色盘").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+						for _, pr := range []struct{ id, lbl string }{
+							{theme.PresetPaper, "纯净白纸"},
+							{theme.PresetZinc, "冷银灰"},
+							{theme.PresetWarm, "暖润纸面"},
+						} {
+							pr := pr
+							on := (st.PresetOverride == "" && tok.Preset == pr.id) || st.PresetOverride == pr.id
+							v := components.ButtonGhost
+							if on {
+								v = components.ButtonToolbar
+							}
+							if components.Button(c, pr.lbl, v).Radius(trackInnerRad).Clicked() {
+								st.PresetOverride = pr.id
+							}
 						}
-						if components.Button(c, pr.lbl, v).Clicked() {
-							st.PresetOverride = pr.id
-						}
-					}
+					})
 				})
 
 				// Density override pills
-				ui.Text(c, "密度").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
-					for _, dn := range []struct{ id, lbl string }{
-						{theme.DensityCompact, "紧凑"},
-						{theme.DensityDefault, "标准"},
-						{theme.DensityComfortable, "舒展"},
-					} {
-						dn := dn
-						on := (st.DensityOverride == "" && tok.Density == dn.id) || st.DensityOverride == dn.id
-						v := components.ButtonGhost
-						if on {
-							v = components.ButtonToolbar
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Text(c, "密度").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+						for _, dn := range []struct{ id, lbl string }{
+							{theme.DensityCompact, "紧凑"},
+							{theme.DensityDefault, "标准"},
+							{theme.DensityComfortable, "舒展"},
+						} {
+							dn := dn
+							on := (st.DensityOverride == "" && tok.Density == dn.id) || st.DensityOverride == dn.id
+							v := components.ButtonGhost
+							if on {
+								v = components.ButtonToolbar
+							}
+							if components.Button(c, dn.lbl, v).Radius(trackInnerRad).Clicked() {
+								st.DensityOverride = dn.id
+							}
 						}
-						if components.Button(c, dn.lbl, v).Clicked() {
-							st.DensityOverride = dn.id
-						}
-					}
+					})
 				})
 
 				if !compactGallery {
@@ -343,7 +389,7 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 								sec := sec
 								if sec.Group != lastGroup {
 									lastGroup = sec.Group
-									ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8), 2, float32(tok.Spacing8)).Children(func() {
+									ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing8), float32(tok.Spacing4), float32(tok.Spacing8)).Children(func() {
 										ui.Text(c, sec.Group).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).SingleLine()
 									})
 								}
@@ -447,6 +493,47 @@ func RenderComponentGallery(c *ui.Context, st *GalleryState, extra ...StorySecti
 		})
 	})
 	st.DemoToasts.Render(c, tok)
+
+	if st.LightboxOpen {
+		spec := findStorySpecimen(st.LightboxItemID)
+		DarkroomLightbox(c, tok, &st.LightboxOpen, &st.LightboxState, DarkroomLightboxProps{
+			Key:          "storybook-darkroom-lightbox",
+			Title:        spec.Title,
+			FormatBadge:  spec.FormatBadge,
+			MetaSummary:  spec.MetaSummary,
+			Caption:      spec.Caption,
+			HeroMatchKey: spec.HeroKey,
+			Image:        spec.Bitmap,
+			Actions: []DarkroomLightboxAction{
+				{
+					ID:    "insert",
+					Label: "插入当前实验",
+					Icon:  lucide.Plus(),
+					Primary: true,
+					OnClick: func() {
+						st.DemoToasts.Push(Toast{Tone: ToastSuccess, Message: "已插入：" + spec.Title})
+						st.LightboxOpen = false
+					},
+				},
+				{
+					ID:    "export",
+					Label: "导出原片",
+					Icon:  lucide.Download(),
+					OnClick: func() {
+						st.DemoToasts.Push(Toast{Tone: ToastInfo, Message: "已导出 " + spec.FormatBadge + "：" + spec.ID})
+					},
+				},
+				{
+					ID:    "ghost",
+					Label: "设为叠影参考",
+					Icon:  lucide.Layers(),
+					OnClick: func() {
+						st.DemoToasts.Push(Toast{Tone: ToastInfo, Message: "已设为叠影参考：" + spec.RoleBadge})
+					},
+				},
+			},
+		})
+	}
 }
 
 func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryState) {
@@ -485,9 +572,9 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 					Width(float32(tok.Spacing48)*2.0).
 					Padding(float32(tok.Spacing4)).
 					Radius(float32(tok.ControlRadius)).
-					Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(4).Children(func() {
+					Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Box(c).FillWidth().Height(float32(tok.Spacing24)).
-						Radius(float32(tok.ControlRadius) - 1).Background(sw.col).Border(1, tok.Border)
+						Radius(tok.InnerControlRadius(tok.Spacing4)).Background(sw.col).Border(1, tok.Border)
 					ui.Text(c, sw.name).FontSize(float32(tok.TextMeta)).TextColor(tok.Text).SingleLine().Ellipsis("…")
 				})
 			}
@@ -534,7 +621,7 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 			}
 		})
 
-		// Interactive Motion Curve Sandbox
+		// Interactive Motion Curve Sandbox + Spatial Emergence Grammar
 		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Text(c, "动效沙盒：").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 			nudgeBox := ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8))
@@ -561,6 +648,166 @@ func renderStoryTokensAndMotion(c *ui.Context, tok theme.Tokens, st *GalleryStat
 				pill.Children(func() {
 					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine()
 				})
+			})
+		})
+
+		// 1B. Concentric Border Radius + Darkroom & Specular Rim Surface Ladder
+		ui.Row(c).FillWidth().Wrap().AlignItems(ui.Stretch).Gap(float32(tok.Spacing12)).Children(func() {
+			// Concentric Border Radius visual card
+			concCard := ui.Column(c.Key("gal-concentric-card")).Grow(1).MinWidth(float32(tok.Spacing48)*6.5).
+				Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+				Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing8))
+			concCard.Children(func() {
+				ui.Text(c, "1B. 同心圆角几何 (Concentric Border Radius)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				ui.Text(c, "R_inner = max(2, R_outer - pad) · 消除嵌套拐角视觉挤压").FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+					// DialogRadius (14) -> pad 4/6/8 -> Inner
+					dlgOuter := ui.Box(c).Padding(float32(tok.Spacing4)).
+						Radius(float32(tok.DialogRadius)).Background(tok.Surface).Border(1, tok.BorderStrong)
+					dlgOuter.Children(func() {
+						ui.Column(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(tok.InnerDialogRadius(tok.Spacing4)).
+							Background(tok.SelectedRow).Border(1, tok.Border).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+							ui.Text(c, fmt.Sprintf("Dialog %d -> Inner %.0f", tok.DialogRadius, tok.InnerDialogRadius(tok.Spacing4))).
+								FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().TextColor(tok.Text).SingleLine()
+							ui.Text(c, fmt.Sprintf("pad %d -> Inner %.0f", tok.Spacing8, tok.InnerDialogRadius(tok.Spacing8))).
+								FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+						})
+					})
+
+					// PanelRadius (12) -> pad Spacing4 (4) -> Inner (8)
+					pnlOuter := ui.Box(c).Padding(float32(tok.Spacing4)).
+						Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.BorderStrong)
+					pnlOuter.Children(func() {
+						ui.Column(c).Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(tok.InnerPanelRadius(tok.Spacing4)).
+							Background(tok.SelectedRow).Border(1, tok.Border).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+							ui.Text(c, fmt.Sprintf("Panel %d -> Inner %.0f", tok.PanelRadius, tok.InnerPanelRadius(tok.Spacing4))).
+								FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().TextColor(tok.Text).SingleLine()
+							ui.Text(c, fmt.Sprintf("Control %d -> Inner %.0f", tok.ControlRadius, tok.InnerControlRadius(tok.Spacing4))).
+								FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted).SingleLine()
+						})
+					})
+				})
+			})
+
+			// Darkroom & Specular Rim Surface Ladder card
+			drCard := ui.Column(c.Key("gal-darkroom-ladder")).Grow(1).MinWidth(float32(tok.Spacing48)*6.5).
+				Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+				Background(tok.DarkroomCanvas).Border(1, tok.DarkroomBorder).Gap(float32(tok.Spacing8))
+			drCard.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if tok.SpecularRim.A > 0 && r.W > 4 && r.H > 4 {
+					p.Stroke(ui.Rect{X: r.X + 1, Y: r.Y + 1, W: r.W - 2, H: r.H - 2}, tok.SpecularRim, theme.ConcentricRadius(float32(tok.PanelRadius), 1), 1)
+				}
+			})
+			drCard.Children(func() {
+				ui.Text(c, "1C. 暗房表面阶梯与 1px 高光边 (Darkroom & SpecularRim)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.DarkroomText)
+				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					drSteps := []struct {
+						lbl string
+						bg  ui.Color
+					}{
+						{"DarkroomCanvas", tok.DarkroomCanvas},
+						{"DarkroomSurface", tok.DarkroomSurface},
+						{"DarkroomElevated", tok.DarkroomElevated},
+						{"DarkroomBadgeBg", tok.DarkroomBadgeBg},
+					}
+					for _, ds := range drSteps {
+						ui.Row(c).Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+							Radius(tok.InnerPanelRadius(tok.Spacing4)).
+							Background(ds.bg).Border(1, tok.DarkroomBorder).Children(func() {
+							ui.Text(c, ds.lbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.DarkroomText).SingleLine()
+						})
+					}
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
+				ui.Text(c, "HairlineDivider · SpecularRim 1px 阳极氧化石墨边线（恒定暗房标定）").
+					FontSize(float32(tok.TextMeta)).TextColor(tok.DarkroomMuted).SingleLine().Ellipsis("…")
+			})
+		})
+
+		// 1D. Spatial Emergence Motion Sandbox
+		sbCard := ui.Column(c.Key("gal-motion-sandbox")).FillWidth().
+			Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
+			Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing8))
+		sbCard.Children(func() {
+			ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Text(c, "1D. 空间浮现动效沙盒 (Spatial Emergence)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+				triggers := []struct {
+					id, lbl string
+				}{
+					{"quick-palette", "QuickPalette 95ms"},
+					{"popover", "Popover 150ms"},
+					{"modal", "Modal 190ms"},
+					{"lightbox", "Lightbox 220ms"},
+				}
+				for _, tr := range triggers {
+					tr := tr
+					v := components.ButtonSecondary
+					if st.SandboxOpen && st.SandboxTransition == tr.id {
+						v = components.ButtonPrimary
+					}
+					if components.Button(c.Key("sb-trig-"+tr.id), tr.lbl, v).Clicked() {
+						if st.SandboxTransition == tr.id {
+							st.SandboxOpen = !st.SandboxOpen
+						} else {
+							st.SandboxTransition = tr.id
+							st.SandboxOpen = true
+						}
+					}
+				}
+				bdVar := components.ButtonSecondary
+				if st.SandboxBackdrop {
+					bdVar = components.ButtonPrimary
+				}
+				if components.Button(c.Key("sb-trig-backdrop"), "SheetBackdrop 0.94", bdVar).Clicked() {
+					st.SandboxBackdrop = !st.SandboxBackdrop
+				}
+			})
+
+			// Live Emergence Preview Stage
+			stage := ui.Row(c.Key("gal-sb-stage")).FillWidth().MinHeight(float32(tok.Spacing48)*1.7).
+				Padding(float32(tok.Spacing12)).
+				Radius(tok.InnerPanelRadius(tok.Spacing4)).
+				Background(tok.Canvas).Border(1, tok.HairlineDivider).
+				AlignItems(ui.Center).Gap(float32(tok.Spacing12))
+			theme.ApplySheetBackdropDepth(stage, st.SandboxBackdrop)
+			stage.Children(func() {
+				ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4)*0.5).Children(func() {
+					ui.Text(c, "工作区画布景深层 (ApplySheetBackdropDepth)").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
+					statusLbl := "Scale 1.00 · 正常前景"
+					if st.SandboxBackdrop {
+						statusLbl = fmt.Sprintf("Scale %.2f · 底部 Sheet 升起退让", theme.SheetBackdropScale)
+					}
+					ui.Text(c, statusLbl).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").TextColor(tok.TextMuted)
+				})
+				if st.SandboxOpen {
+					var tr ui.ElementTransition
+					var trDesc string
+					switch st.SandboxTransition {
+					case "popover":
+						tr = theme.AnchoredPopoverTransition()
+						trDesc = "AnchoredPopoverTransition · 150ms · Scale 0.96 · Flip"
+					case "modal":
+						tr = theme.ModalDialogTransition()
+						trDesc = "ModalDialogTransition · 190ms · Scale 0.96 · Y +6"
+					case "lightbox":
+						tr = theme.DarkroomLightboxTransition()
+						trDesc = "DarkroomLightboxTransition · 220ms · Scale 0.93"
+					default:
+						tr = theme.QuickPaletteTransition()
+						trDesc = "QuickPaletteTransition · 95ms · Scale 0.98 · Y -4"
+					}
+					surf := ui.Row(c.Key("sb-surf-"+st.SandboxTransition)).
+						Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+						AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+						Transition(tr)
+					ApplyElevation(surf, tok, ElevationFloating)
+					surf.Children(func() {
+						ui.Icon(c, lucide.Sparkles()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.Accent)
+						ui.Text(c, trDesc).FontSize(float32(tok.TextMeta)).FontFeatures("tnum").Bold().TextColor(tok.Text).SingleLine()
+					})
+				}
 			})
 		})
 	})
@@ -809,6 +1056,257 @@ func renderStoryScienceCarriers(c *ui.Context, tok theme.Tokens, st *GalleryStat
 					ui.Text(c, sp.CommonStrains).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine().Ellipsis("…")
 				})
 			}
+		})
+	})
+}
+
+type storySpecimen struct {
+	ID          string
+	BatchID     string
+	Title       string
+	FormatBadge string
+	RoleBadge   string
+	CapturedAt  string
+	MetaSummary string
+	Caption     string
+	HeroKey     string
+	Kind        string // "fluo" | "bright" | "gel" | "tube"
+	Bitmap      *ui.Bitmap
+}
+
+var (
+	storySpecimensOnce sync.Once
+	storySpecimensList []storySpecimen
+)
+
+func getStorySpecimens() []storySpecimen {
+	storySpecimensOnce.Do(func() {
+		specs := []storySpecimen{
+			{
+				ID: "spec-huvec-1", BatchID: "B1",
+				Title: "HUVEC · DAPI+FITC 共定位", FormatBadge: "DNG", RoleBadge: "A1", CapturedAt: "14:22",
+				MetaSummary: "ISO 400 · 1/125 s · 5600K · 20x Obj",
+				Caption:     "EXP-2026-1127 · 孔 A1 · 10 uM HAMA 处理组",
+				HeroKey:     "sb-hero-huvec-1", Kind: "fluo",
+			},
+			{
+				ID: "spec-huvec-2", BatchID: "B1",
+				Title: "FITC 血管内皮通道", FormatBadge: "RAW+JPG", RoleBadge: "A2", CapturedAt: "14:24",
+				MetaSummary: "ISO 640 · 1/60 s · 488nm · 20x Obj",
+				Caption:     "EXP-2026-1127 · 孔 A2 · 荧光定量基线",
+				HeroKey:     "sb-hero-huvec-2", Kind: "tube",
+			},
+			{
+				ID: "spec-huvec-3", BatchID: "B1",
+				Title: "PBS 对照明场相差", FormatBadge: "DNG", RoleBadge: "B1", CapturedAt: "14:27",
+				MetaSummary: "ISO 100 · 1/500 s · 5400K · 10x Obj",
+				Caption:     "EXP-2026-1127 · 孔 B1 · PBS 空白对照",
+				HeroKey:     "sb-hero-huvec-3", Kind: "bright",
+			},
+			{
+				ID: "spec-huvec-4", BatchID: "B1",
+				Title: "TRITC 成管分支网络", FormatBadge: "PNG", RoleBadge: "B2", CapturedAt: "14:31",
+				MetaSummary: "ISO 800 · 1/30 s · 561nm · 20x Obj",
+				Caption:     "EXP-2026-1127 · 孔 B2 · 血管环完整度 92%",
+				HeroKey:     "sb-hero-huvec-4", Kind: "fluo",
+			},
+			{
+				ID: "spec-gel-1", BatchID: "B2",
+				Title: "SDS-PAGE 考马斯亮蓝", FormatBadge: "TIFF", RoleBadge: "Lane1", CapturedAt: "18:05",
+				MetaSummary: "16-bit · 曝光 0.8 s · 300 dpi",
+				Caption:     "蛋白表达验证 · Marker 15–180 kDa",
+				HeroKey:     "sb-hero-gel-1", Kind: "gel",
+			},
+			{
+				ID: "spec-gel-2", BatchID: "B2",
+				Title: "WB 化学发光 12s", FormatBadge: "DNG", RoleBadge: "Lane2", CapturedAt: "18:09",
+				MetaSummary: "ISO 1600 · 12.0 s · f/2.8 · ChemiDoc",
+				Caption:     "目的条带 52 kDa · 内参 GAPDH 36 kDa",
+				HeroKey:     "sb-hero-gel-2", Kind: "gel",
+			},
+			{
+				ID: "spec-gel-3", BatchID: "B2",
+				Title: "抑菌圈平皿暗室复拍", FormatBadge: "RAW+JPG", RoleBadge: "Dish3", CapturedAt: "18:14",
+				MetaSummary: "ISO 200 · 1/250 s · 5500K · f/4",
+				Caption:     "MRSA 抑菌圈测定 · 环径 18.4 mm",
+				HeroKey:     "sb-hero-gel-3", Kind: "tube",
+			},
+		}
+		for i := range specs {
+			specs[i].Bitmap = makeSyntheticLabBitmap(specs[i].Kind, i)
+		}
+		storySpecimensList = specs
+	})
+	return storySpecimensList
+}
+
+func findStorySpecimen(id string) storySpecimen {
+	list := getStorySpecimens()
+	for _, s := range list {
+		if s.ID == id {
+			return s
+		}
+	}
+	return list[0]
+}
+
+func makeSyntheticLabBitmap(kind string, seed int) *ui.Bitmap {
+	const sz = 160
+	img := image.NewRGBA(image.Rect(0, 0, sz, sz))
+	for y := 0; y < sz; y++ {
+		for x := 0; x < sz; x++ {
+			fx := float64(x) / sz
+			fy := float64(y) / sz
+			var r, g, b uint8
+			switch kind {
+			case "fluo":
+				// Darkfield fluorescence microscopy: glowing green/cyan/amber puncta on deep obsidian
+				v1 := math.Sin((fx*9+float64(seed)*0.7)*math.Pi) * math.Cos((fy*9-float64(seed)*0.3)*math.Pi)
+				v2 := math.Exp(-((fx-0.42)*(fx-0.42) + (fy-0.48)*(fy-0.48)) * 22)
+				v3 := math.Exp(-((fx-0.66)*(fx-0.66) + (fy-0.36)*(fy-0.36)) * 30)
+				glow := math.Max(0, v1)*0.45 + v2*0.95 + v3*0.75
+				if seed%2 == 0 {
+					r = uint8(min(255, int(12+glow*40)))
+					g = uint8(min(255, int(18+glow*215)))
+					b = uint8(min(255, int(24+glow*160)))
+				} else {
+					r = uint8(min(255, int(14+glow*220)))
+					g = uint8(min(255, int(14+glow*145)))
+					b = uint8(min(255, int(20+glow*45)))
+				}
+			case "tube":
+				// Vascular ring / Petri colony ring pattern
+				dx, dy := fx-0.5, fy-0.5
+				dist := math.Sqrt(dx*dx + dy*dy)
+				ring := math.Exp(-math.Pow((dist-0.28)*9, 2)) + 0.55*math.Exp(-math.Pow((dist-0.14)*12, 2))
+				net := 0.5 + 0.5*math.Sin(fx*22+fy*14)
+				val := math.Min(1.0, ring*(0.65+0.35*net))
+				r = uint8(18 + val*120)
+				g = uint8(24 + val*205)
+				b = uint8(30 + val*180)
+			case "gel":
+				// SDS-PAGE electrophoresis bands across 4 lanes
+				r, g, b = 18, 22, 28
+				lane := int(fx * 5)
+				inLane := (fx*5 - float64(lane))
+				if lane >= 1 && lane <= 3 && inLane > 0.22 && inLane < 0.78 {
+					band1 := math.Exp(-math.Pow((fy-0.28)*28, 2))
+					band2 := math.Exp(-math.Pow((fy-0.54)*24, 2)) * (0.4 + 0.2*float64(lane))
+					band3 := math.Exp(-math.Pow((fy-0.76)*30, 2)) * 0.85
+					lum := math.Min(1.0, band1+band2+band3)
+					r = uint8(18 + lum*195)
+					g = uint8(24 + lum*210)
+					b = uint8(36 + lum*215)
+				}
+			default: // brightfield phase contrast
+				wave := 0.5 + 0.5*math.Sin(fx*16)*math.Cos(fy*16)
+				base := 185 + int(wave*35)
+				r, g, b = uint8(base), uint8(base+4), uint8(base+8)
+			}
+			img.SetRGBA(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
+		}
+	}
+	return ui.NewBitmap(img)
+}
+
+func renderStoryDarkroomGallery(c *ui.Context, tok theme.Tokens, st *GalleryState) {
+	outer := ui.Column(c).FillWidth().Padding(float32(tok.Spacing12), float32(tok.Spacing16)).Gap(float32(tok.Spacing12))
+	ApplyElevation(outer, tok, ElevationCard)
+	outer.Children(func() {
+		SectionHeader(c, tok, lucide.Aperture(), "3D. 暗房灯箱与印样画廊",
+			"DarkroomLightbox · ContactSheetGrid · 2px 紧致方格 · tnum 时间线 · 点击入暗房（双击 2x / 下滑关闭）", func() {
+				ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					drVar := components.ButtonSecondary
+					if st.ContactDarkroom {
+						drVar = components.ButtonPrimary
+					}
+					if components.Button(c, "暗房底色", drVar).Clicked() {
+						st.ContactDarkroom = !st.ContactDarkroom
+					}
+					selVar := components.ButtonSecondary
+					if st.ContactSelectOn {
+						selVar = components.ButtonPrimary
+					}
+					if components.Button(c, "多选模式", selVar).Clicked() {
+						st.ContactSelectOn = !st.ContactSelectOn
+					}
+				})
+			})
+
+		specs := getStorySpecimens()
+		var b1Items, b2Items []ContactSheetItem
+		for _, sp := range specs {
+			it := ContactSheetItem{
+				ID:           sp.ID,
+				Title:        sp.Title,
+				FormatBadge:  sp.FormatBadge,
+				RoleBadge:    sp.RoleBadge,
+				CapturedAt:   sp.CapturedAt,
+				Image:        sp.Bitmap,
+				HeroMatchKey: sp.HeroKey,
+			}
+			if sp.BatchID == "B1" {
+				b1Items = append(b1Items, it)
+			} else {
+				b2Items = append(b2Items, it)
+			}
+		}
+
+		batches := []ContactSheetBatch{
+			{
+				ID:          "B20261127-01",
+				Title:       "2026-11-27 · B20261127-01 · HUVEC 免疫荧光",
+				Subtitle:    "20x 物镜 · 共聚焦/明场组",
+				ActionLabel: "选择本批",
+				OnAction: func() {
+					st.ContactSelectOn = true
+					for _, it := range b1Items {
+						st.ContactSelected[it.ID] = true
+					}
+				},
+				Items: b1Items,
+			},
+			{
+				ID:          "B20261126-03",
+				Title:       "2026-11-26 · B20261126-03 · 凝胶与平皿成像",
+				Subtitle:    "ChemiDoc + 暗室复拍",
+				ActionLabel: "清空选中",
+				OnAction: func() {
+					clear(st.ContactSelected)
+				},
+				Items: b2Items,
+			},
+		}
+
+		var activeHero any
+		if st.LightboxOpen {
+			activeHero = findStorySpecimen(st.LightboxItemID).HeroKey
+		}
+
+		sheetWrap := ui.Column(c).FillWidth().
+			Padding(float32(tok.Spacing12)).
+			Radius(float32(tok.PanelRadius)).
+			Clip()
+		if st.ContactDarkroom {
+			sheetWrap.Background(tok.DarkroomCanvas).Border(1, tok.DarkroomBorder)
+		} else {
+			sheetWrap.Background(tok.Canvas).Border(1, tok.HairlineDivider)
+		}
+		sheetWrap.Children(func() {
+			ContactSheetGrid(c, tok, batches, ContactSheetOptions{
+				Darkroom:      st.ContactDarkroom,
+				SelectedIDs:   st.ContactSelected,
+				SelectionOn:   st.ContactSelectOn,
+				ActiveHeroKey: activeHero,
+				OnItemClick: func(item ContactSheetItem) {
+					if st.ContactSelectOn {
+						st.ContactSelected[item.ID] = !st.ContactSelected[item.ID]
+						return
+					}
+					st.LightboxItemID = item.ID
+					st.LightboxOpen = true
+				},
+			})
 		})
 	})
 }

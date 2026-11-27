@@ -44,15 +44,16 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 	root.Children(func() {
 		scrim := ui.ButtonBase(c.Key("sidepeek-scrim")).Grow(1).FillHeight().
 			Label("关闭侧滑详情").
-			Background(tok.Scrim)
+			Background(tok.Scrim).
+			Transition(theme.MobileOverlayFadeTransition())
 		if scrim.Clicked() {
 			*open = false
 		}
 
 		panel := ui.Column(c.Key("sidepeek-panel")).
-			Width(panelW).FillHeight().Clip()
+			Width(panelW).FillHeight().Clip().
+			Transition(theme.ModalDialogTransition())
 		ApplyElevation(panel, tok, ElevationModal)
-		panel.Background(tok.Surface).Border(1, tok.BorderStrong)
 		panel.Children(func() {
 			ui.Row(c).FillWidth().
 				Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
@@ -74,7 +75,7 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 					*open = false
 				}
 			})
-			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 
 			ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
 				ui.Column(c).FillWidth().Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing12)).Children(func() {
@@ -85,7 +86,7 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 			})
 
 			if opts.Footer != nil {
-				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+				ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 				ui.Row(c).FillWidth().
 					Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
 					AlignItems(ui.Center).
@@ -98,7 +99,8 @@ func SidePeek(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePee
 func renderMobileSidePeekPage(c *ui.Context, key any, tok theme.Tokens, open *bool, opts SidePeekOptions, body func()) {
 	t := c.Theme()
 	topSafe, rightSafe, bottomSafe, leftSafe := c.SafeArea()
-	ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).Children(func() {
+	ui.Column(c.Key(key)).Absolute().Fill().Modal().Background(tok.Canvas).
+		Transition(theme.MobilePagePushTransition()).Children(func() {
 		ui.Row(c).FillWidth().
 			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
 			MinHeight(t.Space(12)+topSafe).
@@ -116,7 +118,7 @@ func renderMobileSidePeekPage(c *ui.Context, key any, tok theme.Tokens, open *bo
 				ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(t.Space(1)).Children(opts.HeaderActions)
 			}
 		})
-		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+		ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 
 		ui.Scroll(c.Key("sidepeek-mb-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
 			ui.Column(c).FillWidth().
@@ -129,7 +131,7 @@ func renderMobileSidePeekPage(c *ui.Context, key any, tok theme.Tokens, open *bo
 		})
 
 		if opts.Footer != nil {
-			ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+			ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 			ui.Row(c).FillWidth().Wrap().
 				Padding(t.Space(3), t.Space(4)+rightSafe, t.Space(3)+bottomSafe, t.Space(4)+leftSafe).
 				AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(opts.Footer)
