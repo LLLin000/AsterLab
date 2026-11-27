@@ -167,10 +167,10 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 					btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-tab-%d-%d", ctx, idx))).
 						Grow(1).MinWidth(0).Center().
 						Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-						Radius(float32(tok.ControlRadius)).Label(ariaLabels[idx])
+						Radius(tok.InnerControlRadius(tok.Spacing4)).Label(ariaLabels[idx])
 					fg := tok.TextMuted
 					if active {
-						btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+						btn.Background(tok.Surface).Border(1, tok.BorderSubtle)
 						fg = tok.Text
 					} else if btn.Hovered() {
 						btn.Background(tok.GhostHover)
@@ -261,7 +261,7 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 
 	// Stage overview card
 	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			components.Text(c, "实验排期统计").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 			ui.Spacer(c)
@@ -276,7 +276,7 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 
 	// Selected date agenda card
 	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			components.Text(c, "选中日期 · "+selDate).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).FontFeatures("tnum")
 			ui.Spacer(c)
@@ -294,7 +294,10 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 				exp := exp
 				btn := ui.ButtonBase(c.Key("rd-cal-day-"+exp.ID)).FillWidth().Justify(ui.Start).
 					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-					Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).Label(exp.Title)
+					Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).Label(exp.Title)
+				if btn.Hovered() {
+					btn.Background(tok.SelectedRow)
+				}
 				btn.Children(func() {
 					components.Text(c, exp.Title).FontSize(float32(tok.TextData)).TextColor(tok.Text).SingleLine().Ellipsis("…")
 				})
@@ -343,7 +346,7 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 	upSum := schedule.SummarizeUpcoming(s.CalendarEvents, todayYMD, 7)
 	if len(upSum.NextEvents) > 0 {
 		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-			Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
+			Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing4)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 				ui.Icon(c, lucide.FlaskConical()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 				components.Text(c, "未来 7 天试剂与动物节点").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
@@ -353,7 +356,10 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 				ev := ev
 				row := ui.ButtonBase(c.Key(fmt.Sprintf("rd-dom-%d-%s", i, ev.ID))).FillWidth().Justify(ui.Start).
 					Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-					Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.BorderSubtle).Label(ev.Title)
+					Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).Label(ev.Title)
+				if row.Hovered() {
+					row.Background(tok.SelectedRow)
+				}
 				row.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 						dtCol := tok.Accent
@@ -391,7 +397,7 @@ func (s *Shell) renderDrawerPantrySummary(c *ui.Context, tok theme.Tokens) {
 	}
 
 	ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			components.Text(c, "试剂耗材健康度").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 			ui.Spacer(c)
@@ -410,7 +416,7 @@ func (s *Shell) renderDrawerPantrySummary(c *ui.Context, tok theme.Tokens) {
 
 	if len(lowItems) == 0 && len(expItems) == 0 {
 		ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-			Background(tok.Elevated).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+			Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.CircleCheck()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Success)
 			components.Text(c, "当前试剂库存充足，暂无低库存或过期预警。").
 				FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
@@ -438,7 +444,7 @@ func (s *Shell) renderDrawerPantrySummary(c *ui.Context, tok theme.Tokens) {
 
 func renderDrawerStatTile(c *ui.Context, tok theme.Tokens, label, val string, accent ui.Color) {
 	ui.Column(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8)).
-		Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).
+		Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).
 		AlignItems(ui.Center).Gap(2).Children(func() {
 		ui.Text(c, val).FontSize(float32(tok.TextSection)).Bold().TextColor(accent).FontFeatures("tnum").SingleLine()
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
@@ -447,7 +453,7 @@ func renderDrawerStatTile(c *ui.Context, tok theme.Tokens, label, val string, ac
 
 func renderDrawerPantryAlertRow(c *ui.Context, tok theme.Tokens, key string, it QuickPantryItem, tone ui.Color) {
 	ui.Row(c.Key(key)).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-		Background(tok.Elevated).Border(1, tone.Alpha(0.32)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		Background(tok.Surface).Border(1, tone.Alpha(0.32)).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 			components.Text(c, it.Name).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 			meta := firstNonEmptyStr(it.Location, it.LotNumber)
@@ -665,7 +671,7 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 	}
 
 	ui.Column(c.Key("rd-bench-timer")).FillWidth().Padding(float32(tok.Spacing12)).
-		Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, tok.Border).
+		Radius(float32(tok.PanelRadius)).Background(tok.Surface).Border(1, tok.Border).
 		Gap(float32(tok.Spacing8)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 			ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing12)+2, float32(tok.Spacing12)+2).TextColor(tok.Accent)
@@ -692,15 +698,15 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 				btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-bt-preset-%d", m))).
 					Grow(1).MinWidth(0).Center().
 					Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-					Radius(float32(tok.ControlRadius)).Label(lbl)
+					Radius(tok.InnerPanelRadius(tok.Spacing4)).Label(lbl)
 				fg := tok.TextMuted
 				if active {
-					btn.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.55))
-					fg = tok.Accent
+					btn.Background(tok.SelectedRow)
+					fg = tok.Text
 				} else {
-					btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+					btn.Background(tok.Elevated)
 					if btn.Hovered() {
-						btn.Background(tok.AccentSoftBg.Alpha(0.5))
+						btn.Background(tok.GhostHover)
 						fg = tok.Text
 					}
 				}
@@ -734,8 +740,8 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 		})
 
 		// Countdown readout + Start/Pause/Reset
-		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
-			Background(tok.Surface).Border(1, tok.Border.Alpha(0.75)).
+		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+			Background(tok.Elevated).
 			AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			clockColor := tok.Text
 			if bt.Running {
@@ -1109,13 +1115,13 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 			btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-calc-%d", idx))).
 				Grow(1).MinWidth(0).Center().
 				Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-				Radius(float32(tok.ControlRadius)).Label(lbl)
+				Radius(tok.InnerControlRadius(tok.Spacing4)).Label(lbl)
 			fg := tok.TextMuted
 			if active {
-				btn.Background(tok.Surface).Border(1, tok.Border.Alpha(0.75))
+				btn.Background(tok.Surface).Border(1, tok.BorderSubtle)
 				fg = tok.Text
 			} else if btn.Hovered() {
-				btn.Background(tok.Text.Alpha(0.04))
+				btn.Background(tok.GhostHover)
 				fg = tok.Text
 			}
 			btn.Children(func() {
@@ -1142,7 +1148,7 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 		}
 
 		ui.Column(c.Key("rd-dil-card")).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-			Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
+			Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
 			drawerLabeledInput(c, tok, "母液浓度 (C₁)", &s.RightCalc.Stock, "例如 100", &s.RightCalc.StockUnit, quickAllStockUnits)
 			// Re-check compatibility immediately if user just changed StockUnit
 			if f1, _ := quickConcUnitBase(s.RightCalc.StockUnit); f1 != "" {
@@ -1160,8 +1166,8 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 				strings.TrimSpace(s.RightCalc.Target) == "" ||
 				strings.TrimSpace(s.RightCalc.FinalVol) == ""
 			v1UL, diluentUL, msg := computeQuickDilution(s.RightCalc)
-			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-				Background(tok.Surface).Border(1, tok.Accent.Alpha(0.28)).Gap(float32(tok.Spacing4)).Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+				Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
 				if blankDil {
 					ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 						ui.Text(c, "取母液 V₁").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -1205,7 +1211,7 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 		s.RightCalc.MolarVolUnit = "mL"
 	}
 	ui.Column(c.Key("rd-mol-card")).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-		Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
+		Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing12)).Children(func() {
 		drawerLabeledInput(c, tok, "目标摩尔浓度", &s.RightCalc.MolarTarget, "例如 10", &s.RightCalc.MolarTargetUnit, quickMolarUnits)
 		drawerLabeledInput(c, tok, "配置总体积", &s.RightCalc.MolarVol, "例如 5", &s.RightCalc.MolarVolUnit, quickVolUnits)
 		ui.Column(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
@@ -1219,8 +1225,8 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 			strings.TrimSpace(s.RightCalc.MolarVol) == "" ||
 			strings.TrimSpace(s.RightCalc.MolarMass) == ""
 		massMg, msg := computeQuickMolarMass(s.RightCalc)
-		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-			Background(tok.Surface).Border(1, tok.Accent.Alpha(0.28)).Gap(float32(tok.Spacing4)).Children(func() {
+		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+			Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
 			if blankMol {
 				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "需称量溶质").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)

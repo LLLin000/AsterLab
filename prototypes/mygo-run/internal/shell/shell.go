@@ -12,6 +12,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/mobile"
 	"github.com/oneo-me/onevra/source/components"
 	"github.com/oneo-me/onevra/source/icons/lucide"
 	"github.com/oneo-me/onevra/source/shells/sidebar"
@@ -957,7 +958,7 @@ func (s *Shell) renderDesktopStatusBar(c *ui.Context, tok theme.Tokens) {
 				ui.Text(c, "指南").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 			})
 		})
-		components.MenuButton(c, guideBtn, func(m *components.Menu) {
+		s.shellMenuButton(c, guideBtn, func(m *shellMenu) {
 			if m.Item("1 分钟界面区域导览").Chosen() {
 				s.StartTour()
 			}
@@ -1530,4 +1531,282 @@ func (s *Shell) Quit() {
 	if w := s.MyGoWindow(); w != nil {
 		w.OnClosed(func() { mygo.App.Quit() })
 	}
+}
+
+type shellMenuState struct {
+	open            bool
+	asSheet         bool
+	focus, keyboard bool
+	pointer         [2]float32
+	lastItems       int
+}
+
+type shellMenu struct {
+	c       *ui.Context
+	st      *shellMenuState
+	tok     theme.Tokens
+	moved   bool
+	asSheet bool
+	pending *shellMenuItem
+	divide  bool
+	shown   bool
+	items   []shellMenuRow
+}
+
+type shellMenuRow struct {
+	e       ui.Element
+	enabled bool
+}
+
+type shellMenuItem struct {
+	m              *shellMenu
+	label          string
+	disabled       bool
+	built, chosen  bool
+}
+
+func (m *shellMenu) Item(label string) *shellMenuItem {
+	m.flush()
+	it := &shellMenuItem{m: m, label: label}
+	m.pending = it
+	return it
+}
+
+func (m *shellMenu) Separator() {
+	m.flush()
+	m.divide = true
+}
+
+func (it *shellMenuItem) Chosen() bool {
+	it.m.flush()
+	return it.chosen
+}
+
+func (m *shellMenu) dividing() {
+	if m.divide && m.shown {
+		ui.Box(m.c).FillWidth().Height(1).
+			Margin(float32(m.tok.Spacing4), float32(m.tok.Spacing8), float32(m.tok.Spacing4), float32(m.tok.Spacing8)).
+			Background(m.tok.HairlineDivider).Shrink(0)
+	}
+	m.divide = false
+}
+
+func (m *shellMenu) flush() {
+	it := m.pending
+	if it == nil || it.built {
+		return
+	}
+	m.pending, it.built = nil, true
+	m.dividing()
+	m.shown = true
+	c, tok := m.c, m.tok
+	if m.asSheet {
+		if len(m.items) > 0 {
+			ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider).Shrink(0)
+		}
+		rowH := float32(tok.Spacing48)
+		b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).
+			FillWidth().MinWidth(0).MinHeight(rowH).
+			Padding(float32(tok.Spacing12), float32(tok.Spacing16)).
+			Radius(tok.InnerPanelRadius(tok.Spacing4)).
+			Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).
+			Role(ui.RoleMenuItem)
+		m.items = append(m.items, shellMenuRow{e: b, enabled: !it.disabled})
+		bg := tok.Surface
+		fg := tok.Text
+		if strings.Contains(it.label, "删除") || strings.Contains(it.label, "移入回收站") {
+			fg = tok.DangerText
+		}
+		if b.Pressed() && !it.disabled {
+			bg = tok.GhostActive
+		}
+		b.Background(bg).TextColor(fg)
+		b.Children(func() {
+			ui.Text(c, it.label).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").FontSize(float32(tok.TextBody))
+		})
+		if m.st.open && !it.disabled && b.Clicked() {
+			mygo.Haptics.Selection()
+			it.chosen, m.st.open = true, false
+		}
+		return
+	}
+
+	b := ui.ButtonBase(c).Key(len(m.items)).Label(it.label).Disabled(it.disabled).FillWidth().MinWidth(0).
+		Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+		Radius(tok.InnerPanelRadius(tok.Spacing4)).
+		Justify(ui.Start).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).
+		Role(ui.RoleMenuItem).TextColor(tok.Text)
+	m.items = append(m.items, shellMenuRow{e: b, enabled: !it.disabled})
+
+	hoverBg := ui.Transparent
+	hovered := b.Hovered()
+	switch {
+	case hovered && m.moved && !b.Focused():
+		b.Focus()
+		fallthrough
+	case hovered, b.Focused():
+		hoverBg = tok.GhostHover
+	}
+	b.Background(b.AnimateColor("sh-menu-bg", hoverBg, theme.MotionInstant))
+	theme.ApplyTactilePress(b)
+	b.Children(func() {
+		ui.Text(c, it.label).Grow(1).MinWidth(0).SingleLine().Ellipsis("…").FontSize(float32(tok.TextData))
+	})
+	if b.Clicked() {
+		it.chosen, m.st.open = true, false
+	}
+}
+
+func (m *shellMenu) move(step int) {
+	at := -1
+	for i, r := range m.items {
+		if r.e.Focused() {
+			at = i
+		}
+	}
+	if at < 0 {
+		if step > 0 {
+			m.focusAt(0, 1)
+		} else {
+			m.focusAt(len(m.items)-1, -1)
+		}
+		return
+	}
+	n := len(m.items)
+	for i := 1; i <= n; i++ {
+		if r := m.items[((at+step*i)%n+n)%n]; r.enabled {
+			r.e.Focus()
+			return
+		}
+	}
+}
+
+func (m *shellMenu) focusAt(i, step int) {
+	for ; i >= 0 && i < len(m.items); i += step {
+		if m.items[i].enabled {
+			m.items[i].e.Focus()
+			return
+		}
+	}
+}
+
+// shellMenuButton attaches a kit-elevated desktop PopoverBase menu (ElevationFloating +
+// AnchoredPopoverTransition) or a haptic mobile bottom Sheet (>=48dp rows).
+func (s *Shell) shellMenuButton(c *ui.Context, button ui.Element, build func(m *shellMenu)) {
+	if c == nil || build == nil {
+		return
+	}
+	st := ui.Local(button, "shell-menu-btn", func() shellMenuState { return shellMenuState{} })
+	if st == nil {
+		return
+	}
+	isMobile := s.IsMobileLayout(c)
+	if button.Clicked() {
+		open := !st.open
+		*st = shellMenuState{open: open, asSheet: isMobile, focus: open, keyboard: button.FocusVisible(), lastItems: st.lastItems}
+		if open && isMobile {
+			mygo.Haptics.Medium()
+		}
+	}
+	button.Role(ui.RoleMenuButton)
+	if button.IsDisabled() && st.open {
+		st.open = false
+	}
+
+	tok := theme.GetTokens(c.Theme())
+	if st.asSheet {
+		rowH := float32(tok.Spacing48)
+		_, winH := c.Size()
+		if winH <= 0 {
+			winH = 800
+		}
+		estCount := st.lastItems
+		if estCount <= 0 {
+			estCount = 5
+		}
+		needH := float32(estCount)*rowH + rowH + float32(tok.Spacing32) + float32(tok.Spacing24)
+		detent := needH / winH
+		if detent < 0.34 {
+			detent = 0.34
+		}
+		if detent > 0.88 {
+			detent = 0.88
+		}
+		detents := []float32{detent}
+		if detent < 0.82 {
+			detents = append(detents, 0.88)
+		}
+		bg := tok.Surface
+		mobile.Sheet(c, &st.open, mobile.SheetOptions{
+			Detents:    detents,
+			Background: &bg,
+			Label:      "操作菜单",
+		}, func() {
+			ui.Column(c).Fill().Padding(float32(tok.Spacing4), float32(tok.Spacing16), float32(tok.Spacing12), float32(tok.Spacing16)).
+				Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Scroll(c).FillWidth().Grow(1).MinHeight(0).Children(func() {
+					m := &shellMenu{c: c, st: st, tok: tok, asSheet: true}
+					ui.Column(c).FillWidth().Background(tok.Surface).Gap(float32(tok.Spacing4)).Children(func() {
+						build(m)
+						m.flush()
+					})
+					st.lastItems = len(m.items)
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
+				cancelBtn := ui.ButtonBase(c.Key("sh-sheet-cancel")).FillWidth().MinHeight(rowH).
+					Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).Border(1, tok.HairlineDivider).Center().Label("取消")
+				if cancelBtn.Pressed() {
+					cancelBtn.Background(tok.GhostActive)
+				}
+				cancelBtn.Children(func() {
+					ui.Text(c, "取消").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Accent)
+				})
+				if st.open && cancelBtn.Clicked() {
+					mygo.Haptics.Selection()
+					st.open = false
+				}
+			})
+		})
+		return
+	}
+
+	if !st.open {
+		return
+	}
+	ui.PopoverBase(c, button, &st.open, func(panel ui.Element) {
+		panel.Column().
+			Role(ui.RoleMenu).Focusable().
+			MinWidth(180).MaxWidth(360).
+			Padding(float32(tok.Spacing4)).Gap(1).
+			Margin(float32(tok.Spacing4), 0, 0, 0).
+			TextColor(tok.Text).
+			Transition(theme.AnchoredPopoverTransition())
+		kit.ApplyElevation(panel, tok, kit.ElevationFloating)
+
+		x, y, _ := panel.PointerPosition()
+		moved := [2]float32{x, y} != st.pointer
+		st.pointer = [2]float32{x, y}
+		m := &shellMenu{c: c, st: st, tok: tok, moved: moved}
+		panel.Children(func() {
+			build(m)
+			m.flush()
+		})
+		st.lastItems = len(m.items)
+		switch {
+		case !st.open:
+		case panel.Shortcut(0, ui.KeyDown):
+			m.move(1)
+		case panel.Shortcut(0, ui.KeyUp):
+			m.move(-1)
+		case panel.Shortcut(0, ui.KeyHome):
+			m.focusAt(0, 1)
+		case panel.Shortcut(0, ui.KeyEnd):
+			m.focusAt(len(m.items)-1, -1)
+		case st.focus && st.keyboard:
+			m.focusAt(0, 1)
+		case st.focus:
+			panel.Focus()
+		}
+		st.focus = false
+	})
 }

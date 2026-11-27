@@ -403,7 +403,7 @@ func (s *Shell) calendarHomeBody(
 					}
 					if s.OnOpenTemplatePicker != nil || s.OnImport != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
 						moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多创建方式", components.IconButtonCompact)
-						components.MenuButton(c, moreBtn, func(m *components.Menu) {
+						s.shellMenuButton(c, moreBtn, func(m *shellMenu) {
 							if s.OnOpenTemplatePicker != nil && m.Item("从模板创建实验…").Chosen() {
 								s.OnOpenTemplatePicker(selDateYMD)
 							}
@@ -534,7 +534,7 @@ func (s *Shell) renderMobileCalendarToolbar(c *ui.Context, tok theme.Tokens, cur
 			}
 			if s.OnOpenTemplatePicker != nil || s.OnImport != nil || s.OnCreateReagentForDate != nil || s.OnCreateAnimalForDate != nil {
 				moreBtn := components.IconButton(c, lucide.Ellipsis(), "更多创建方式", components.IconButtonCompact)
-				components.MenuButton(c, moreBtn, func(m *components.Menu) {
+				s.shellMenuButton(c, moreBtn, func(m *shellMenu) {
 					if s.OnOpenTemplatePicker != nil && m.Item("从模板创建实验…").Chosen() {
 						s.OnOpenTemplatePicker(*selDateYMD)
 					}
@@ -1515,7 +1515,10 @@ func (s *Shell) renderDayPopover(c *ui.Context, panel ui.Element, tok theme.Toke
 		panelW = max(float32(tok.Spacing48)*5, vw-float32(tok.Spacing24))
 	}
 	panel.Width(panelW).MaxHeight(float32(tok.Spacing48)*10.5).
-		Label(popoverTitle).Children(func() {
+		Transition(theme.AnchoredPopoverTransition()).
+		Label(popoverTitle)
+	kit.ApplyElevation(panel, tok, kit.ElevationFloating)
+	panel.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Icon(c, lucide.CalendarDays()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 			components.Text(c, popoverTitle).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
@@ -1524,8 +1527,8 @@ func (s *Shell) renderDayPopover(c *ui.Context, panel ui.Element, tok theme.Toke
 		})
 
 		if totalItems == 0 {
-			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-				Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing8)).
+				Background(tok.Elevated).Gap(float32(tok.Spacing8)).Children(func() {
 				components.Text(c, "该日期暂无已安排实验、试剂提醒或动物房节点。").FontSize(float32(tok.TextBody)).TextColor(tok.TextMuted)
 				ui.Row(c).FillWidth().Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					if s.OnCreateForDate != nil || s.OnCreate != nil {

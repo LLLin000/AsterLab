@@ -770,6 +770,7 @@ func (s *Shell) renderMobileWorkbench(c *ui.Context, tok theme.Tokens) {
 			// Layer 1 (Main Workspace Stage, z=1): ONE persistent Draggable container across open/close/drag
 			// so finger momentum and spring settle never stutter or drop frames.
 			stageWrap := ui.Box(c.Key("mb-main-stage")).Absolute().Fill().Background(tok.Canvas).Clip()
+			theme.ApplySheetBackdropDepth(stageWrap, s.MobileMenuSheetOpen || s.MobileTabSwitcherOpen)
 			if s.MobileDrawer != "" || math.Abs(float64(extra.drawerX.X)) > 1 {
 				stageWrap.Shadow(0, 0, 24, 0, tok.ShadowColor)
 			}
@@ -1008,7 +1009,7 @@ func (s *Shell) renderMobileGlassTopBar(c *ui.Context, tok theme.Tokens, activeT
 }
 
 func (s *Shell) attachMobileDocMenu(c *ui.Context, trigger ui.Element, activeTab *WorkspaceTab) {
-	components.MenuButton(c, trigger, func(m *components.Menu) {
+	s.shellMenuButton(c, trigger, func(m *shellMenu) {
 		if m.Item("步骤大纲与速算").Chosen() {
 			s.MobileDrawer = "outline"
 		}
@@ -1164,21 +1165,34 @@ func (s *Shell) renderMobileRibbonMenuSheet(c *ui.Context, tok theme.Tokens) {
 			ui.Column(c).FillWidth().
 				Padding(float32(tok.Spacing8), float32(tok.Spacing16), float32(tok.Spacing24), float32(tok.Spacing16)).
 				Children(func() {
-				ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Clip().Children(func() {
+				listBorder := tok.BorderSubtle
+				if tok.Dark {
+					listBorder = tok.SpecularRim
+				}
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing4)).
+					Radius(float32(tok.PanelRadius)).Background(tok.Elevated).Border(1, listBorder).Clip().Children(func() {
 					for i, item := range items {
 						item := item
 						if i > 0 {
-							ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+							ui.Box(c).FillWidth().Height(1).Background(tok.HairlineDivider)
 						}
 						row := ui.ButtonBase(c.Key("mb-ribbon-"+item.key)).FillWidth().
 							MinHeight(float32(tok.Spacing48)).
 							Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
+							Radius(tok.InnerPanelRadius(tok.Spacing4)).
 							Justify(ui.Start).Label(item.label).
 							OnClick(func() {
 								mygo.Haptics.Selection()
 								s.MobileMenuSheetOpen = false
 								item.run()
 							})
+						rowBg := ui.Transparent
+						if row.Pressed() {
+							rowBg = tok.GhostActive
+						} else if row.Hovered() {
+							rowBg = tok.GhostHover
+						}
+						row.Background(row.AnimateColor("mb-rib-bg", rowBg, theme.MotionInstant))
 						theme.ApplyTactilePress(row)
 						row.Children(func() {
 							ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
@@ -1608,7 +1622,9 @@ func (s *Shell) renderMobileRightUnderlay(
 				s.rightDrawerBodyOnly(c, tok)
 				if extra.rightSwitcherOpen {
 					dismiss := ui.ButtonBase(c.Key("mb-right-switcher-dismiss")).Absolute().Fill().
-						Background(tok.Scrim.Alpha(0.12)).Label("收起面板切换菜单")
+						Background(tok.Scrim.Alpha(0.18)).
+						Transition(theme.MobileOverlayFadeTransition()).
+						Label("收起面板切换菜单")
 					if dismiss.Clicked() {
 						extra.rightSwitcherOpen = false
 					}
@@ -1616,11 +1632,9 @@ func (s *Shell) renderMobileRightUnderlay(
 						Left(float32(tok.Spacing12)).Right(float32(tok.Spacing12)).
 						Bottom(float32(tok.Spacing8)).
 						Padding(float32(tok.Spacing8)).
-						Radius(float32(tok.DialogRadius)).
-						Background(tok.Surface).
-						Border(1, tok.Border).
-						Shadow(0, 8, 28, 0, tok.ShadowColor).
-						Gap(float32(tok.Spacing4))
+						Gap(float32(tok.Spacing4)).
+						Transition(theme.AnchoredPopoverTransition())
+					kit.ApplyElevation(menuCard, tok, kit.ElevationFloating)
 					menuCard.Children(func() {
 						for idx, sp := range specs {
 							idx, sp := idx, sp
@@ -1633,7 +1647,7 @@ func (s *Shell) renderMobileRightUnderlay(
 							rowBtn := ui.ButtonBase(c.Key(fmt.Sprintf("mb-right-opt-%d-%d", ctx, idx))).
 								FillWidth().MinHeight(float32(tok.Spacing32)+float32(tok.Spacing8)).
 								Padding(float32(tok.Spacing8), float32(tok.Spacing12)).
-								Radius(float32(tok.ControlRadius)).
+								Radius(tok.InnerDialogRadius(tok.Spacing8)).
 								Background(rowBg).
 								Justify(ui.Start).
 								Label(sp.title)
@@ -2246,10 +2260,13 @@ func (s *Shell) renderMobileTabSwitcherOverlay(c *ui.Context, tok theme.Tokens, 
 							t := activePane.Tabs[pos]
 							isActive := activeTab != nil && activeTab.ID == t.ID
 							cardBg := tok.Elevated
-							var borderW float32 = 0
-							cardBorder := ui.Transparent
+							var borderW float32 = 1
+							cardBorder := tok.BorderSubtle
+							if tok.Dark {
+								cardBorder = tok.SpecularRim
+							}
 							if isActive {
-								cardBg = tok.AccentSoftBg
+								cardBg = tok.SelectedRow
 								cardBorder = tok.Accent
 								borderW = 1.5
 							}

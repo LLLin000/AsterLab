@@ -185,8 +185,9 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 		components.Dialog(c.Key("vault-launcher-dlg"), &open, components.DialogOptions{
 			Label: "选择或新建本地实验库",
 		}, func(panel ui.Element) {
-			panel.Width(float32(tok.Spacing48)*14.5).Padding(0).Gap(0).
-				Radius(float32(tok.DialogRadius)).Background(tok.Surface).Border(1, tok.BorderStrong).Clip()
+			panel.Width(float32(tok.Spacing48)*14.5).Padding(0).Gap(0).Clip().
+				Transition(theme.ModalDialogTransition())
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 
 			ui.Row(c).FillWidth().Gap(0).Children(func() {
 				// Left Pane: Brand + Recent Vaults list
@@ -205,8 +206,8 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 					components.Text(c, "最近打开的实验库").FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted)
 
 					if len(s.RecentVaults) == 0 {
-						ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-							Background(tok.Surface).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+						ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerDialogRadius(tok.Spacing8)).
+							Background(tok.Surface).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing8)).Children(func() {
 							components.Text(c, "还没有记录的实验库").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
 							components.Text(c, "所有 .asterml 实验文档、图片与 .asterlab/pantry.jsonl 储藏室台账都直接保存在你选定的本地文件夹里，方便用网盘或 Git 备份同步。").
 								FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -217,13 +218,13 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 								for _, rv := range s.RecentVaults {
 									rv := rv
 									bg := tok.Surface
-									bdr := tok.Border
+									bdr := tok.BorderSubtle
 									if rv.Active {
-										bg = tok.AccentSoftBg
-										bdr = tok.Accent.Alpha(0.55)
+										bg = tok.SelectedRow
+										bdr = tok.Border
 									}
 									ui.Row(c.Key("rv-"+rv.Path)).FillWidth().Padding(float32(tok.Spacing8)).
-										Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bdr).
+										Radius(tok.InnerDialogRadius(tok.Spacing8)).Background(bg).Border(1, bdr).
 										AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 										pick := ui.ButtonBase(c.Key("rv-open-"+rv.Path)).Label("打开 "+rv.Name).
 											Grow(1).MinWidth(0).Justify(ui.Start).OnClick(func() {
@@ -280,8 +281,8 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 					})
 
 					// 1. Create New Vault Card
-					ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-						Background(tok.Elevated).Border(1, tok.Accent.Alpha(0.45)).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+						Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 							ui.Icon(c, lucide.FolderPlus()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 							components.Text(c, "新建本地实验库").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
@@ -339,8 +340,8 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 					})
 
 					// 2. Open Existing Folder Card
-					ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-						Background(tok.Elevated).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
+					ui.Row(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+						Background(tok.Elevated).Border(1, tok.BorderSubtle).AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 						ui.Icon(c, lucide.FolderOpen()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.TextMuted)
 						ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
 							components.Text(c, "打开电脑已有文件夹作为实验库").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text)
@@ -357,8 +358,8 @@ func (s *Shell) renderVaultLauncherDialog(c *ui.Context) {
 					})
 
 					// 3. Quick Sandbox Fallback
-					ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
-						Background(tok.Surface).Border(1, tok.Border).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Radius(tok.InnerDialogRadius(tok.Spacing8)).
+						Background(tok.Surface).Border(1, tok.BorderSubtle).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						components.Text(c, "只想先看看功能？可进入内置临时体验库，随时在左下角迁移到正式文件夹。").
 							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).Grow(1).MinWidth(0)
 						if components.Button(c.Key("vl-sandbox"), "进入临时体验库", components.ButtonGhost).Clicked() {
@@ -497,7 +498,7 @@ func (s *Shell) renderMobileVaultLauncherPage(c *ui.Context, tok theme.Tokens) {
 								}
 								bg := tok.Surface
 								if rv.Active {
-									bg = tok.AccentSoftBg
+									bg = tok.SelectedRow
 								}
 								ui.Row(c.Key("mb-rv-"+rv.Path)).FillWidth().Padding(t.Space(3)).
 									Background(bg).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {

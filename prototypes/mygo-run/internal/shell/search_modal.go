@@ -87,7 +87,8 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 	ui.Box(c.Key("global-search-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "Vault 全局全文搜索"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*12.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
-				MaxHeight(float32(tok.Spacing48) * 12.0)
+				MaxHeight(float32(tok.Spacing48) * 12.0).
+				Transition(theme.QuickPaletteTransition())
 			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			panel.Children(func() {
 				if len(hits) > 0 {
@@ -144,17 +145,17 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 							selected := i == s.GlobalSearchCursor
 							targetBg := ui.Transparent
 							if selected {
-								targetBg = tok.AccentSoftBg
+								targetBg = tok.SelectedRow
 							}
 							row := ui.ButtonBase(c.Key(fmt.Sprintf("gsearch-%d-%d-%s", i, hit.LineNum, hit.RelPath))).
 								Label(firstNonEmptyStr(hit.Title, hit.RelPath)).
 								FillWidth().Justify(ui.Start).
 								Padding(float32(tok.Spacing8), float32(tok.Spacing8)).
-								Radius(float32(tok.ControlRadius))
+								Radius(tok.InnerDialogRadius(tok.Spacing8))
 							if row.Hovered() && !selected {
-								targetBg = tok.Elevated
+								targetBg = tok.GhostHover
 							}
-							row.Background(row.AnimateColor("gs-bg", targetBg, theme.MotionMicroFade))
+							row.Background(row.AnimateColor("gs-bg", targetBg, theme.MotionSnappy))
 							theme.ApplyTactilePress(row)
 							row.Children(func() {
 								ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).AlignItems(ui.Center).Children(func() {

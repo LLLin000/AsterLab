@@ -163,10 +163,9 @@ func (s *Shell) renderObsidianSettingsDialog(c *ui.Context) {
 	tok := theme.GetTokens(t)
 	ui.Box(c.Key("obsidian-settings-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "设置", Inset: inset}, func(panel ui.Element) {
-			panel.Width(width).Height(height).Padding(0).Gap(0).Clip()
-			if tok.Dark {
-				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
-			}
+			panel.Width(width).Height(height).Padding(0).Gap(0).Clip().
+				Transition(theme.ModalDialogTransition())
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			components.Settings(c, &s.SettingsView, s.obsidianSettingsCategories(c), components.SettingsOptions{
 				Narrow:            narrow,
 				Title:             "设置",
@@ -1116,7 +1115,7 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 									btn := ui.ButtonBase(c.Key("set-open-mode-"+item.key)).Label(item.lbl).
 										Shrink(0).
 										Padding(float32(tok.Spacing4), float32(tok.Spacing12)).
-										Radius(float32(tok.ControlRadius) - 1)
+										Radius(tok.InnerControlRadius(tok.Spacing4 / 2))
 									theme.ApplyTactilePress(btn)
 									btn.Background(btn.AnimateColor("sombg", targetBg, theme.MotionMicroFade)).
 										OnClick(func() {

@@ -77,7 +77,8 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 	ui.Box(c.Key("command-palette-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "命令面板"}, func(panel ui.Element) {
 			panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing16)).Gap(float32(tok.Spacing8)).
-				MaxHeight(float32(tok.Spacing48) * 11.5)
+				MaxHeight(float32(tok.Spacing48) * 11.5).
+				Transition(theme.QuickPaletteTransition())
 			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 		panel.Children(func() {
 			if len(entries) > 0 {
@@ -145,10 +146,10 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 					active := s.PaletteMode == m.key
 					bg, fg := ui.Transparent, tok.TextMuted
 					if active {
-						bg, fg = tok.AccentSoftBg, tok.Accent
+						bg, fg = tok.SelectedRow, tok.Text
 					}
 					chip := ui.ButtonBase(c.Key("pal-mode-"+m.key)).Label(m.lbl).
-						Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(float32(tok.ControlRadius)).
+						Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(tok.InnerDialogRadius(tok.Spacing8)).
 						Background(bg).Shrink(0).OnClick(func() {
 						s.PaletteMode = m.key
 						s.PaletteCursor = 0
@@ -182,13 +183,15 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 									Padding(float32(tok.Spacing4), float32(tok.Spacing4))
 							}
 							selected := i == s.PaletteCursor
+							palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
+								Radius(tok.InnerDialogRadius(tok.Spacing8)).
+								AlignItems(ui.Center).Gap(float32(tok.Spacing8))
 							targetBg := ui.Transparent
 							if selected {
-								targetBg = tok.AccentSoftBg
+								targetBg = tok.SelectedRow
+							} else if palRow.Hovered() {
+								targetBg = tok.GhostHover
 							}
-							palRow := ui.Row(c.Key("pal-"+entry.key)).FillWidth().Padding(float32(tok.Spacing4), float32(tok.Spacing8)).
-								Radius(float32(tok.ControlRadius)).
-								AlignItems(ui.Center).Gap(float32(tok.Spacing8))
 							palRow.Background(palRow.AnimateColor("pal-bg", targetBg, theme.MotionSnappy))
 							palRow.Children(func() {
 								rowBtn := ui.ButtonBase(c).Grow(1).MinWidth(0).Justify(ui.Start).Label(entry.title)

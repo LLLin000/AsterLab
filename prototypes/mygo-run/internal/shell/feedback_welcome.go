@@ -57,12 +57,9 @@ func (s *Shell) renderFeedbackDialog(c *ui.Context) {
 	open := s.FeedbackOpen
 	ui.Box(c.Key("feedback-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "反馈与诊断中心"}, func(panel ui.Element) {
-			panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing12))
-			if tok.Dark {
-				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
-			} else if tok.LiquidGlass {
-				theme.ApplyPanelGlass(panel, tok, 0.36)
-			}
+			panel.Width(float32(tok.Spacing48)*11.5).Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing12)).
+				Transition(theme.ModalDialogTransition())
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			panel.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Icon(c, lucide.LifeBuoy()).Size(float32(tok.Spacing24), float32(tok.Spacing24)).TextColor(tok.Accent)
@@ -72,8 +69,8 @@ func (s *Shell) renderFeedbackDialog(c *ui.Context) {
 					kit.Badge(c, "v"+strings.TrimPrefix(ver, "v"), components.BadgeOptions{Tone: components.BadgeNeutral})
 				})
 
-				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.PanelRadius)).
-					Background(tok.Elevated).Border(1, tok.Border).Gap(float32(tok.Spacing8)).Children(func() {
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+					Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing8)).Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Icon(c, lucide.Camera()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent).Shrink(0)
 						ui.Text(c, "可视化截图标注反馈模式").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).Grow(1).MinWidth(0)
@@ -178,12 +175,9 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 	choiceHandled := false
 	ui.Box(c.Key("welcome-dlg")).Children(func() {
 		components.Dialog(c, &open, components.DialogOptions{Label: "欢迎使用 AsterLab"}, func(panel ui.Element) {
-			panel.Width(float32(tok.Spacing48)*12).Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing16))
-			if tok.Dark {
-				panel.Background(tok.Surface).Border(1, tok.BorderStrong)
-			} else if tok.LiquidGlass {
-				theme.ApplyPanelGlass(panel, tok, 0.36)
-			}
+			panel.Width(float32(tok.Spacing48)*12).Padding(float32(tok.Spacing24)).Gap(float32(tok.Spacing16)).
+				Transition(theme.ModalDialogTransition())
+			kit.ApplyElevation(panel, tok, kit.ElevationModal)
 			panel.Children(func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing12)).Children(func() {
 					ui.Image(c, theme.LogoParsedTriStream(tok.Dark)).Width(float32(tok.Spacing48)).Height(float32(tok.Spacing48)*0.85)
@@ -194,7 +188,7 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 					})
 				})
 
-				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(float32(tok.ControlRadius)).
+				ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerDialogRadius(tok.Spacing8)).
 					Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
 					ui.Text(c, "3 步快速上手（无需懂任何代码语法）：").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 					ui.Text(c, "1. 写方案：左侧管理实验档案与模板，画布像普通文档一样打字，点 + 或右键即可插入分组、孔板、计算器和计时器。").
@@ -208,10 +202,10 @@ func (s *Shell) renderWelcomeDialog(c *ui.Context) {
 				ui.Column(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 					card := func(key, title, desc string, badge string, primary bool, choice string) {
 						row := ui.Row(c.Key("welcome-opt-"+key)).FillWidth().Padding(float32(tok.Spacing12)).
-							Radius(float32(tok.ControlRadius)).Background(tok.Surface).Border(1, tok.Border).
+							Radius(tok.InnerDialogRadius(tok.Spacing8)).Background(tok.Surface).Border(1, tok.BorderSubtle).
 							AlignItems(ui.Center).Gap(float32(tok.Spacing12))
 						if primary {
-							row.Border(1, tok.Accent.Alpha(0.55)).Background(tok.AccentSoftBg.Alpha(0.45))
+							row.Border(1, tok.BorderStrong).Background(tok.SelectedRow)
 						}
 						theme.ApplyTactilePress(row)
 						row.Children(func() {
