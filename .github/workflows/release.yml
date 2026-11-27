@@ -1,6 +1,6 @@
 name: release
 
-# Automated tag-driven Pure-Go tri-platform (Windows / macOS / Linux) release pipeline.
+# Automated tag-driven Pure-Go five-platform (Windows / macOS / Linux / Android / iOS) release pipeline.
 on:
   push:
     tags:
@@ -27,6 +27,7 @@ jobs:
     timeout-minutes: 25
     outputs:
       version: ${{ steps.meta.outputs.version }}
+      clean_version: ${{ steps.meta.outputs.clean_version }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
@@ -36,6 +37,7 @@ jobs:
         run: |
           RAW_TAG="${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}"
           CLEAN_VER="${RAW_TAG#v}"
+          SEMVER_VER="${CLEAN_VER%%-*}"
           HAS_SIGN="${{ vars.ENABLE_AZURE_SIGN == 'true' && 'true' || 'false' }}"
           if [[ "$HAS_SIGN" != "true" && "$CLEAN_VER" != *unsigned* ]]; then
             PKG_VER="${CLEAN_VER}-unsigned"
@@ -52,6 +54,7 @@ jobs:
           {
             echo "tag=${RAW_TAG}"
             echo "version=${PKG_VER}"
+            echo "clean_version=${SEMVER_VER}"
             echo "prerelease=${IS_PRE}"
           } >> "$GITHUB_OUTPUT"
 
@@ -200,9 +203,163 @@ jobs:
             release/AsterLab-MyGo-*-linux-amd64.deb
             release/sums-linux.txt
 
+  build-android:
+    name: build-android
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+      - name: Install JDK 17 for Android Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Configure preinstalled Android SDK & NDK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=${SDK}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK}" >> "$GITHUB_ENV"
+          NDK_DIR=""
+          if [ -d "${SDK}/ndk" ]; then
+            NDK_DIR="$(find "${SDK}/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1 || true)"
+          fi
+          if [ -z "${NDK_DIR}" ]; then
+            yes | "${SDK}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+            "${SDK}/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+            NDK_DIR="${SDK}/ndk/27.2.12479018"
+          fi
+          echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
+          echo "Using Android SDK=${SDK}, NDK=${NDK_DIR}"
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ hashFiles('prototypes/mygo-run/mygo.json', 'prototypes/mygo-run/go.sum') }}
+          restore-keys: android-gradle-
+      - name: Patch MyGo mobile touch UX & build patched CLI (v0.10.0)
+        working-directory: prototypes/mygo-run
+        run: |
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-patched"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED"
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-patched-bin" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
+      - name: Build & Package Android (.apk + .aab)
+        working-directory: prototypes/mygo-run
+        env:
+          MYGO_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.MYGO_ANDROID_KEYSTORE_PASSWORD }}
+          MYGO_ANDROID_KEY_PASSWORD: ${{ secrets.MYGO_ANDROID_KEY_PASSWORD }}
+          CLEAN_VERSION: ${{ needs.verify.outputs.clean_version }}
+          PKG_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import json, os; p="mygo.json"; d=json.load(open(p)); d["version"]=os.environ["CLEAN_VERSION"]; json.dump(d, open(p,"w"), indent=2)'
+          "$RUNNER_TEMP/mygo-patched-bin" doctor || true
+          "$RUNNER_TEMP/mygo-patched-bin" build -platform android
+          ls -lh dist/android/
+          OUT_DIR="${GITHUB_WORKSPACE}/release"
+          mkdir -p "${OUT_DIR}"
+          APK_SRC="$(find dist/android -maxdepth 1 -name '*.apk' -type f | head -n 1 || true)"
+          AAB_SRC="$(find dist/android -maxdepth 1 -name '*.aab' -type f | head -n 1 || true)"
+          if [ -z "${APK_SRC}" ] || [ -z "${AAB_SRC}" ]; then
+            echo "::error::Missing Android .apk or .aab in dist/android/"
+            exit 1
+          fi
+          APK_OUT="${OUT_DIR}/AsterLab-MyGo-${PKG_VERSION}-android-universal.apk"
+          AAB_OUT="${OUT_DIR}/AsterLab-MyGo-${PKG_VERSION}-android-universal.aab"
+          cp "${APK_SRC}" "${APK_OUT}"
+          cp "${AAB_SRC}" "${AAB_OUT}"
+          SUMS_FILE="${OUT_DIR}/sums-android.txt"
+          rm -f "${SUMS_FILE}"
+          for f in "${APK_OUT}" "${AAB_OUT}"; do
+            h="$(sha256sum "${f}" | awk '{print toupper($1)}')"
+            sz="$(stat -c%s "${f}")"
+            echo "${h}  $(basename "${f}") (${sz} bytes)" >> "${SUMS_FILE}"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-android-release
+          if-no-files-found: error
+          path: |
+            release/AsterLab-MyGo-*-android-universal.apk
+            release/AsterLab-MyGo-*-android-universal.aab
+            release/sums-android.txt
+
+  build-ios-unsigned:
+    name: build-ios-unsigned
+    needs: verify
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: prototypes/mygo-run/go.mod
+          cache-dependency-path: prototypes/mygo-run/go.sum
+      - name: Build & Package unsigned arm64 .ipa
+        working-directory: prototypes/mygo-run
+        env:
+          CLEAN_VERSION: ${{ needs.verify.outputs.clean_version }}
+          PKG_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          go mod download github.com/egoist/mygo
+          MYGO_SRC="$(go list -m -f '{{.Dir}}' github.com/egoist/mygo)"
+          PATCHED="$RUNNER_TEMP/mygo-unsigned-src"
+          rm -rf "$PATCHED"
+          cp -R "$MYGO_SRC" "$PATCHED"
+          chmod -R u+w "$PATCHED"
+          python3 ../../scripts/ci/patch_mygo_mobile_ux.py "$PATCHED" --unsigned-ipa
+          (cd "$PATCHED" && go build -o "$RUNNER_TEMP/mygo-unsigned" ./cmd/mygo)
+          go mod edit -replace "github.com/egoist/mygo=$PATCHED"
+          python3 -c 'import json, os; p="mygo.json"; d=json.load(open(p)); d["version"]=os.environ["CLEAN_VERSION"]; json.dump(d, open(p,"w"), indent=2)'
+          MYGO_IOS_UNSIGNED=1 "$RUNNER_TEMP/mygo-unsigned" build -platform ios
+          ls -lh dist/ios-arm64/*-unsigned.ipa
+
+          IPA_SRC="$(find dist/ios-arm64 -maxdepth 1 -name '*-unsigned.ipa' -type f | head -n 1 || true)"
+          if [ -z "${IPA_SRC}" ]; then
+            echo "::error::Missing unsigned .ipa in dist/ios-arm64/"
+            exit 1
+          fi
+          rm -rf "$RUNNER_TEMP/ipa-check"
+          unzip -q "${IPA_SRC}" "Payload/*.app/*" -d "$RUNNER_TEMP/ipa-check"
+          BIN="$(find "$RUNNER_TEMP/ipa-check/Payload" -maxdepth 2 -type f -name "AsterLab" | head -n 1)"
+          file "$BIN"
+          otool -l "$BIN" | grep -A3 LC_BUILD_VERSION | head -n 8
+
+          OUT_DIR="${GITHUB_WORKSPACE}/release"
+          mkdir -p "${OUT_DIR}"
+          IPA_OUT="${OUT_DIR}/AsterLab-MyGo-${PKG_VERSION}-ios-arm64.ipa"
+          cp "${IPA_SRC}" "${IPA_OUT}"
+          SUMS_FILE="${OUT_DIR}/sums-ios.txt"
+          rm -f "${SUMS_FILE}"
+          h="$(shasum -a 256 "${IPA_OUT}" | awk '{print toupper($1)}')"
+          sz="$(stat -f%z "${IPA_OUT}")"
+          echo "${h}  $(basename "${IPA_OUT}") (${sz} bytes)" > "${SUMS_FILE}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: asterlab-ios-release
+          if-no-files-found: error
+          path: |
+            release/AsterLab-MyGo-*-ios-arm64.ipa
+            release/sums-ios.txt
+
   publish-release:
     name: publish-release
-    needs: [verify, build-windows, build-macos, build-linux]
+    needs: [verify, build-windows, build-macos, build-linux, build-android, build-ios-unsigned]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     steps:
@@ -210,21 +367,23 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: _artifacts
-      - name: Merge tri-platform checksums & generate unified release-manifest.json
+      - name: Merge five-platform checksums & generate unified release-manifest.json
         run: |
           mkdir -p release
           cp _artifacts/asterlab-windows-release/* release/
           cp _artifacts/asterlab-macos-release/* release/
           cp _artifacts/asterlab-linux-release/* release/
-          cat release/SHA256SUMS.txt release/sums-macos.txt release/sums-linux.txt > release/SHA256SUMS.merged.txt
+          cp _artifacts/asterlab-android-release/* release/
+          cp _artifacts/asterlab-ios-release/* release/
+          cat release/SHA256SUMS.txt release/sums-macos.txt release/sums-linux.txt release/sums-android.txt release/sums-ios.txt > release/SHA256SUMS.merged.txt
           mv release/SHA256SUMS.merged.txt release/SHA256SUMS.txt
-          rm -f release/sums-macos.txt release/sums-linux.txt
+          rm -f release/sums-macos.txt release/sums-linux.txt release/sums-android.txt release/sums-ios.txt
           VER="${{ needs.verify.outputs.version }}"
           TAG="${{ needs.verify.outputs.tag }}"
           COMMIT="$(git rev-parse --short HEAD)"
           CHAN="$([[ '${{ needs.verify.outputs.prerelease }}' == 'true' ]] && echo 'prerelease' || echo 'stable')"
           export VER TAG COMMIT CHAN
-          python3 -c 'import os, json, datetime; v=os.environ["VER"]; print(json.dumps({"version":v,"tag":os.environ["TAG"],"channel":os.environ["CHAN"],"commit":os.environ["COMMIT"],"builtAtUtc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"assets":{"windowsSetup":f"AsterLab-MyGo-{v}-win-x64-setup.exe","windowsZip":f"AsterLab-MyGo-{v}-win-x64.zip","macosDmg":f"AsterLab-MyGo-{v}-macOS-universal.dmg","macosZip":f"AsterLab-MyGo-{v}-macOS-universal.zip","linuxDeb":f"AsterLab-MyGo-{v}-linux-amd64.deb","linuxTarX64":f"AsterLab-MyGo-{v}-linux-x64.tar.gz","linuxTarArm64":f"AsterLab-MyGo-{v}-linux-arm64.tar.gz","sums":"SHA256SUMS.txt"}}, indent=2))' > release/release-manifest.json
+          python3 -c 'import os, json, datetime; v=os.environ["VER"]; print(json.dumps({"version":v,"tag":os.environ["TAG"],"channel":os.environ["CHAN"],"commit":os.environ["COMMIT"],"builtAtUtc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"assets":{"windowsSetup":f"AsterLab-MyGo-{v}-win-x64-setup.exe","windowsZip":f"AsterLab-MyGo-{v}-win-x64.zip","macosDmg":f"AsterLab-MyGo-{v}-macOS-universal.dmg","macosZip":f"AsterLab-MyGo-{v}-macOS-universal.zip","linuxDeb":f"AsterLab-MyGo-{v}-linux-amd64.deb","linuxTarX64":f"AsterLab-MyGo-{v}-linux-x64.tar.gz","linuxTarArm64":f"AsterLab-MyGo-{v}-linux-arm64.tar.gz","androidApk":f"AsterLab-MyGo-{v}-android-universal.apk","androidAab":f"AsterLab-MyGo-{v}-android-universal.aab","iosIpa":f"AsterLab-MyGo-{v}-ios-arm64.ipa","sums":"SHA256SUMS.txt"}}, indent=2))' > release/release-manifest.json
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:

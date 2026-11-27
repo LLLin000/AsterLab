@@ -247,7 +247,7 @@ func TestObsidianVaultPantryAnd27InchVisualAudit(t *testing.T) {
 		st.Frame()
 		st.Advance(200 * time.Millisecond)
 		st.Frame()
-		if !st.HasText("软件版本与自动更新") || !st.HasText("立即更新并重启") || !st.HasText("发现新版本 v0.1.1") {
+		if !st.HasText("软件版本与更新") || !st.HasText("立即更新并重启") || !st.HasText("发现新版本 v0.1.1") {
 			t.Fatalf("expected update UI controls in About settings, got: %q", st.Texts())
 		}
 	})
