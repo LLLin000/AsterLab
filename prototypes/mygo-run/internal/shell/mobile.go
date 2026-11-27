@@ -1069,7 +1069,7 @@ func (s *Shell) renderMobileDockedTopChrome(c *ui.Context, tok theme.Tokens, act
 			}
 		}
 
-		components.Text(c, title).FontSize(float32(tok.TextBody)).Bold().
+		components.Text(c, kit.MiddleTruncate(title, 24)).FontSize(float32(tok.TextBody)).Bold().
 			TextColor(tok.Text).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 
 		if activeTab != nil && activeTab.Kind == TabFile {
@@ -1342,8 +1342,9 @@ func (s *Shell) renderMobileNavDockItems(c *ui.Context, tok theme.Tokens, active
 	// 5. Tab Counter Box ([N]) - faithful to Obsidian iOS Tab Switcher glyph!
 	navBtn("tabs", "标签", true, s.MobileTabSwitcherOpen, func(fg ui.Color) {
 		ui.Box(c).Size(20, 20).Radius(float32(tok.ControlRadius)).Border(1.6, fg).Center().Children(func() {
-			components.Text(c, fmt.Sprintf("%d", tabCount)).
-				FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine()
+			components.Text(c.Key("mb-nav-tab-count"), fmt.Sprintf("%d", tabCount)).
+				FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).FontFeatures("tnum").SingleLine().
+				ContentTransition(theme.NumericRoll(false))
 		})
 	}, func() {
 		s.MobileDrawer = ""
@@ -1374,7 +1375,12 @@ func (s *Shell) renderMobileEditToolbarCapsule(c *ui.Context, tok theme.Tokens, 
 			scrollMaxW = avail
 		}
 	}
-	ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(scrollMaxW).Height(40).Scrollbars(false).Children(func() {
+	editScroll := ui.ScrollHorizontal(c.Key("mb-edit-tb-scroll")).MaxWidth(scrollMaxW).Height(40).
+		Scrollbars(false).ScrollSnap(ui.SnapProximity)
+	editScrollSt := ui.Local(editScroll, "mb-edit-tb-scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+	editScroll.TrackScroll(editScrollSt)
+	theme.ApplyEdgeFadeX(editScroll, tok, editScrollSt.X > 2, editScrollSt.MaxX == 0 || editScrollSt.X < editScrollSt.MaxX-2)
+	editScroll.Children(func() {
 		ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 			s.renderMobileEditToolbarItems(c, tok, activeTab)
 		})
@@ -1388,7 +1394,8 @@ func (s *Shell) renderMobileEditToolbarCapsule(c *ui.Context, tok theme.Tokens, 
 }
 
 func (s *Shell) renderMobileToolbarButton(c *ui.Context, tok theme.Tokens, activeTab *WorkspaceTab, spec MobileToolbarActionSpec) {
-	b := ui.ButtonBase(c.Key("mb-ed-"+spec.ID)).Size(36, 36).Radius(float32(tok.PillRadius)).Center().Label(spec.Label)
+	b := ui.ButtonBase(c.Key("mb-ed-"+spec.ID)).Size(36, 36).Radius(float32(tok.PillRadius)).
+		Center().SnapAlign(ui.Start).Label(spec.Label)
 	if b.Hovered() {
 		b.Background(tok.Text.Alpha(0.06))
 	}
@@ -1721,8 +1728,8 @@ func (s *Shell) renderMobileRightDrawerBottomIsland(
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 			ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
-				components.Text(c, docTitle).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-				components.Text(c, docMeta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").SingleLine().Ellipsis("…")
+				components.Text(c, kit.MiddleTruncate(docTitle, 24)).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
+				components.Text(c, docMeta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false)).SingleLine().Ellipsis("…")
 			})
 			s.renderMobileDrawerSyncIndicator(c, tok)
 		})
@@ -2174,7 +2181,7 @@ func (s *Shell) renderMobileTreeNode(c *ui.Context, tok theme.Tokens, node *vaul
 					icoCol = tok.Text
 				}
 				ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(icoCol)
-				nameTxt := components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+				nameTxt := components.Text(c, kit.MiddleTruncate(node.Name, 24)).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 				if selected {
 					nameTxt.Bold()

@@ -216,145 +216,164 @@ func (s *Shell) renderMobileSettingsPage(c *ui.Context, tok theme.Tokens, extra 
 		pageTitle = cats[selected].Title
 	}
 
-	onBack := func() {
-		if extra.mobileSettingsDetail || searching {
-			extra.mobileSettingsDetail = false
-			s.SettingsView.Category = ""
-			s.SettingsView.Query = ""
-			return
-		}
+	onRootBack := func() {
 		s.VaultSettingsOpen = false
 		extra.mobileSettingsLastOpen = false
 		extra.mobileSettingsDetail = false
 	}
-
-	swipeKey := "mb-settings-root"
-	if extra.mobileSettingsDetail || searching {
-		swipeKey = "mb-settings-detail"
+	onDetailBack := func() {
+		extra.mobileSettingsDetail = false
+		s.SettingsView.Category = ""
+		s.SettingsView.Query = ""
 	}
-	s.renderMobileSwipeBackContainer(c, swipeKey, tok, onBack, func() {
-		// Obsidian Mobile Top Navigation Bar (edge-to-edge full-screen page)
-		ui.Row(c).FillWidth().
-			Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
-			MinHeight(t.Space(12)+topSafe).
-			AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
-			if extra.mobileSettingsDetail || searching {
-				backBtn := ui.ButtonBase(c.Key("mb-set-back")).Label("返回设置").
-					Padding(t.Space(1), t.Space(2)).Radius(float32(tok.ControlRadius)).
-					Background(ui.Transparent).MinHeight(t.Space(9)).Center().
-					OnClick(func() {
-						mygo.Haptics.Selection()
-						extra.mobileSettingsDetail = false
-						s.SettingsView.Category = ""
-						s.SettingsView.Query = ""
-					})
-				backBtn.Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
-						ui.Icon(c, lucide.ChevronLeft()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-						ui.Text(c, "设置").FontSize(float32(tok.TextBody)).TextColor(tok.Accent).SingleLine()
+	subPageOpen := extra.mobileSettingsDetail || searching
+
+	var rootSwipe func()
+	if !subPageOpen {
+		rootSwipe = onRootBack
+	}
+	s.renderMobileSwipeBackContainer(c, "mb-settings-root", tok, rootSwipe, func() {
+		stack := ui.Box(c.Key("mb-settings-stack")).Fill().Clip()
+		stack.Children(func() {
+			// Level 1: Obsidian Mobile Grouped Settings Home (recedes left with iOS parallax when sub-page pushes in).
+			parentBox := ui.Column(c.Key("mb-settings-parent")).Absolute().Fill().Background(tok.Canvas)
+			theme.ApplyParentParallaxRecede(parentBox, subPageOpen)
+			if subPageOpen {
+				parentBox.IgnoreInput(true).AccessHidden(true)
+			}
+			parentBox.Children(func() {
+				ui.Row(c).FillWidth().
+					Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+					MinHeight(t.Space(12)+topSafe).
+					AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+					ui.Icon(c, lucide.Settings()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+					components.Text(c, "设置").FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+						Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+					doneBtn := components.Button(c.Key("mb-set-close"), "完成", components.ButtonGhost).Label("关闭设置").Shrink(0)
+					if doneBtn.Clicked() {
+						onRootBack()
+					}
+				})
+
+				ui.Column(c).FillWidth().
+					Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).
+					Background(tok.Surface).Children(func() {
+					components.TextBox(c.Key("mb-set-search"), &s.SettingsView.Query, components.TextBoxOptions{
+						LeadingIcon: lucide.Search(),
+					}).Placeholder("搜索设置…").FillWidth()
+				})
+				ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+				ui.Scroll(c.Key("mb-set-home-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
+					ui.Column(c).FillWidth().
+						Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
+						Gap(t.Space(5)).Children(func() {
+						var workspaceCats, systemCats []components.SettingsCategory
+						for _, cat := range cats {
+							if cat.Placeholder != nil {
+								continue
+							}
+							if cat.ID == "about" {
+								systemCats = append(systemCats, cat)
+							} else {
+								workspaceCats = append(workspaceCats, cat)
+							}
+						}
+
+						renderGroup := func(groupTitle string, list []components.SettingsCategory) {
+							if len(list) == 0 {
+								return
+							}
+							ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+								components.Text(c, groupTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
+									Padding(0, t.Space(1))
+								ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
+									Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
+									for i, cat := range list {
+										cat := cat
+										if i > 0 {
+											ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+										}
+										row := ui.ButtonBase(c.Key("mb-set-cat-"+cat.ID)).Label(cat.Title).
+											FillWidth().MinHeight(float32(tok.Spacing48)+t.Space(1)).
+											Padding(t.Space(3), t.Space(4)).
+											Background(tok.Surface).Justify(ui.Start).
+											OnClick(func() {
+												mygo.Haptics.Selection()
+												s.SettingsView.Category = cat.ID
+												s.SettingsView.Query = ""
+												extra.mobileSettingsDetail = true
+											})
+										theme.ApplyTactilePress(row)
+										row.Children(func() {
+											ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
+												if cat.Icon != nil {
+													kit.IconBox(c, tok, cat.Icon, tok.Accent)
+												}
+												ui.Text(c, cat.Title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
+													Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+												if hint := s.mobileSettingsCategoryHint(cat.ID); hint != "" {
+													ui.Text(c, hint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+														SingleLine().Ellipsis("…")
+												}
+												ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
+											})
+										})
+									}
+								})
+							})
+						}
+
+						renderGroup("工作区", workspaceCats)
+						renderGroup("系统", systemCats)
 					})
 				})
-			} else {
-				ui.Icon(c, lucide.Settings()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
-			}
-
-			components.Text(c, pageTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
-				Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-
-			doneBtn := components.Button(c.Key("mb-set-close"), "完成", components.ButtonGhost).Label("关闭设置").Shrink(0)
-			if doneBtn.Clicked() {
-				s.VaultSettingsOpen = false
-				extra.mobileSettingsLastOpen = false
-				extra.mobileSettingsDetail = false
-			}
-		})
-
-		// Search field on Level 1 Home or while actively filtering
-		if !extra.mobileSettingsDetail || searching {
-			ui.Column(c).FillWidth().
-				Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).
-				Background(tok.Surface).Children(func() {
-				components.TextBox(c.Key("mb-set-search"), &s.SettingsView.Query, components.TextBoxOptions{
-					LeadingIcon: lucide.Search(),
-				}).Placeholder("搜索设置…").FillWidth()
 			})
-		}
-		ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
 
-		if searching {
-			s.renderMobileSettingsResultsList(c, tok, cats, selected, true, topSafe, rightSafe, bottomSafe, leftSafe)
-			return
-		}
-
-		if extra.mobileSettingsDetail && selected >= 0 && selected < len(cats) {
-			s.renderMobileSettingsResultsList(c, tok, cats, selected, false, topSafe, rightSafe, bottomSafe, leftSafe)
-			return
-		}
-
-		// Level 1: Obsidian Mobile Grouped Settings Home
-		ui.Scroll(c.Key("mb-set-home-scroll")).FillWidth().Grow(1).Basis(0).MinHeight(0).Clip().Children(func() {
-			ui.Column(c).FillWidth().
-				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
-				Gap(t.Space(5)).Children(func() {
-				var workspaceCats, systemCats []components.SettingsCategory
-				for _, cat := range cats {
-					if cat.Placeholder != nil {
-						continue
-					}
-					if cat.ID == "about" {
-						systemCats = append(systemCats, cat)
-					} else {
-						workspaceCats = append(workspaceCats, cat)
-					}
-				}
-
-				renderGroup := func(groupTitle string, list []components.SettingsCategory) {
-					if len(list) == 0 {
-						return
-					}
-					ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
-						components.Text(c, groupTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.TextMuted).
-							Padding(0, t.Space(1))
-						ui.Column(c).FillWidth().Radius(float32(tok.PanelRadius)).
-							Background(tok.Surface).Border(1, tok.Border).Clip().Children(func() {
-							for i, cat := range list {
-								cat := cat
-								if i > 0 {
-									ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
-								}
-								row := ui.ButtonBase(c.Key("mb-set-cat-"+cat.ID)).Label(cat.Title).
-									FillWidth().MinHeight(float32(tok.Spacing48)+t.Space(1)).
-									Padding(t.Space(3), t.Space(4)).
-									Background(tok.Surface).Justify(ui.Start).
-									OnClick(func() {
-										mygo.Haptics.Selection()
-										s.SettingsView.Category = cat.ID
-										s.SettingsView.Query = ""
-										extra.mobileSettingsDetail = true
-									})
-								theme.ApplyTactilePress(row)
-								row.Children(func() {
-									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(3)).Children(func() {
-										if cat.Icon != nil {
-											kit.IconBox(c, tok, cat.Icon, tok.Accent)
-										}
-										ui.Text(c, cat.Title).FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
-											Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
-										if hint := s.mobileSettingsCategoryHint(cat.ID); hint != "" {
-											ui.Text(c, hint).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
-												SingleLine().Ellipsis("…")
-										}
-										ui.Icon(c, lucide.ChevronRight()).Size(float32(tok.IconSm), float32(tok.IconSm)).TextColor(tok.TextMuted)
-									})
-								})
-							}
+			// Level 2: Pushed Sub-Page / Search Results (slides in from right over receding parent).
+			if subPageOpen {
+				s.renderMobileSwipeBackContainer(c, "mb-settings-detail", tok, onDetailBack, func() {
+					ui.Row(c).FillWidth().
+						Padding(t.Space(2)+topSafe, t.Space(4)+rightSafe, t.Space(2), t.Space(4)+leftSafe).
+						MinHeight(t.Space(12)+topSafe).
+						AlignItems(ui.Center).Gap(t.Space(2)).Background(tok.Surface).Children(func() {
+						backBtn := ui.ButtonBase(c.Key("mb-set-back")).Label("返回设置").
+							Padding(t.Space(1), t.Space(2)).Radius(float32(tok.ControlRadius)).
+							Background(ui.Transparent).MinHeight(t.Space(9)).Center().
+							OnClick(func() {
+								mygo.Haptics.Selection()
+								onDetailBack()
+							})
+						backBtn.Children(func() {
+							ui.Row(c).AlignItems(ui.Center).Gap(t.Space(1)).Children(func() {
+								ui.Icon(c, lucide.ChevronLeft()).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(tok.Accent)
+								ui.Text(c, "设置").FontSize(float32(tok.TextBody)).TextColor(tok.Accent).SingleLine()
+							})
 						})
-					})
-				}
 
-				renderGroup("工作区", workspaceCats)
-				renderGroup("系统", systemCats)
-			})
+						components.Text(c, pageTitle).FontSize(float32(tok.TextSection)).Bold().TextColor(tok.Text).
+							Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
+
+						doneBtn := components.Button(c.Key("mb-set-detail-close"), "完成", components.ButtonGhost).Label("关闭设置").Shrink(0)
+						if doneBtn.Clicked() {
+							onRootBack()
+						}
+					})
+
+					if searching {
+						ui.Column(c).FillWidth().
+							Padding(t.Space(2), t.Space(4)+rightSafe, t.Space(3), t.Space(4)+leftSafe).
+							Background(tok.Surface).Children(func() {
+							components.TextBox(c.Key("mb-set-search-detail"), &s.SettingsView.Query, components.TextBoxOptions{
+								LeadingIcon: lucide.Search(),
+							}).Placeholder("搜索设置…").FillWidth()
+						})
+					}
+					ui.Box(c).FillWidth().Height(1).Background(tok.BorderSubtle)
+
+					s.renderMobileSettingsResultsList(c, tok, cats, selected, searching, topSafe, rightSafe, bottomSafe, leftSafe)
+				})
+			}
 		})
 	})
 	})
@@ -478,8 +497,14 @@ func (s *Shell) renderMobileSettingsResultsList(
 				})
 			}
 			if count == 0 {
-				kit.EmptyState(c, tok, lucide.Search(), "无匹配设置项", "尝试更换关键词或清空搜索词查看全部设置。", "清空搜索", func() {
-					s.SettingsView.Query = ""
+				kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+					Icon:        lucide.Search(),
+					Title:       "无匹配设置项",
+					Hint:        "尝试更换关键词或清空搜索词查看全部设置。",
+					ActionLabel: "清空搜索",
+					OnAction: func() {
+						s.SettingsView.Query = ""
+					},
 				})
 			}
 		})
@@ -1103,8 +1128,10 @@ func (s *Shell) obsidianSettingsCategories(c *ui.Context) []components.SettingsC
 						Build: func(c *ui.Context) {
 							// Avoid components.Tabs inside Settings Dialog (Onevra Tabs.Draw panics on Dialog Exit transition).
 							// Keep Shrink(0) on container and buttons so right-hand segmented pills never clip text (FB-103901).
-							ui.Row(c).Shrink(0).AlignItems(ui.Center).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
-								Background(tok.Elevated).Border(1, tok.Border).Gap(2).Children(func() {
+							modeTrack := ui.Row(c).Shrink(0).AlignItems(ui.Center).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+								Background(tok.Elevated).Border(1, tok.Border).Gap(2)
+							theme.ApplyRecessedWell(modeTrack, tok)
+							modeTrack.Children(func() {
 								for _, item := range []struct{ key, lbl string }{{"edit", "编辑态"}, {"read", "阅读态"}} {
 									item := item
 									active := s.DefaultOpenMode == item.key || (s.DefaultOpenMode == "" && item.key == "edit")
@@ -1472,7 +1499,11 @@ func (s *Shell) buildSyncSettingsCategory(c *ui.Context, tok theme.Tokens) compo
 			Keywords:    []string{"provider", "webdav", "onedrive", "google drive", "后端", "云盘", "网盘"},
 			Stacked:     true,
 			Build: func(c *ui.Context) {
-				ui.Row(c).Wrap().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+				provTrack := ui.Row(c).Wrap().AlignItems(ui.Center).AlignSelf(ui.Start).
+					Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing4))
+				theme.ApplyRecessedWell(provTrack, tok)
+				provTrack.Children(func() {
 					for _, opt := range []struct {
 						key, lbl string
 					}{

@@ -338,7 +338,11 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 						dispName = "图片与附件"
 					}
 				}
-				components.Text(c, dispName).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
+				dispTrunc := kit.MiddleTruncate(dispName, 24)
+				if dispTrunc != dispName {
+					components.Tooltip(c, row, node.RelPath)
+				}
+				components.Text(c, dispTrunc).FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).
 					SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			})
 		})
@@ -491,7 +495,11 @@ func (s *Shell) renderTreeNode(c *ui.Context, tok theme.Tokens, node *vault.Tree
 				icoCol = tok.Text
 			}
 			ui.Icon(c, icon).Size(float32(tok.IconMd), float32(tok.IconMd)).TextColor(icoCol)
-			components.Text(c, node.Name).FontSize(float32(tok.TextData)).TextColor(tok.Text).
+			dispFile := kit.MiddleTruncate(node.Name, 24)
+			if dispFile != node.Name {
+				components.Tooltip(c, row, node.Name)
+			}
+			components.Text(c, dispFile).FontSize(float32(tok.TextData)).TextColor(tok.Text).
 				SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 			if shortDate != "" {
 				ui.Text(c, shortDate).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).

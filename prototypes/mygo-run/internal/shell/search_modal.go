@@ -125,16 +125,27 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 				ui.Divider(c)
 
 				if strings.TrimSpace(s.GlobalSearchQuery) == "" {
-					ui.Column(c).FillWidth().Padding(float32(tok.Spacing24)).Center().Gap(float32(tok.Spacing4)).Children(func() {
-						components.Text(c, "输入关键词跨 Vault 全文检索").FontSize(float32(tok.TextBody)).Bold().TextColor(tok.TextMuted)
-						components.Text(c, "支持搜索步骤标题、孔板配方、Pantry 编号与实验笔记；选中后直接打开并高亮匹配行。").
-							FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
+					kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+						Icon:      lucide.FileSearch(),
+						Title:     "输入关键词跨 Vault 全文检索",
+						Hint:      "支持搜索步骤标题、孔板配方、Pantry 编号与实验笔记；选中后直接打开并高亮匹配行。",
+						Shortcuts: []string{"Ctrl", "Shift", "F"},
 					})
 					return
 				}
 
 				if len(hits) == 0 {
-					kit.EmptyState(c, tok, lucide.FileSearch(), "未找到包含该关键词的实验文档", "尝试更换试剂名、细胞系名称或实验日期。", "", nil)
+					kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+						Icon:        lucide.FileSearch(),
+						Title:       "未找到包含该关键词的实验文档",
+						Hint:        "尝试更换试剂名、细胞系名称或实验日期。",
+						ActionLabel: "清空搜索",
+						Shortcuts:   []string{"Esc"},
+						OnAction: func() {
+							s.GlobalSearchQuery = ""
+							s.refreshGlobalSearch()
+						},
+					})
 					return
 				}
 
@@ -162,7 +173,8 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 									ui.Icon(c, lucide.FileText()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 									ui.Column(c).Grow(1).MinWidth(0).Gap(float32(tok.Spacing4) * 0.5).Children(func() {
 										ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-											components.Text(c, firstNonEmptyStr(hit.Title, hit.RelPath)).
+											hitTitle := kit.MiddleTruncate(firstNonEmptyStr(hit.Title, hit.RelPath), 32)
+											components.Text(c, hitTitle).
 												FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 											if hit.Date != "" {
 												components.Text(c, hit.Date).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum")
@@ -182,6 +194,18 @@ func (s *Shell) renderGlobalSearchModal(c *ui.Context) {
 							}
 						}
 					})
+				})
+				ui.Divider(c)
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+					kit.ShortcutKeycaps(c, tok, "↑↓")
+					components.Text(c, "移动").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					kit.ShortcutKeycaps(c, tok, "Enter")
+					components.Text(c, "打开").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					ui.Spacer(c)
+					kit.ShortcutKeycaps(c, tok, "Ctrl", "Shift", "F")
+					components.Text(c, "搜索").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+					kit.ShortcutKeycaps(c, tok, "Esc")
+					components.Text(c, "关闭").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				})
 			})
 		})
@@ -228,11 +252,24 @@ func (s *Shell) renderMobileGlobalSearchPage(c *ui.Context, tok theme.Tokens, hi
 				Padding(t.Space(3), t.Space(4)+rightSafe, t.Space(8)+bottomSafe, t.Space(4)+leftSafe).
 				Gap(t.Space(3)).Children(func() {
 				if strings.TrimSpace(s.GlobalSearchQuery) == "" {
-					kit.EmptyState(c, tok, lucide.FileSearch(), "全库全文检索", "输入关键词搜索步骤标题、孔板配方、试剂编号或实验笔记。", "", nil)
+					kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+						Icon:  lucide.FileSearch(),
+						Title: "全库全文检索",
+						Hint:  "输入关键词搜索步骤标题、孔板配方、试剂编号或实验笔记。",
+					})
 					return
 				}
 				if len(hits) == 0 {
-					kit.EmptyState(c, tok, lucide.FileSearch(), "未找到匹配文档", "尝试更换试剂名、细胞系名称或实验日期。", "", nil)
+					kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+						Icon:        lucide.FileSearch(),
+						Title:       "未找到匹配文档",
+						Hint:        "尝试更换试剂名、细胞系名称或实验日期。",
+						ActionLabel: "清空搜索",
+						OnAction: func() {
+							s.GlobalSearchQuery = ""
+							s.refreshGlobalSearch()
+						},
+					})
 					return
 				}
 				ui.Text(c, fmt.Sprintf("共 %d 条命中", len(hits))).
@@ -259,7 +296,7 @@ func (s *Shell) renderMobileGlobalSearchPage(c *ui.Context, tok theme.Tokens, hi
 								kit.IconBox(c, tok, lucide.FileText(), tok.Accent)
 								ui.Column(c).Grow(1).MinWidth(0).Gap(t.Space(1)).Children(func() {
 									ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-										components.Text(c, firstNonEmptyStr(hit.Title, hit.RelPath)).
+										components.Text(c, kit.MiddleTruncate(firstNonEmptyStr(hit.Title, hit.RelPath), 28)).
 											FontSize(float32(tok.TextBody)).Bold().TextColor(tok.Text).
 											Grow(1).MinWidth(0).SingleLine().Ellipsis("…")
 										if hit.Date != "" {

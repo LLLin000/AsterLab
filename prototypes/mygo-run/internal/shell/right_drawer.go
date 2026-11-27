@@ -158,9 +158,11 @@ func (s *Shell) rightDrawer(c *ui.Context) {
 	}
 	drawerCol.Children(func() {
 		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8), float32(tok.Spacing12)).Children(func() {
-			ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
+			tabTrack := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
 				Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
-				Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+				Gap(float32(tok.Spacing4)).AlignItems(ui.Center)
+			theme.ApplyRecessedWell(tabTrack, tok)
+			tabTrack.Children(func() {
 				for idx, lbl := range shortLabels {
 					idx, lbl := idx, lbl
 					active := s.RightTab == idx
@@ -265,7 +267,7 @@ func (s *Shell) renderDrawerCalendarSummary(c *ui.Context, tok theme.Tokens) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			components.Text(c, "实验排期统计").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 			ui.Spacer(c)
-			components.Badge(c, fmt.Sprintf("共 %d 项", len(s.Experiments)))
+			components.Badge(c, fmt.Sprintf("共 %d 项", len(s.Experiments))).ContentTransition(theme.NumericRoll(false))
 		})
 		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			renderDrawerStatTile(c, tok, "进行中", fmt.Sprintf("%d", activeCnt), tok.Accent)
@@ -401,7 +403,7 @@ func (s *Shell) renderDrawerPantrySummary(c *ui.Context, tok theme.Tokens) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			components.Text(c, "试剂耗材健康度").FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text)
 			ui.Spacer(c)
-			components.Badge(c, fmt.Sprintf("%d 项", len(s.PantryItems)))
+			components.Badge(c, fmt.Sprintf("%d 项", len(s.PantryItems))).ContentTransition(theme.NumericRoll(false))
 		})
 		ui.Row(c).FillWidth().Gap(float32(tok.Spacing8)).Children(func() {
 			renderDrawerStatTile(c, tok, "充足", fmt.Sprintf("%d", okCnt), tok.Success)
@@ -446,7 +448,8 @@ func renderDrawerStatTile(c *ui.Context, tok theme.Tokens, label, val string, ac
 	ui.Column(c).Grow(1).MinWidth(0).Padding(float32(tok.Spacing8)).
 		Radius(tok.InnerPanelRadius(tok.Spacing4)).Background(tok.Elevated).
 		AlignItems(ui.Center).Gap(2).Children(func() {
-		ui.Text(c, val).FontSize(float32(tok.TextSection)).Bold().TextColor(accent).FontFeatures("tnum").SingleLine()
+		ui.Text(c, val).FontSize(float32(tok.TextSection)).Bold().TextColor(accent).
+			FontFeatures("tnum").SingleLine().ContentTransition(theme.NumericRoll(false))
 		ui.Text(c, label).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 	})
 }
@@ -477,41 +480,54 @@ func (s *Shell) renderDrawerOutline(c *ui.Context, tok theme.Tokens) {
 			FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 		return
 	}
-	// Compact segmented filter: [ 全部 | 仅步骤 ]
+	// Compact segmented filter: [ 全部 | 仅步骤 ] + visible step count
 	hasSteps := false
 	hasHeadings := false
+	visibleCount := 0
 	for _, it := range s.OutlineSteps {
 		if it.IsStep {
 			hasSteps = true
 		} else {
 			hasHeadings = true
 		}
+		if !s.OutlineOnlySteps || it.IsStep {
+			visibleCount++
+		}
 	}
-	if hasSteps && hasHeadings {
-		ui.Row(c).FillWidth().Padding(0, 0, float32(tok.Spacing8), 0).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
-			for idx, lbl := range []string{"全部", "仅步骤"} {
-				idx, lbl := idx, lbl
-				active := (idx == 1) == s.OutlineOnlySteps
-				pill := ui.ButtonBase(c.Key(fmt.Sprintf("rd-ol-flt-%d", idx))).
-					Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
-					AlignItems(ui.Center).Radius(float32(tok.ControlRadius)).Label("大纲筛选：" + lbl)
-				fg := tok.TextMuted
-				if active {
-					pill.Background(tok.AccentSoftBg).Border(1, tok.Accent.Alpha(0.32))
-					fg = tok.Accent
-				} else if pill.Hovered() {
-					pill.Background(tok.Text.Alpha(0.04))
-					fg = tok.Text
+	ui.Row(c).FillWidth().Padding(0, 0, float32(tok.Spacing8), 0).AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		if hasSteps && hasHeadings {
+			fltTrack := ui.Row(c).Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).Border(1, tok.BorderSubtle).AlignItems(ui.Center).Gap(2)
+			theme.ApplyRecessedWell(fltTrack, tok)
+			fltTrack.Children(func() {
+				for idx, lbl := range []string{"全部", "仅步骤"} {
+					idx, lbl := idx, lbl
+					active := (idx == 1) == s.OutlineOnlySteps
+					pill := ui.ButtonBase(c.Key(fmt.Sprintf("rd-ol-flt-%d", idx))).
+						Height(float32(tok.Spacing24)).Padding(0, float32(tok.Spacing8)).
+						AlignItems(ui.Center).Radius(tok.InnerControlRadius(tok.Spacing4/2)).Label("大纲筛选：" + lbl)
+					fg := tok.TextMuted
+					if active {
+						pill.Background(tok.Surface).Border(1, tok.BorderSubtle)
+						fg = tok.Text
+					} else if pill.Hovered() {
+						pill.Background(tok.GhostHover)
+						fg = tok.Text
+					}
+					pill.Children(func() {
+						ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
+					})
+					if pill.Clicked() {
+						s.OutlineOnlySteps = idx == 1
+					}
 				}
-				pill.Children(func() {
-					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
-				})
-				if pill.Clicked() {
-					s.OutlineOnlySteps = idx == 1
-				}
-			}
-		})
-	}
+			})
+		}
+		ui.Spacer(c)
+		ui.Text(c.Key("rd-ol-count"), fmt.Sprintf("%d 项", visibleCount)).
+			FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").
+			ContentTransition(theme.NumericRoll(false)).SingleLine()
+	})
 
 	for _, item := range s.OutlineSteps {
 		item := item
@@ -564,7 +580,8 @@ func (s *Shell) renderDrawerOutline(c *ui.Context, tok theme.Tokens) {
 					titleTxt.Bold()
 				}
 				if item.Meta != "" {
-					ui.Text(c, item.Meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).FontFeatures("tnum").Shrink(0)
+					ui.Text(c, item.Meta).FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).
+						FontFeatures("tnum").ContentTransition(theme.NumericRoll(false)).Shrink(0)
 				}
 			})
 		})
@@ -596,7 +613,8 @@ func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
 					components.Text(c, fmt.Sprintf("%s · %s", firstNonEmptyStr(vt.DocTitle, vt.RelPath), vt.Title)).
 						FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 					components.Text(c, formatVaultTimerClock(vt, now)).
-						FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum")
+						FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum").
+						ContentTransition(theme.NumericRoll(vt.Mode == "countdown"))
 				})
 				if s.OnOpenSearchHit != nil && components.Button(c, "打开", components.ButtonGhost).Clicked() {
 					s.OnOpenSearchHit(vt.RelPath, "")
@@ -615,7 +633,8 @@ func (s *Shell) renderDrawerTimerAndCalc(c *ui.Context, tok theme.Tokens) {
 				ui.Icon(c, lucide.Timer()).Size(float32(tok.Spacing16), float32(tok.Spacing16)).TextColor(tok.Accent)
 				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 					components.Text(c, tm.RunTitle).FontSize(float32(tok.TextMeta)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
-					components.Text(c, formatTimerClock(tm)).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).FontFeatures("tnum")
+					components.Text(c, formatTimerClock(tm)).FontSize(float32(tok.TextMeta)).TextColor(tok.Accent).
+						FontFeatures("tnum").ContentTransition(theme.NumericRoll(tm.RemainingS != nil))
 				})
 				if s.OnTimerSelect != nil && components.Button(c, "跳转", components.ButtonGhost).Clicked() {
 					s.OnTimerSelect(tm.RunID)
@@ -690,7 +709,11 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 		})
 
 		// Presets row: 5m / 15m / 30m / 60m
-		ui.Row(c).FillWidth().Gap(float32(tok.Spacing4)).Children(func() {
+		presetTrack := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)*0.5).
+			Radius(float32(tok.ControlRadius)).Background(tok.Elevated).Border(1, tok.BorderSubtle).
+			Gap(float32(tok.Spacing4)).AlignItems(ui.Center)
+		theme.ApplyRecessedWell(presetTrack, tok)
+		presetTrack.Children(func() {
 			for _, m := range []int{5, 15, 30, 60} {
 				m := m
 				active := bt.PresetMin == m
@@ -698,17 +721,14 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 				btn := ui.ButtonBase(c.Key(fmt.Sprintf("rd-bt-preset-%d", m))).
 					Grow(1).MinWidth(0).Center().
 					Padding(float32(tok.Spacing4), float32(tok.Spacing4)).
-					Radius(tok.InnerPanelRadius(tok.Spacing4)).Label(lbl)
+					Radius(tok.InnerControlRadius(tok.Spacing4/2)).Label(lbl)
 				fg := tok.TextMuted
 				if active {
-					btn.Background(tok.SelectedRow)
+					btn.Background(tok.Surface).Border(1, tok.BorderSubtle)
 					fg = tok.Text
-				} else {
-					btn.Background(tok.Elevated)
-					if btn.Hovered() {
-						btn.Background(tok.GhostHover)
-						fg = tok.Text
-					}
+				} else if btn.Hovered() {
+					btn.Background(tok.GhostHover)
+					fg = tok.Text
 				}
 				btn.Children(func() {
 					ui.Text(c, lbl).FontSize(float32(tok.TextMeta)).Bold().TextColor(fg).SingleLine()
@@ -740,17 +760,20 @@ func (s *Shell) renderDrawerBenchTimer(c *ui.Context, tok theme.Tokens) {
 		})
 
 		// Countdown readout + Start/Pause/Reset
-		ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
-			Background(tok.Elevated).
-			AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
+		timerWell := ui.Row(c).FillWidth().Padding(float32(tok.Spacing8)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+			Background(tok.Elevated).Border(1, tok.BorderSubtle).
+			AlignItems(ui.Center).Gap(float32(tok.Spacing8))
+		theme.ApplyRecessedWell(timerWell, tok)
+		timerWell.Children(func() {
 			clockColor := tok.Text
 			if bt.Running {
 				clockColor = tok.Accent
 			} else if bt.TotalSec > 0 && bt.RemainingSec == 0 {
 				clockColor = tok.Warning
 			}
-			ui.Text(c, formatBenchCountdown(bt.RemainingSec)).
-				FontSize(float32(tok.TextPage)).Bold().TextColor(clockColor).FontFeatures("tnum")
+			ui.Text(c.Key("rd-bt-clock"), formatBenchCountdown(bt.RemainingSec)).
+				FontSize(float32(tok.TextPage)).Bold().TextColor(clockColor).FontFeatures("tnum").
+				ContentTransition(theme.NumericRoll(true))
 			ui.Spacer(c)
 			if bt.Running {
 				if components.Button(c, "暂停", components.ButtonSecondary).Clicked() {
@@ -971,7 +994,7 @@ func (s *Shell) renderDrawerLinksAndDiagnostics(c *ui.Context, tok theme.Tokens)
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
 						ui.Icon(c, lucide.FileText()).Size(float32(tok.Spacing12), float32(tok.Spacing12)).TextColor(tok.Accent)
 						ui.Column(c).Grow(1).MinWidth(0).Gap(1).Children(func() {
-							ui.Text(c, firstNonEmptyStr(rd.Title, rd.RelPath)).
+							ui.Text(c, kit.MiddleTruncate(firstNonEmptyStr(rd.Title, rd.RelPath), 26)).
 								FontSize(float32(tok.TextData)).Bold().TextColor(tok.Text).SingleLine().Ellipsis("…")
 							meta := firstNonEmptyStr(rd.Date, rd.Folder)
 							if rd.Date != "" && rd.Folder != "" {
@@ -1106,9 +1129,11 @@ func defaultCompatibleTargetUnit(stockUnit string) string {
 // and strict compatible-unit filtering (no unusable options ever shown).
 func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 	// Segmented mode switch: top calculator toggles between C1V1 dilution and Molar weighing.
-	ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
+	calcSeg := ui.Row(c).FillWidth().Padding(float32(tok.Spacing4)).
 		Radius(float32(tok.ControlRadius)).Background(tok.Elevated).
-		Gap(float32(tok.Spacing4)).AlignItems(ui.Center).Children(func() {
+		Gap(float32(tok.Spacing4)).AlignItems(ui.Center)
+	theme.ApplyRecessedWell(calcSeg, tok)
+	calcSeg.Children(func() {
 		for idx, lbl := range []string{"C₁V₁ 稀释", "摩尔称量"} {
 			idx, lbl := idx, lbl
 			active := s.RightCalc.Mode == idx
@@ -1166,8 +1191,10 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 				strings.TrimSpace(s.RightCalc.Target) == "" ||
 				strings.TrimSpace(s.RightCalc.FinalVol) == ""
 			v1UL, diluentUL, msg := computeQuickDilution(s.RightCalc)
-			ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
-				Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
+			dilWell := ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+				Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing4))
+			theme.ApplyRecessedWell(dilWell, tok)
+			dilWell.Children(func() {
 				if blankDil {
 					ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 						ui.Text(c, "取母液 V₁").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -1189,13 +1216,13 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 					ui.Text(c, "取母液 V₁").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					ui.Spacer(c)
 					ui.Text(c.Key("rd-dil-v1"), formatQuickVolUL(v1UL)).FontSize(float32(tok.TextSection)).Bold().
-						TextColor(tok.Accent).FontFeatures("tnum")
+						TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 				})
 				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "补加稀释液").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 					ui.Spacer(c)
 					ui.Text(c.Key("rd-dil-dil"), formatQuickVolUL(diluentUL)).FontSize(float32(tok.TextData)).Bold().
-						TextColor(tok.Text).FontFeatures("tnum")
+						TextColor(tok.Text).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 				})
 			})
 		})
@@ -1225,8 +1252,10 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 			strings.TrimSpace(s.RightCalc.MolarVol) == "" ||
 			strings.TrimSpace(s.RightCalc.MolarMass) == ""
 		massMg, msg := computeQuickMolarMass(s.RightCalc)
-		ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
-			Background(tok.Elevated).Gap(float32(tok.Spacing4)).Children(func() {
+		molWell := ui.Column(c).FillWidth().Padding(float32(tok.Spacing12)).Radius(tok.InnerPanelRadius(tok.Spacing4)).
+			Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(float32(tok.Spacing4))
+		theme.ApplyRecessedWell(molWell, tok)
+		molWell.Children(func() {
 			if blankMol {
 				ui.Row(c).FillWidth().AlignItems(ui.Baseline).Children(func() {
 					ui.Text(c, "需称量溶质").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
@@ -1243,7 +1272,7 @@ func (s *Shell) renderDrawerQuickCalc(c *ui.Context, tok theme.Tokens) {
 				ui.Text(c, "需称量溶质").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted)
 				ui.Spacer(c)
 				ui.Text(c.Key("rd-mol-res"), formatQuickMassMg(massMg)).FontSize(float32(tok.TextSection)).Bold().
-					TextColor(tok.Accent).FontFeatures("tnum")
+					TextColor(tok.Accent).FontFeatures("tnum").ContentTransition(theme.NumericRoll(false))
 			})
 		})
 	})

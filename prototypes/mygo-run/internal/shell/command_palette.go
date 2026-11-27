@@ -136,37 +136,56 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 				})
 				inp.AutoFocus()
 
-				// Compact mode switcher chips (Obsidian Ctrl+O vs Ctrl+P separation — UI-14)
-				for _, m := range []struct{ key, lbl string }{
-					{"", "全部"},
-					{"files", "文件/储藏室"},
-					{"commands", "命令"},
-				} {
-					m := m
-					active := s.PaletteMode == m.key
-					bg, fg := ui.Transparent, tok.TextMuted
-					if active {
-						bg, fg = tok.SelectedRow, tok.Text
-					}
-					chip := ui.ButtonBase(c.Key("pal-mode-"+m.key)).Label(m.lbl).
-						Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(tok.InnerDialogRadius(tok.Spacing8)).
-						Background(bg).Shrink(0).OnClick(func() {
-						s.PaletteMode = m.key
-						s.PaletteCursor = 0
-					})
-					chip.Children(func() {
-						txt := ui.Text(c, m.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+				// Compact mode switcher track (Obsidian Ctrl+O vs Ctrl+P separation — UI-14)
+				modeTrack := ui.Row(c).AlignItems(ui.Center).
+					Padding(float32(tok.Spacing4)*0.5).Radius(float32(tok.ControlRadius)).
+					Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(2).Shrink(0)
+				theme.ApplyRecessedWell(modeTrack, tok)
+				modeTrack.Children(func() {
+					for _, m := range []struct{ key, lbl string }{
+						{"", "全部"},
+						{"files", "文件/储藏室"},
+						{"commands", "命令"},
+					} {
+						m := m
+						active := s.PaletteMode == m.key
+						bg, fg := ui.Transparent, tok.TextMuted
 						if active {
-							txt.Bold()
+							bg, fg = tok.Surface, tok.Text
 						}
-					})
-				}
+						chip := ui.ButtonBase(c.Key("pal-mode-"+m.key)).Label(m.lbl).
+							Padding(float32(tok.Spacing4)*0.5, float32(tok.Spacing8)).Radius(tok.InnerControlRadius(tok.Spacing4/2)).
+							Background(bg).Shrink(0).OnClick(func() {
+							s.PaletteMode = m.key
+							s.PaletteCursor = 0
+						})
+						if active {
+							chip.Border(1, tok.BorderSubtle)
+						}
+						chip.Children(func() {
+							txt := ui.Text(c, m.lbl).FontSize(float32(tok.TextMeta)).TextColor(fg).SingleLine()
+							if active {
+								txt.Bold()
+							}
+						})
+					}
+				})
 			})
 
 			ui.Divider(c)
 
 			if len(entries) == 0 {
-				kit.EmptyState(c, tok, lucide.Search(), "未找到匹配实验、试剂或命令", "尝试输入实验名称、试剂位置或直接清空搜索。", "", nil)
+				kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+					Icon:        lucide.Search(),
+					Title:       "未找到匹配实验、试剂或命令",
+					Hint:        "尝试输入实验名称、试剂位置或直接清空搜索。",
+					ActionLabel: "清空搜索",
+					Shortcuts:   []string{"Ctrl", "K"},
+					OnAction: func() {
+						s.PaletteQuery = ""
+						s.PaletteCursor = 0
+					},
+				})
 				return
 			}
 
@@ -206,7 +225,7 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 											}
 										})
 										if entry.shortcut != "" {
-											kit.Keycap(c, tok, entry.shortcut)
+											renderPaletteShortcutKeycaps(c, tok, entry.shortcut)
 										}
 									})
 								})
@@ -228,20 +247,41 @@ func (s *Shell) renderCommandPalette(c *ui.Context) {
 			})
 			ui.Divider(c)
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(tok.Spacing8)).Children(func() {
-				kit.Keycap(c, tok, "↑↓")
+				kit.ShortcutKeycaps(c, tok, "↑↓")
 				components.Text(c, "移动").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				kit.Keycap(c, tok, "Enter")
+				kit.ShortcutKeycaps(c, tok, "Enter")
 				components.Text(c, "打开").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
-				kit.Keycap(c, tok, "Ctrl+Enter")
+				kit.ShortcutKeycaps(c, tok, "Ctrl", "Enter")
 				components.Text(c, "分屏").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 				ui.Spacer(c)
-				kit.Keycap(c, tok, "Esc")
+				kit.ShortcutKeycaps(c, tok, "Esc")
 				components.Text(c, "关闭").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
 			})
 		})
 	})
 	})
 	s.PaletteOpen = open
+}
+
+func renderPaletteShortcutKeycaps(c *ui.Context, tok theme.Tokens, chord string) {
+	chord = strings.TrimSpace(chord)
+	if chord == "" {
+		return
+	}
+	alts := strings.Split(chord, "/")
+	ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Shrink(0).Children(func() {
+		for ai, alt := range alts {
+			alt = strings.TrimSpace(alt)
+			if alt == "" {
+				continue
+			}
+			if ai > 0 {
+				ui.Text(c, "/").FontSize(float32(tok.TextMeta)).TextColor(tok.TextMuted).SingleLine()
+			}
+			parts := strings.Split(alt, "+")
+			kit.ShortcutKeycaps(c, tok, parts...)
+		}
+	})
 }
 
 func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, entries []paletteEntry) {
@@ -270,7 +310,11 @@ func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, 
 				}
 			})
 
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			modeTrack := ui.Row(c).FillWidth().AlignItems(ui.Center).
+				Padding(t.Space(1)/2).Radius(float32(tok.ControlRadius)).
+				Background(tok.Elevated).Border(1, tok.BorderSubtle).Gap(t.Space(1))
+			theme.ApplyRecessedWell(modeTrack, tok)
+			modeTrack.Children(func() {
 				for _, m := range []struct{ key, lbl string }{
 					{"", "全部"},
 					{"files", "文件与储藏室"},
@@ -278,13 +322,13 @@ func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, 
 				} {
 					m := m
 					active := s.PaletteMode == m.key
-					bg, fg, bd := tok.Elevated, tok.TextMuted, tok.Border
+					bg, fg, bd := ui.Transparent, tok.TextMuted, ui.Transparent
 					if active {
-						bg, fg, bd = tok.AccentSoftBg, tok.Accent, tok.Accent
+						bg, fg, bd = tok.Surface, tok.Accent, tok.BorderSubtle
 					}
 					chip := ui.ButtonBase(c.Key("mb-pal-mode-"+m.key)).Label(m.lbl).
 						Grow(1).Basis(0).Padding(t.Space(1), t.Space(2)).
-						Radius(float32(tok.ControlRadius)).Background(bg).Border(1, bd).Center().
+						Radius(tok.InnerControlRadius(tok.Spacing4/2)).Background(bg).Border(1, bd).Center().
 						OnClick(func() {
 							s.PaletteMode = m.key
 							s.PaletteCursor = 0
@@ -304,7 +348,16 @@ func (s *Shell) renderMobileCommandPalettePage(c *ui.Context, tok theme.Tokens, 
 			ui.Column(c).FillWidth().Grow(1).MinHeight(0).
 				Padding(t.Space(4), t.Space(4)+rightSafe, t.Space(6)+bottomSafe, t.Space(4)+leftSafe).
 				Children(func() {
-				kit.EmptyState(c, tok, lucide.Search(), "未找到匹配实验、试剂或命令", "尝试输入实验名称、试剂位置或清空搜索词。", "", nil)
+				kit.EmptyStateCard(c, tok, kit.EmptyStateProps{
+					Icon:        lucide.Search(),
+					Title:       "未找到匹配实验、试剂或命令",
+					Hint:        "尝试输入实验名称、试剂位置或清空搜索词。",
+					ActionLabel: "清空搜索",
+					OnAction: func() {
+						s.PaletteQuery = ""
+						s.PaletteCursor = 0
+					},
+				})
 			})
 			return
 		}

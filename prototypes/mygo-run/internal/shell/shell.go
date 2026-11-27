@@ -1134,7 +1134,11 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 			}
 		}
 
-		ui.ScrollHorizontal(c.Key("tab-scroll-"+pane.ID)).Grow(1).MinWidth(0).Children(func() {
+		tabScroll := ui.ScrollHorizontal(c.Key("tab-scroll-"+pane.ID)).Grow(1).MinWidth(0).ScrollSnap(ui.SnapProximity)
+		tabScrollSt := ui.Local(tabScroll, "tab-scroll-st", func() ui.ScrollState { return ui.ScrollState{} })
+		tabScroll.TrackScroll(tabScrollSt)
+		theme.ApplyEdgeFadeX(tabScroll, tok, tabScrollSt.X > 2, tabScrollSt.MaxX == 0 || tabScrollSt.X < tabScrollSt.MaxX-2)
+		tabScroll.Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(float32(tok.Spacing4)).Children(func() {
 				for idx, tab := range pane.Tabs {
 					idx, tab := idx, tab
@@ -1152,7 +1156,7 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 					pill := ui.Row(c.Key("ptab-"+pane.ID+"-"+tab.ID)).AlignItems(ui.Center).
 						Padding(float32(tok.Spacing4)*0.75, float32(tok.Spacing8)).
 						Radius(float32(tok.ControlRadius)).
-						Gap(float32(tok.Spacing4)).Shrink(0)
+						Gap(float32(tok.Spacing4)).Shrink(0).SnapAlign(ui.Start)
 					if active && tok.LiquidGlass {
 						pill.Border(1, tok.Border.Alpha(0.65)).Shadow(0, 1, 6, 0, tok.Text.Alpha(0.06))
 					} else if !active && pill.Hovered() {
@@ -1186,7 +1190,8 @@ func (s *Shell) renderPaneTabBar(c *ui.Context, tok theme.Tokens, pane *PaneNode
 									if len(pane.Tabs) >= 4 {
 										tabMaxW = float32(tok.Spacing48) * 2.8
 									}
-									components.Text(c, tab.Title).FontSize(float32(tok.TextData)).Bold().
+									dispTitle := kit.MiddleTruncate(tab.Title, 24)
+									components.Text(c, dispTitle).FontSize(float32(tok.TextData)).Bold().
 										TextColor(fg).SingleLine().Ellipsis("…").MaxWidth(tabMaxW)
 								}
 								if tab.Pinned {

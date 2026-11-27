@@ -5,10 +5,13 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
+
+	"asterlab-mygo-prototype/internal/uikit/kit"
 )
 
 func exportPolishShot(t *testing.T, dir, name string, img image.Image) {
@@ -269,5 +272,177 @@ func TestShellPolishScreenshots(t *testing.T) {
 		tt.Frame()
 		advanceMobileFrames(tt, 240*time.Millisecond)
 		exportPolishShot(t, shotDir, "desktop_vault_launcher_light_1280x820.png", tt.Image())
+	}
+}
+
+func TestShellRolloutCraftPrimitives(t *testing.T) {
+	longTitle := "2026-11-27_HAMA-GelMA_CCK8_Plate03_FOV12_48h_raw.asterml"
+	truncTitle := kit.MiddleTruncate(longTitle, 24)
+	if truncTitle == longTitle || !strings.Contains(truncTitle, "…") || !strings.HasSuffix(truncTitle, ".asterml") {
+		t.Fatalf("expected MiddleTruncate to preserve .asterml suffix around ellipsis, got %q", truncTitle)
+	}
+
+	s := makeSampleV9Shell(true)
+	s.ForceMobilePreview = false
+	s.RightOpen = true
+	s.RightTab = 0
+	s.OpenFileInPane(defaultPaneID, "2026/long-raw.asterml", longTitle, ModeEdit, true)
+
+	tt := ui.NewTesterWith(func(c *ui.Context) {
+		s.RenderSplitView(c)
+	}, 1280, 820, ui.TesterOptions{Dark: true})
+	tt.Frame()
+
+	// 1. Desktop tab MiddleTruncate keeps full label accessible and short names untouched.
+	if !tt.HasText(truncTitle) {
+		t.Fatalf("expected middle-truncated desktop tab title %q, got %v", truncTitle, tt.Texts())
+	}
+	if _, ok := tt.Find("标签:" + longTitle); !ok {
+		t.Fatalf("expected full accessible tab label %q", "标签:"+longTitle)
+	}
+	if !tt.HasText("HUVEC 血管新生") {
+		t.Fatalf("expected short tab title HUVEC 血管新生 untouched, got %v", tt.Texts())
+	}
+	if !tt.HasText("3 项") {
+		t.Fatalf("expected outline step count in right drawer, got %v", tt.Texts())
+	}
+
+	// 2. Right drawer calculator + timer NumericRoll readouts.
+	if err := tt.Click("速算计时"); err != nil {
+		t.Fatalf("switch right drawer to 速算计时: %v", err)
+	}
+	s.RightCalc.Stock = "100"
+	s.RightCalc.Target = "50"
+	s.RightCalc.FinalVol = "4"
+	tt.Frame()
+	if !tt.HasText("2.00 µL") || !tt.HasText("15:00") {
+		t.Fatalf("expected live calc & timer readouts in right drawer, got %v", tt.Texts())
+	}
+	if err := tt.Click("30分"); err != nil {
+		t.Fatalf("click 30分 timer preset: %v", err)
+	}
+	tt.Frame()
+	if !tt.HasText("30:00") {
+		t.Fatalf("expected timer countdown 30:00 after preset click, got %v", tt.Texts())
+	}
+
+	// 3. Command Palette EmptyStateCard + ShortcutKeycaps + 清空搜索 action.
+	s.PaletteOpen = true
+	s.PaletteQuery = "no-such-rollout-match"
+	tt.Frame()
+	advanceMobileFrames(tt, 140*time.Millisecond)
+	if !tt.HasText("未找到匹配实验、试剂或命令") || !tt.HasText("清空搜索") {
+		t.Fatalf("expected CommandPalette EmptyStateCard, got %v", tt.Texts())
+	}
+	if !tt.HasText("Ctrl") || !tt.HasText("K") {
+		t.Fatalf("expected ShortcutKeycaps in CommandPalette EmptyStateCard, got %v", tt.Texts())
+	}
+	if err := tt.Click("清空搜索"); err != nil {
+		t.Fatalf("click CommandPalette 清空搜索: %v", err)
+	}
+	tt.Frame()
+	if s.PaletteQuery != "" || !tt.HasText("新建实验") {
+		t.Fatalf("expected PaletteQuery cleared and entries restored, query=%q texts=%v", s.PaletteQuery, tt.Texts())
+	}
+	s.PaletteOpen = false
+	advanceMobileFrames(tt, 120*time.Millisecond)
+
+	// 4. Global Search Modal EmptyStateCard (idle & empty hits) + ShortcutKeycaps.
+	s.GlobalSearchOpen = true
+	s.GlobalSearchQuery = ""
+	tt.Frame()
+	advanceMobileFrames(tt, 140*time.Millisecond)
+	if !tt.HasText("输入关键词跨 Vault 全文检索") || !tt.HasText("Shift") {
+		t.Fatalf("expected GlobalSearch idle EmptyStateCard with shortcut keycaps, got %v", tt.Texts())
+	}
+	s.GlobalSearchQuery = "no-such-rollout-hit"
+	tt.Frame()
+	if !tt.HasText("未找到包含该关键词的实验文档") || !tt.HasText("清空搜索") || !tt.HasText("Esc") {
+		t.Fatalf("expected GlobalSearch empty hits EmptyStateCard, got %v", tt.Texts())
+	}
+	if err := tt.Click("清空搜索"); err != nil {
+		t.Fatalf("click GlobalSearch 清空搜索: %v", err)
+	}
+	tt.Frame()
+	if s.GlobalSearchQuery != "" {
+		t.Fatalf("expected GlobalSearchQuery cleared, got %q", s.GlobalSearchQuery)
+	}
+	s.GlobalSearchOpen = false
+	advanceMobileFrames(tt, 120*time.Millisecond)
+
+	// 5. Mobile Settings directional parallax sub-page push/pop + recessed sync provider track.
+	sMob := makeSampleV9Shell(true)
+	sMob.VaultSettingsOpen = true
+	ttMob := ui.NewTesterWith(func(c *ui.Context) {
+		sMob.RenderSplitView(c)
+	}, 402, 874, ui.TesterOptions{Dark: true})
+	ttMob.SetInsets(44, 0, 34, 0)
+	ttMob.Frame()
+	advanceMobileFrames(ttMob, 240*time.Millisecond)
+
+	if err := ttMob.Click("多端同步"); err != nil {
+		t.Fatalf("open mobile 多端同步 sub-page: %v", err)
+	}
+	advanceMobileFrames(ttMob, 360*time.Millisecond)
+	if !sMob.mobileExtra().mobileSettingsDetail || !ttMob.HasText("OneDrive") {
+		t.Fatalf("expected mobile sync sub-page open with OneDrive pill, texts=%v", ttMob.Texts())
+	}
+	if err := ttMob.Click("返回设置"); err != nil {
+		t.Fatalf("return from mobile settings sub-page: %v", err)
+	}
+	advanceMobileFrames(ttMob, 360*time.Millisecond)
+	if sMob.mobileExtra().mobileSettingsDetail || !ttMob.HasText("工作区") {
+		t.Fatalf("expected parent settings home restored after back, texts=%v", ttMob.Texts())
+	}
+}
+
+func TestShellRolloutScreenshots(t *testing.T) {
+	shotDir := os.Getenv("ASTERLAB_SHELL_ROLLOUT_SHOT_DIR")
+	if shotDir == "" {
+		t.Skip("set ASTERLAB_SHELL_ROLLOUT_SHOT_DIR to export verification screenshots")
+	}
+
+	// 1. Desktop Dark (1280x820): edge-faded tabs + MiddleTruncate, Command Palette recessed keycaps,
+	//    and Right Drawer with recessed segmented track & NumericRoll calculator/timer readouts.
+	{
+		s := makeSampleV9Shell(true)
+		s.ForceMobilePreview = false
+		s.RightOpen = true
+		s.RightTab = 1
+		s.RightCalc.Stock = "100"
+		s.RightCalc.Target = "25"
+		s.RightCalc.FinalVol = "4"
+		s.BenchTimer.PresetMin = 30
+		s.BenchTimer.TotalSec = 30 * 60
+		s.BenchTimer.RemainingSec = 30 * 60
+		s.BenchTimer.Initialized = true
+		s.OpenPantryTab()
+		s.OpenFileInPane(defaultPaneID, "2026/hama-raw.asterml", "2026-11-27_HAMA-GelMA_CCK8_Plate03_FOV12_48h_raw.asterml", ModeEdit, true)
+		s.OpenFileInPane(defaultPaneID, "2026/qpcr.asterml", "VEGF_qPCR_2026-11-27_Run02_Ct_Normalized.asterml", ModeLab, true)
+		s.PaletteOpen = true
+
+		tt := ui.NewTesterWith(func(c *ui.Context) {
+			s.RenderSplitView(c)
+		}, 1280, 820, ui.TesterOptions{Dark: true})
+		tt.Frame()
+		advanceMobileFrames(tt, 220*time.Millisecond)
+		exportPolishShot(t, shotDir, "rollout_shell_desktop_dark_1280x820.png", tt.Image())
+	}
+
+	// 2. Mobile Settings (402x874): directional parallax parent recede + pushed sub-page with recessed controls.
+	{
+		s := makeSampleV9Shell(true)
+		s.VaultSettingsOpen = true
+		tt := ui.NewTesterWith(func(c *ui.Context) {
+			s.RenderSplitView(c)
+		}, 402, 874, ui.TesterOptions{Dark: true})
+		tt.SetInsets(44, 0, 34, 0)
+		tt.Frame()
+		advanceMobileFrames(tt, 240*time.Millisecond)
+		if err := tt.Click("多端同步"); err != nil {
+			t.Fatalf("click 多端同步 for rollout shot: %v", err)
+		}
+		advanceMobileFrames(tt, 112*time.Millisecond)
+		exportPolishShot(t, shotDir, "rollout_shell_mobile_settings_402x874.png", tt.Image())
 	}
 }
