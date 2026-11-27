@@ -10,12 +10,26 @@
 
 | 类别 | 唯一来源 | 禁止写法 | 正确写法 |
 |---|---|---|---|
-| 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DangerText`；调色板色复用具名函数 |
+| 颜色 | `Tokens`（`Canvas/Surface/Elevated/SelectedRow/Border/Text/TextMuted/Accent/Success/Warning/Danger`、`SpecularRim/HairlineDivider`、`Darkroom*` 及 `*Bg/*Text`）；具名科学调色板（见 §1 例外） | 在渲染/组件调用点写 `ui.Hex(...)`、`ui.RGBA(...)` | `tokens.Surface`、`tokens.DarkroomCanvas`、`tokens.DangerText`；调色板色复用具名函数 |
 | 字号 | `TextPage/TextSection/TextBody/TextMeta/TextData`，或 `t.Rem(x)`（随主题缩放） | `FontSize(12)`、`FontSize(11)` | `FontSize(float32(tokens.TextMeta))`、`.FontSize(t.Rem(.85))` |
 | 间距 | `Spacing4/8/12/16/24/32/48`（紧凑/默认/舒展三档与缩放后一律按 `scaleGridToken` 对齐 4px 栅格），或 `t.Space(n)` | `Padding(2)`、`Padding(3, 8)`、`Padding(6, 12)`、`Gap(5)` | `Padding(t.Space(2), t.Space(4))`、`Gap(t.Space(1))` |
 | 图标 | `IconSm=16 / IconMd=18 / IconLg=20` 与 `IconBoxSize=24`（偶数光学尺度 + 24×24 透明光学外框）；行内/列表/卡片图标优先走 `kit.IconBox` | 写死 `Size(18, 18)` 或宽窄图标裸排错位 | `kit.IconBox(c, tok, icon, tok.Text)`、`.Size(float32(tok.IconMd), float32(tok.IconMd))` |
-| 圆角 | 四档：`ControlRadius(6)`（控件）/ `PanelRadius(12)`（面板/卡片）/ `DialogRadius(14)`（弹窗）/ `PillRadius(999)`（胶囊/圆形/指示条） | `Radius(3)`、`Radius(5)`、`Radius(18)`、`Radius(20)` | `.Radius(float32(tok.ControlRadius))`、`.Radius(float32(tok.PillRadius))` |
+| 圆角 | 四档外半径：`ControlRadius(6)` / `PanelRadius(12)` / `DialogRadius(14)` / `PillRadius(999)`；嵌套内半径统一用 `ConcentricRadius` / `tok.Inner*Radius` | `Radius(3)`、`Radius(5)`、`Radius(18)`、`Radius(20)` 或嵌套内外同值 | `.Radius(float32(tok.ControlRadius))`、`.Radius(tok.InnerPanelRadius(tok.Spacing4))` |
 | 控件高度 | `ButtonHeight/InputHeight/RowHeight` | `Height(28)`、`MinHeight(33)` | `.Height(float32(tokens.ButtonHeight))` |
+
+### C1 Monochrome + Instrument Amber Signal 色盘、表面阶梯与暗房 Token（`PresetPaper = "paper"`）
+
+默认预设 `PresetPaper = "paper"`（兼容迁移历史 `"obsidian"` / `"aurora"`）采用 **Leica 石墨单色 + 仪器琥珀告警信号**：主 Accent 与选中高亮严禁使用紫色或高饱和彩色，仅保留黑白灰中性阶梯与克制的信号色。
+
+| 语义层 | Token | Light (`paper`) | Dark (`paper`) | 用途 |
+|---|---|---|---|---|
+| 表面阶梯（Surface Ladder） | `Canvas` / `Surface` / `Elevated` / `SelectedRow` | `#ffffff` / `#ffffff` / `#f4f4f5` / `#eaeaef` | `#111214` / `#17181b` / `#202226` / `#282b31` | 四级平面纵深；`AccentSoftBg` 复用 `SelectedRow` |
+| 主文字 / 辅文字 | `Text` / `TextMuted` | `#18181b` / `#6b6b73` | `#f4f4f5` / `#9a9ca6` | 90% 中性纸面阅读层级 |
+| 单色 Accent | `Accent` / `AccentHover` / `AccentText` | `#18181b` / `#27272a` / `#ffffff` | `#f4f4f5` / `#e4e4e7` / `#111214` | 唯一 Primary CTA 与焦点态 |
+| 仪器信号色 | `Success` / `Warning`（Amber）/ `Danger` | `#16794b` / `#c87010` / `#c23643` | `#65c996` / `#f0a52b` / `#f08e96` | 仅用于语义状态，不作普通高亮 |
+| 精密边线与高光 | `SpecularRim` / `HairlineDivider` | `rgba(255,255,255,0.65)` / `Border.Alpha(0.55)` | `rgba(255,255,255,0.08)` / `rgba(255,255,255,0.08)` | 1px 阳极氧化石墨高光边与发丝分割线（`kit` 悬浮层在暗色下呈精密仪器质感而非闷黑方块） |
+| 暗房灯箱 / 印样画廊（固定暗室标定） | `DarkroomCanvas` / `DarkroomSurface` / `DarkroomElevated` | `#0b0c0e` / `#141518` / `#1d1f24` | `#0b0c0e` / `#141518` / `#1d1f24` | Lightbox 与 Contact-Sheet 图库专用深色暗室表面（不随浅色文档漂移） |
+| 暗房边线 / 文本 / 浮标 | `DarkroomBorder` / `DarkroomText` / `DarkroomMuted` / `DarkroomBadgeBg` | `rgba(255,255,255,0.10)` / `#f4f4f5` / `#9a9ca6` / `rgba(11,12,14,0.72)` | 同左 | 暗室图片边框、DNG/孔位半透徽标与元数据条 |
 
 颜色字面值只允许出现在 `internal/theme/theme.go`（定义）与确有科学语义的具名调色板函数（如孔板分组色、多维分类色与孔角色色）中；已有同语义调色板时必须复用，不得散落在渲染代码里。
 
@@ -45,9 +59,15 @@
     - 嵌套于 `step@1` 步骤卡片内的子块自动省略外层重边框，仅保留统一的 `[图标 + 标题 + 摘要] + 发丝线 + 内容区`，严禁卡片套重卡片。
 - **语义嵌套**：容器内边距 ≥ 子元素间距；同一层嵌套的上下左右取同一档；相邻同级元素均分剩余空间。
 
-## 3. 圆角
+## 3. 圆角与同心圆角几何（Concentric Border Radius）
 
-四档统一取值（与 `internal/theme/theme.go` 单一来源保持一致），不做第五种：控件 `ControlRadius`(6)、面板 `PanelRadius`(12)、对话框 `DialogRadius`(14)、胶囊/圆形/细指示条 `PillRadius`(999)。同类容器全项目一致。嵌套圆角保持内小外大，不要出现内外同值或内大外小。连续圆角在性能允许时优先；性能不允许时在本文记录例外，不在代码里各写各的。
+四档外半径统一取值（与 `internal/theme/theme.go` 单一来源保持一致），不做第五种：控件 `ControlRadius`(6)、面板 `PanelRadius`(12)、对话框 `DialogRadius`(14)、胶囊/圆形/细指示条 `PillRadius`(999)。同类容器全项目一致。
+
+**同心圆角公式**：嵌套内圆角必须遵循光学同心几何 `R_inner = max(2, R_outer - pad)`（当 `R_outer <= 0` 时返回 `0`），禁止内外同值、内大外小或手写魔术数字：
+- 通用计算：`theme.ConcentricRadius(outer, pad)` 或 `tok.InnerRadius(outer, pad)`；
+- 语义快捷方法：`tok.InnerControlRadius(pad)`、`tok.InnerPanelRadius(pad)`、`tok.InnerDialogRadius(pad)`（例如 `PanelRadius(12)` 内缩 `Spacing4(4)` 得 `8`，`DialogRadius(14)` 内缩 `Spacing8(8)` 得 `6`，`ControlRadius(6)` 内缩 `Spacing4(4)` 钳位至 `2`）。
+
+连续圆角在性能允许时优先；性能不允许时在本文记录例外，不在代码里各写各的。
 
 ## 4. 组件语义
 
@@ -194,11 +214,16 @@ grep -rn "Radius([0-9]" prototypes/mygo-run --include=*.go                      
 | `theme.MotionSnappy` | 临界阻尼弹簧 (`160ms, Bounce: 0`) + `Oklab` | 共享几何磁吸滑块（`SharedPillTransition`：标签栏、`Ctrl+K` 列表高亮、孔板图层胶囊、填充模式切换）、孔板 Oklab 染色过渡、选孔底条托出（`FloatingBarTransition`，退场 `110ms`） |
 | `theme.MotionFluid` | 柔和弹簧 (`220ms, Bounce: 0.04`) + `Oklab` | 文件夹/步骤块/检查项/实测偏离框手风琴生长收拢（`AccordionTransition`）、分屏四向 25% 预览框液态变形（`LiquidSplitTransition`）、按位数字滚轮（`NumericRoll`：计时器跳秒、计算器结果、选孔计数） |
 | `theme.MotionHero` | 空间过渡弹簧 (`260ms, Bounce: 0.03`) + `Oklab` | `figure@1` 与 `plate@1` 缩略图至放大灯箱的一镜到底过渡（`HeroFlyTransition`）、日历月/周网格切换 |
+| `theme.MotionQuickPalette` / `QuickPaletteTransition()` | `95ms` `EaseOut`（退场 `75ms`），`Scale: 0.98`, `Y: -4` | 高频 `Ctrl+K` 命令面板与全局搜索零负担瞬时浮现 |
+| `theme.MotionPopover` / `AnchoredPopoverTransition()` / `ContactSheetCardTransition()` | 临界阻尼弹簧 (`150ms, Bounce: 0`，退场 `105ms/100ms`)，`Scale: 0.96`, `Y: -6` (`Flip: true`) | 锚定弹出菜单/浮层（依 `Flip` 自动翻转方向）与 Contact-Sheet 图库印样卡片入场 |
+| `theme.MotionModal` / `ModalDialogTransition()` | 柔和弹簧 (`190ms, Bounce: 0.02`，退场 `120ms`)，`Scale: 0.96`, `Y: 6` | 模态对话框与设置中心面板居中浮现 |
+| `theme.MotionLightbox` / `DarkroomLightboxTransition()` | 暗房平静弹簧 (`220ms, Bounce: 0`，退场 `150ms`)，`Scale: 0.93` | 无锚定缩略图场景下的暗室灯箱照片柔和放大入场 |
+| `theme.MotionSheetBackdrop` / `SheetBackdropScale(0.94)` / `ApplySheetBackdropDepth()` | 同步弹簧 (`340ms, Bounce: 0`)，背景缩放 `0.94` | 移动端底部 `Sheet` 升起时底层工作区画布景深后退 |
 | `theme.ApplyNudge` | 欠阻尼速度脉冲 (`k=580, c=16, v0=240`) | 空输入或非法倍比提交时的 `±5px` 海绵轻晃提醒（替代刺眼弹窗报错） |
 
 **动效红线**：
-1. 禁止从 `Scale: 0` 缩放弹出（最小起始缩放 `0.95 ~ 0.98`）；退场时长必须短于进场时长（`100ms ~ 120ms`）；初始常驻标签禁止挂 `Enter: {Collapse: true}` 以免首帧被零宽裁切。
-2. 色彩插值统一启用 `Oklab: true`；所有位移与弹簧自动遵循系统 `Preferences.ReduceMotion` 无障碍降级；`components.Dialog` 外层须独立用 keyed `ui.Box` 包裹（不在参数内直接传 `c.Key(...)`）。
+1. 禁止从 `Scale: 0` 缩放弹出（通用浮层最小起始缩放 `0.95 ~ 0.98`，暗室灯箱 `0.93`）；退场时长必须短于进场时长（`75ms ~ 150ms`）；初始常驻标签禁止挂 `Enter: {Collapse: true}` 以免首帧被零宽裁切。
+2. 色彩插值统一启用 `Oklab: true`；所有位移与弹簧自动遵循系统/应用 `ReduceMotion` 无障碍降级（空间 `Motion*` 折叠为 `1ms` 瞬时，上述 `*Transition()` 构造器自动降级为 `MotionMicroFade`/`MotionEffect` 纯透明淡入淡出，`Scale=0, Y=0`；`ApplySheetBackdropDepth` 自动跳过缩放）；`components.Dialog` 外层须独立用 keyed `ui.Box` 包裹（不在参数内直接传 `c.Key(...)`）。
 
 **前端科研文案规范（强制）**：所有面向研究者的界面文案、状态胶囊、提示与报错严禁暴露 `Core`、`Rust Core`、`后端`、`schema`、`JSON`、`readout.submit`、`AsterDoc`、`rev`、内部数据库版本号（如 `"第 N 版"` / `"方案第 N 版"`）、英文原词（如 `insufficient`、`missing variable`）、开发术语（如旧版层名或 `Notebook`）或原始数据库 ID（如 `blk-*`、`assay-*`、`inhibition_zone_mm`）；统一使用自然科研表达（如「数据已记录」「本步实验操作与记录」「方案耗时测算」「实验测定数据表」「计划中」「进行中」「已完成」「实时保存」「开始实验」「记偏离」「+ 追加标签」），底层标识仅在「步骤高级选项与技术标识」「技术属性（只读）」等二级折叠区按 `UX-P2` 按需展示。
 

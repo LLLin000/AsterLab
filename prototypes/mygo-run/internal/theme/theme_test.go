@@ -115,3 +115,66 @@ func TestDesignTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestConcentricRadius(t *testing.T) {
+	if got := ConcentricRadius(0, 4); got != 0 {
+		t.Fatalf("ConcentricRadius(0, 4) = %v, want 0", got)
+	}
+	if got := ConcentricRadius(-6, 4); got != 0 {
+		t.Fatalf("ConcentricRadius(-6, 4) = %v, want 0", got)
+	}
+	if got := ConcentricRadius(12, 4); got != 8 {
+		t.Fatalf("ConcentricRadius(12, 4) = %v, want 8", got)
+	}
+	if got := ConcentricRadius(6, 4); got != 2 {
+		t.Fatalf("ConcentricRadius(6, 4) = %v, want 2", got)
+	}
+	if got := ConcentricRadius(6, 12); got != 2 {
+		t.Fatalf("ConcentricRadius(6, 12) = %v, want 2 (clamped floor)", got)
+	}
+
+	tok := LightTokens()
+	if got := tok.InnerRadius(tok.PanelRadius, tok.Spacing4); got != 8 {
+		t.Fatalf("InnerRadius(12, 4) = %v, want 8", got)
+	}
+	if got := tok.InnerControlRadius(tok.Spacing4); got != 2 {
+		t.Fatalf("InnerControlRadius(4) = %v, want 2", got)
+	}
+	if got := tok.InnerPanelRadius(tok.Spacing4); got != 8 {
+		t.Fatalf("InnerPanelRadius(4) = %v, want 8", got)
+	}
+	if got := tok.InnerDialogRadius(tok.Spacing8); got != 6 {
+		t.Fatalf("InnerDialogRadius(8) = %v, want 6", got)
+	}
+}
+
+func TestDarkroomAndSpecularTokens(t *testing.T) {
+	SetActiveLook(PresetPaper, true)
+	light, dark := LightTokens(), DarkTokens()
+
+	for name, tk := range map[string]Tokens{"light": light, "dark": dark} {
+		if tk.DarkroomCanvas != ui.Hex("#0b0c0e") ||
+			tk.DarkroomSurface != ui.Hex("#141518") ||
+			tk.DarkroomElevated != ui.Hex("#1d1f24") ||
+			tk.DarkroomText != ui.Hex("#f4f4f5") ||
+			tk.DarkroomMuted != ui.Hex("#9a9ca6") {
+			t.Fatalf("%s darkroom solid colors mismatch: %+v", name, tk)
+		}
+		if tk.DarkroomBorder != ui.RGBA(255, 255, 255, 0.10) {
+			t.Fatalf("%s DarkroomBorder mismatch: %+v", name, tk.DarkroomBorder)
+		}
+		if tk.DarkroomBadgeBg != ui.RGBA(11, 12, 14, 0.72) {
+			t.Fatalf("%s DarkroomBadgeBg mismatch: %+v", name, tk.DarkroomBadgeBg)
+		}
+		if tk.HairlineDivider.A == 0 {
+			t.Fatalf("%s HairlineDivider must be non-transparent", name)
+		}
+	}
+
+	if dark.SpecularRim != ui.RGBA(255, 255, 255, 0.08) {
+		t.Fatalf("dark SpecularRim mismatch: %+v", dark.SpecularRim)
+	}
+	if light.SpecularRim != ui.RGBA(255, 255, 255, 0.65) {
+		t.Fatalf("light SpecularRim mismatch: %+v", light.SpecularRim)
+	}
+}

@@ -94,6 +94,45 @@ var (
 		Oklab: true,
 	}
 
+	// Spatial Emergence Motion tokens (frequency-aware & calibrated per surface distance).
+	baseMotionQuickPalette = ui.Animation{
+		Duration: 95 * time.Millisecond,
+		Ease:     ui.EaseOut,
+		Oklab:    true,
+	}
+	baseMotionPopover = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 150 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+	baseMotionModal = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 190 * time.Millisecond,
+			Bounce:   0.02,
+		},
+		Oklab: true,
+	}
+	baseMotionLightbox = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 220 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+	baseMotionSheetBackdrop = ui.Animation{
+		Spring: ui.SpringOptions{
+			Duration: 340 * time.Millisecond,
+			Bounce:   0,
+		},
+		Oklab: true,
+	}
+
+	// SheetBackdropScale is the background canvas depth-recede scale when a mobile
+	// bottom sheet rises over the workspace.
+	SheetBackdropScale = float32(0.94)
+
 	// MotionInstant drives high-frequency hover/tab color snaps per the frequency-tiered motion law.
 	MotionInstant = baseMotionInstant
 
@@ -131,6 +170,21 @@ var (
 
 	// MotionSheet drives mobile bottom sheets and tab overview spatial scaling.
 	MotionSheet = baseMotionSheet
+
+	// MotionQuickPalette drives ultra-snappy ~95ms ease-out emergence for high-frequency Ctrl+K / Search.
+	MotionQuickPalette = baseMotionQuickPalette
+
+	// MotionPopover drives crisp ~150ms critically damped anchored popover & menu emergence.
+	MotionPopover = baseMotionPopover
+
+	// MotionModal drives smooth ~190ms modal/dialog spring emergence.
+	MotionModal = baseMotionModal
+
+	// MotionLightbox drives calm ~220ms darkroom lightbox image emergence.
+	MotionLightbox = baseMotionLightbox
+
+	// MotionSheetBackdrop drives synchronized ~340ms background canvas depth-recede when a sheet rises.
+	MotionSheetBackdrop = baseMotionSheetBackdrop
 )
 
 func applyMotionPreference(reduce bool) {
@@ -145,6 +199,11 @@ func applyMotionPreference(reduce bool) {
 		MotionDrawer = instantMotion
 		MotionPagePush = instantMotion
 		MotionSheet = instantMotion
+		MotionQuickPalette = instantMotion
+		MotionPopover = instantMotion
+		MotionModal = instantMotion
+		MotionLightbox = instantMotion
+		MotionSheetBackdrop = instantMotion
 		return
 	}
 	MotionInstant = baseMotionInstant
@@ -158,6 +217,11 @@ func applyMotionPreference(reduce bool) {
 	MotionDrawer = baseMotionDrawer
 	MotionPagePush = baseMotionPagePush
 	MotionSheet = baseMotionSheet
+	MotionQuickPalette = baseMotionQuickPalette
+	MotionPopover = baseMotionPopover
+	MotionModal = baseMotionModal
+	MotionLightbox = baseMotionLightbox
+	MotionSheetBackdrop = baseMotionSheetBackdrop
 }
 
 // ReducedMotionEnabled reports whether in-app reduced motion is active.
@@ -200,6 +264,105 @@ func DialogSurfaceTransition() ui.ElementTransition {
 		Enter:        &ui.Motion{Opacity: 0, Scale: 0.96, Y: 6},
 		Exit:         &ui.Motion{Opacity: 0, Scale: 0.98, Y: 4},
 	}
+}
+
+func reducedFadeTransition(exit time.Duration, anim *ui.Animation) ui.ElementTransition {
+	return ui.ElementTransition{
+		Animation:    anim,
+		ExitDuration: exit,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0},
+		Exit:         &ui.Motion{Opacity: 0},
+	}
+}
+
+// QuickPaletteTransition drives ultra-snappy ~95ms emergence for high-frequency
+// Ctrl+K command palette and global search overlays with zero cognitive tax.
+func QuickPaletteTransition() ui.ElementTransition {
+	if ReducedMotionEnabled() {
+		return reducedFadeTransition(75*time.Millisecond, &MotionMicroFade)
+	}
+	return ui.ElementTransition{
+		Animation:    &MotionQuickPalette,
+		ExitDuration: 75 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.98, Y: -4},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.99, Y: -2},
+	}
+}
+
+// AnchoredPopoverTransition drives crisp ~150ms anchored emergence with 6px directional
+// slide (automatically mirrored via Flip when flipped above an anchor) and 0.96 -> 1.0 scale.
+func AnchoredPopoverTransition() ui.ElementTransition {
+	if ReducedMotionEnabled() {
+		return reducedFadeTransition(80*time.Millisecond, &MotionMicroFade)
+	}
+	return ui.ElementTransition{
+		Animation:    &MotionPopover,
+		ExitDuration: 105 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.96, Y: -6, Flip: true},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.98, Y: -4, Flip: true},
+	}
+}
+
+// ModalDialogTransition drives smooth ~190ms modal/dialog spring emergence (0.96 -> 1.0).
+func ModalDialogTransition() ui.ElementTransition {
+	if ReducedMotionEnabled() {
+		return reducedFadeTransition(90*time.Millisecond, &MotionMicroFade)
+	}
+	return ui.ElementTransition{
+		Animation:    &MotionModal,
+		ExitDuration: 120 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.96, Y: 6},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.98, Y: 4},
+	}
+}
+
+// DarkroomLightboxTransition drives calm ~220ms darkroom fade + 0.93 -> 1.0 image scale-in.
+func DarkroomLightboxTransition() ui.ElementTransition {
+	if ReducedMotionEnabled() {
+		return reducedFadeTransition(120*time.Millisecond, &MotionEffect)
+	}
+	return ui.ElementTransition{
+		Animation:    &MotionLightbox,
+		ExitDuration: 150 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.93},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.95},
+	}
+}
+
+// ContactSheetCardTransition drives crisp ~150ms thumbnail/card emergence in the Contact-Sheet Lab Gallery.
+func ContactSheetCardTransition() ui.ElementTransition {
+	if ReducedMotionEnabled() {
+		return reducedFadeTransition(80*time.Millisecond, &MotionMicroFade)
+	}
+	return ui.ElementTransition{
+		Animation:    &MotionPopover,
+		ExitDuration: 100 * time.Millisecond,
+		ExitEase:     ui.EaseOut,
+		Enter:        &ui.Motion{Opacity: 0, Scale: 0.96},
+		Exit:         &ui.Motion{Opacity: 0, Scale: 0.97},
+	}
+}
+
+// ApplySheetBackdropDepth scales the underlying canvas subtly to SheetBackdropScale (0.94)
+// while a mobile bottom sheet is open, creating layered spatial depth.
+func ApplySheetBackdropDepth(elem ui.Element, sheetOpen bool) ui.Element {
+	if ReducedMotionEnabled() {
+		return elem
+	}
+	target := float32(1.0)
+	if sheetOpen {
+		target = SheetBackdropScale
+	}
+	s := elem.AnimateTo("sheet-backdrop-depth", target, MotionSheetBackdrop)
+	if s > 0 && s != 1.0 {
+		elem.Scale(s, s)
+	}
+	return elem
 }
 
 // SharedPillTransition creates a magnetic shared-geometry transition (`layoutId` / `matchedGeometryEffect`)

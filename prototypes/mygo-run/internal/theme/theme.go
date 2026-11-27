@@ -193,8 +193,10 @@ type Tokens struct {
 	LiquidGlass                                                                                  bool
 	Dark                                                                                         bool
 	Canvas, Surface, Elevated, SelectedRow                                                       ui.Color
-	Border, BorderStrong, BorderSubtle, TopHighlight, ShadowAmbient                              ui.Color
+	Border, BorderStrong, BorderSubtle, TopHighlight, SpecularRim, HairlineDivider, ShadowAmbient ui.Color
 	Scrim, ShadowColor                                                                           ui.Color
+	DarkroomCanvas, DarkroomSurface, DarkroomElevated, DarkroomBorder                            ui.Color
+	DarkroomText, DarkroomMuted, DarkroomBadgeBg                                                 ui.Color
 	BorderFocused, BorderSelected, BorderDisabled                                                ui.Color
 	ElementBg, ElementHover, ElementActive, ElementSelected, ElementDisabled                     ui.Color
 	GhostHover, GhostActive, GhostSelected                                                       ui.Color
@@ -211,6 +213,43 @@ type Tokens struct {
 	IconSm, IconMd, IconLg, IconBoxSize                                                          int
 	ButtonHeight, InputHeight, RowHeight                                                         int
 	ControlRadius, PanelRadius, DialogRadius, PillRadius                                         int
+}
+
+// ConcentricRadius computes the optically matched inner corner radius for a child
+// inset by pad DIPs inside a container with radius outer: max(2, outer - pad),
+// or 0 when outer <= 0.
+func ConcentricRadius(outer, pad float32) float32 {
+	if outer <= 0 {
+		return 0
+	}
+	if pad < 0 {
+		pad = 0
+	}
+	r := outer - pad
+	if r < 2 {
+		return 2
+	}
+	return r
+}
+
+// InnerRadius returns ConcentricRadius for integer outer radius and inset padding tokens.
+func (t Tokens) InnerRadius(outer, pad int) float32 {
+	return ConcentricRadius(float32(outer), float32(pad))
+}
+
+// InnerControlRadius returns the concentric radius nested inside ControlRadius by pad.
+func (t Tokens) InnerControlRadius(pad int) float32 {
+	return ConcentricRadius(float32(t.ControlRadius), float32(pad))
+}
+
+// InnerPanelRadius returns the concentric radius nested inside PanelRadius by pad.
+func (t Tokens) InnerPanelRadius(pad int) float32 {
+	return ConcentricRadius(float32(t.PanelRadius), float32(pad))
+}
+
+// InnerDialogRadius returns the concentric radius nested inside DialogRadius by pad.
+func (t Tokens) InnerDialogRadius(pad int) float32 {
+	return ConcentricRadius(float32(t.DialogRadius), float32(pad))
 }
 
 func scaleToken(base int, scale float32, minVal int) int {
@@ -357,9 +396,18 @@ func DarkTokens() Tokens {
 
 func aliases(t Tokens) Tokens {
 	t.CardBackground, t.CardBorder = t.Elevated, t.Border
+	t.DarkroomCanvas = ui.Hex("#0b0c0e")
+	t.DarkroomSurface = ui.Hex("#141518")
+	t.DarkroomElevated = ui.Hex("#1d1f24")
+	t.DarkroomBorder = ui.RGBA(255, 255, 255, 0.10)
+	t.DarkroomText = ui.Hex("#f4f4f5")
+	t.DarkroomMuted = ui.Hex("#9a9ca6")
+	t.DarkroomBadgeBg = ui.RGBA(11, 12, 14, 0.72)
 	if t.Dark {
 		t.BorderSubtle = ui.RGBA(255, 255, 255, 0.08)
 		t.TopHighlight = ui.RGBA(255, 255, 255, 0.07)
+		t.SpecularRim = ui.RGBA(255, 255, 255, 0.08)
+		t.HairlineDivider = ui.RGBA(255, 255, 255, 0.08)
 		t.ShadowAmbient = ui.RGBA(0, 0, 0, 0.36)
 		t.Scrim = ui.RGBA(0, 0, 0, 0.56)
 		t.ShadowColor = ui.RGBA(0, 0, 0, 0.50)
@@ -378,6 +426,8 @@ func aliases(t Tokens) Tokens {
 	} else {
 		t.BorderSubtle = t.Border.Alpha(0.65)
 		t.TopHighlight = ui.Transparent
+		t.SpecularRim = ui.RGBA(255, 255, 255, 0.65)
+		t.HairlineDivider = t.Border.Alpha(0.55)
 		t.ShadowAmbient = ui.RGBA(15, 23, 42, 0.08)
 		t.Scrim = ui.RGBA(0, 0, 0, 0.28)
 		t.ShadowColor = ui.RGBA(0, 0, 0, 0.18)
