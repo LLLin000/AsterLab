@@ -421,12 +421,15 @@ func TestV2WorkbenchVisualGate(t *testing.T) {
 			t.Fatalf("click zoom button: %v", err)
 		}
 		tt.Frame()
-		if err := tt.Click("150%"); err != nil {
-			t.Fatalf("click 150%% zoom button: %v", err)
+		if err := tt.Click("放大"); err != nil {
+			t.Fatalf("click 放大 zoom button: %v", err)
 		}
 		tt.Frame()
-		if !tt.HasText("关闭") {
-			t.Fatalf("figure lightbox dialog did not open: %q", tt.Texts())
+		if !tt.HasText("150%") {
+			t.Fatalf("expected 150%% zoom indicator in lightbox: %q", tt.Texts())
+		}
+		if _, ok := tt.Find("关闭灯箱"); !ok {
+			t.Fatalf("figure lightbox close button not found: %q", tt.Texts())
 		}
 	})
 

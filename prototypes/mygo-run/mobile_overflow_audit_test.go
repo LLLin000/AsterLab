@@ -226,7 +226,7 @@ status: "in_progress"
 	sh.TourOpen = false
 	settleIPhoneFrames(tt, 120)
 
-	// 8. Obsidian Settings Level 1 + All 6 Level 2 Subpages
+	// 8. Obsidian Settings Level 1 + All 5 Mobile Level 2 Subpages
 	sh.VaultSettingsOpen = true
 	sh.SettingsView.Category = ""
 	settleIPhoneFrames(tt, 160)
@@ -241,7 +241,6 @@ status: "in_progress"
 		{"多端同步", "10b_settings_sync.png"},
 		{"外观", "10c_settings_appearance.png"},
 		{"编辑器", "10d_settings_editor.png"},
-		{"快捷键", "10e_settings_hotkeys.png"},
 		{"关于", "10f_settings_about.png"},
 	} {
 		if err := tt.Click(cat.title); err != nil {
@@ -295,10 +294,12 @@ status: "in_progress"
 			})
 		})
 	}, 402, 874)
-	docTester.SetInsets(topInset, 0, 34, 0)
+	const lightboxTopInset = float32(62)
+	const lightboxBottomInset = float32(34)
+	docTester.SetInsets(lightboxTopInset, 0, lightboxBottomInset, 0)
 	settleIPhoneFrames(docTester, 160)
 	for step := 0; step < 12; step++ {
-		if r, ok := docTester.Find("放大查看"); ok && r.Y >= topInset && r.Y+r.H <= 840 {
+		if r, ok := docTester.Find("放大查看"); ok && r.Y >= lightboxTopInset && r.Y+r.H <= 840 {
 			break
 		}
 		docTester.Scroll(200, 350, 0, 260)
@@ -309,7 +310,7 @@ status: "in_progress"
 	}
 	settleIPhoneFrames(docTester, 160)
 	saveAuditSnapshot(t, docTester, "12_figure_lightbox_mobile.png")
-	assertHeaderSafeArea402(t, docTester, "FigureLightbox", "关闭", topInset)
+	assertHeaderSafeArea402(t, docTester, "FigureLightbox", "关闭灯箱", lightboxTopInset)
 	assertNoHorizontalOverflow402(t, docTester, "FigureLightbox")
 }
 
