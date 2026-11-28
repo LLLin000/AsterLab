@@ -25,6 +25,8 @@ func TestCompareVersions(t *testing.T) {
 		{"v0.1.0-rc.2", "v0.1.0-rc.1", 1},
 		{"v0.1.0", "v0.1.0-rc.2", 1},
 		{"v0.2.0", "v0.1.9", 1},
+		{"nl-router-v1.3.0", "v0.1.13", -1},
+		{"v0.1.13", "nl-router-v1.3.0", 1},
 	}
 	for _, tc := range cases {
 		if got := CompareVersions(tc.a, tc.b); got != tc.want {
@@ -96,6 +98,51 @@ func TestCheckForUpdateAndAssetMatching(t *testing.T) {
 	}
 	if sameRes.HasUpdate {
 		t.Fatalf("expected HasUpdate=false when already at %s", sameRes.Latest.TagName)
+	}
+}
+
+func TestCheckForUpdateIgnoresNonAppModelBundleReleases(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]ReleaseInfo{
+			{
+				TagName:    "nl-router-v1.3.0",
+				Name:       "Offline AI Semantic Router Model Bundle v1.3.0",
+				Prerelease: true,
+				Assets: []ReleaseAsset{
+					{Name: "nl-router-v1.3.0.zip", BrowserDownloadURL: "https://example.com/nl-router-v1.3.0.zip"},
+				},
+			},
+			{
+				TagName:    "v9.9.9",
+				Name:       "Model Weights Only",
+				Prerelease: false,
+				Assets: []ReleaseAsset{
+					{Name: "model-weights.zip", BrowserDownloadURL: "https://example.com/model-weights.zip"},
+				},
+			},
+			{
+				TagName:    "v0.1.13",
+				Name:       "AsterLab v0.1.13",
+				Prerelease: true,
+				Assets: []ReleaseAsset{
+					{Name: "AsterLab-MyGo-0.1.13-unsigned-win-x64.zip", BrowserDownloadURL: "https://example.com/app.zip"},
+					{Name: "SHA256SUMS.txt", BrowserDownloadURL: "https://example.com/SHA256SUMS.txt"},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	prevBase := APIBaseURL
+	APIBaseURL = srv.URL
+	defer func() { APIBaseURL = prevBase }()
+
+	res, err := CheckForUpdate(context.Background(), "v0.1.12", true)
+	if err != nil {
+		t.Fatalf("CheckForUpdate: %v", err)
+	}
+	if !res.HasUpdate || res.Latest == nil || res.Latest.TagName != "v0.1.13" {
+		t.Fatalf("expected v0.1.13 (ignoring nl-router-v1.3.0 and v9.9.9 non-app release), got %+v", res)
 	}
 }
 

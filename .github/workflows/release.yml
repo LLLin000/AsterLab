@@ -99,10 +99,15 @@ jobs:
         run: |
           $nlTmp = Join-Path $env:TEMP 'nl-router-bundle'
           New-Item -ItemType Directory -Path $nlTmp -Force | Out-Null
-          gh release download nl-router-v1.3.0 -R LLLin000/AsterLab -p 'nl-router-v1.3.0.zip' --dir $nlTmp --clobber
+          $assetId = (gh api --paginate "repos/LLLin000/AsterLab/releases?per_page=100" --jq '.[] | select(.tag_name=="nl-router-v1.3.0") | .assets[] | select(.name=="nl-router-v1.3.0.zip") | .id' | Select-Object -First 1)
+          if ($assetId) { $assetId = $assetId.Trim() }
+          if (-not $assetId) { throw "Could not find nl-router-v1.3.0.zip asset ID in LLLin000/AsterLab releases" }
+          $nlZip = Join-Path $nlTmp 'nl-router-v1.3.0.zip'
+          curl.exe -fsSL -H "Authorization: Bearer $env:GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/LLLin000/AsterLab/releases/assets/$assetId" -o $nlZip
+          if ($LASTEXITCODE -ne 0) { throw "curl failed downloading nl-router-v1.3.0.zip (exit $LASTEXITCODE)" }
           $nlDst = Join-Path $PWD 'prototypes\mygo-run\models\nl-router'
           New-Item -ItemType Directory -Path $nlDst -Force | Out-Null
-          Expand-Archive -LiteralPath (Join-Path $nlTmp 'nl-router-v1.3.0.zip') -DestinationPath $nlDst -Force
+          Expand-Archive -LiteralPath $nlZip -DestinationPath $nlDst -Force
           Remove-Item -LiteralPath $nlTmp -Recurse -Force
           python -m pip install --quiet onnxruntime
       - name: Build & Package Windows Artifacts

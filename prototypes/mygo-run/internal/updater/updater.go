@@ -184,9 +184,16 @@ func comparePrerelease(a, b []string) int {
 }
 
 // CompareVersions compares two version strings (-1 if a < b, 0 if equal, +1 if a > b).
+// Any valid SemVer always sorts ahead of an unparseable non-SemVer tag so auxiliary
+// artifact tags (e.g. "nl-router-v1.3.0") never outrank real client releases.
 func CompareVersions(a, b string) int {
 	pa, pb := parseSemver(a), parseSemver(b)
-	if !pa.valid || !pb.valid {
+	switch {
+	case pa.valid && !pb.valid:
+		return 1
+	case !pa.valid && pb.valid:
+		return -1
+	case !pa.valid && !pb.valid:
 		na, nb := NormalizeVersion(a), NormalizeVersion(b)
 		return strings.Compare(na, nb)
 	}
@@ -248,6 +255,24 @@ func populateMatchedAssets(rel *ReleaseInfo) {
 	}
 }
 
+func hasMatchedClientAssets(rel *ReleaseInfo) bool {
+	if rel == nil {
+		return false
+	}
+	if rel.ManifestURL != "" || rel.ZipURL != "" || rel.SetupURL != "" ||
+		rel.MacDmgURL != "" || rel.MacZipURL != "" ||
+		rel.LinuxDebURL != "" || rel.LinuxTarURL != "" {
+		return true
+	}
+	for _, a := range rel.Assets {
+		lower := strings.ToLower(a.Name)
+		if strings.HasSuffix(lower, ".apk") || strings.HasSuffix(lower, ".aab") || strings.HasSuffix(lower, ".ipa") {
+			return true
+		}
+	}
+	return false
+}
+
 func validateDownloadURL(raw string) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -270,7 +295,7 @@ func CheckForUpdate(ctx context.Context, currentVersion string, includePrereleas
 	}
 	res := CheckResult{CurrentVersion: currentVersion}
 	base := strings.TrimRight(APIBaseURL, "/")
-	endpoint := fmt.Sprintf("%s/repos/%s/releases?per_page=10", base, Repo)
+	endpoint := fmt.Sprintf("%s/repos/%s/releases?per_page=25", base, Repo)
 	if err := validateDownloadURL(endpoint); err != nil {
 		return res, err
 	}
@@ -304,6 +329,13 @@ func CheckForUpdate(ctx context.Context, currentVersion string, includePrereleas
 			continue
 		}
 		if r.Prerelease && !includePrerelease {
+			continue
+		}
+		if !parseSemver(r.TagName).valid {
+			continue
+		}
+		populateMatchedAssets(&r)
+		if len(r.Assets) > 0 && !hasMatchedClientAssets(&r) {
 			continue
 		}
 		if best == nil || CompareVersions(r.TagName, best.TagName) > 0 {
